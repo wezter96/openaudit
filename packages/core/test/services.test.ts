@@ -45,6 +45,7 @@ describe("Http", () => {
 		port: 0,
 		fetch: (req) => {
 			seen.other = req.headers.get("authorization");
+			seen.otherKey = req.headers.get("x-api-key");
 			return new Response("other");
 		},
 	});
@@ -69,7 +70,7 @@ describe("Http", () => {
 			Effect.gen(function* () {
 				const http = yield* Http;
 				return yield* http.request(url, {
-					headers: { authorization: "Bearer t" },
+					headers: { authorization: "Bearer t", "x-api-key": "k" },
 					maxBytes,
 				});
 			}).pipe(Effect.provide(CoreLive)),
@@ -80,6 +81,7 @@ describe("Http", () => {
 		expect(res.redirected).toBe(true);
 		expect(res.body).toBe("other");
 		expect(seen.other).toBeNull();
+		expect(seen.otherKey).toBeNull();
 	});
 
 	test("caps buffered body size", async () => {

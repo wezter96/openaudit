@@ -249,8 +249,6 @@ export interface HttpResponse {
 	readonly totalMs: number;
 }
 
-/** Headers that must never follow a redirect to another origin. */
-const SENSITIVE_HEADERS = ["authorization", "cookie", "proxy-authorization"];
 const MAX_REDIRECTS = 10;
 
 /** Reads at most `max` bytes, cancelling the stream beyond that. */
@@ -287,20 +285,24 @@ const httpRequest = (
 			);
 			const started = performance.now();
 			try {
-				// Redirects are followed manually so credentials supplied for the
-				// target origin are dropped when a redirect leaves that origin.
+				// Redirects are followed manually. Caller headers may carry
+				// credentials under any name (X-Api-Key, custom tokens), so once a
+				// redirect leaves the original origin only the user agent is kept.
+				const baseHeaders = { "user-agent": USER_AGENT };
 				let current = url;
 				let headers: Record<string, string> = {
-					"user-agent": USER_AGENT,
+					...baseHeaders,
 					...init.headers,
 				};
+				let method = init.method ?? "GET";
+				let body = init.body;
 				let redirected = false;
 				let res: Response;
 				for (let hop = 0; ; hop++) {
 					res = await fetch(current, {
-						method: init.method ?? "GET",
+						method,
 						headers,
-						body: init.body,
+						body,
 						redirect: "manual",
 						signal: controller.signal,
 					});
@@ -317,12 +319,14 @@ const httpRequest = (
 					const next = new URL(location, current);
 					if (next.protocol !== "http:" && next.protocol !== "https:")
 						throw new Error(`Refusing redirect to ${next.protocol}`);
-					if (next.origin !== new URL(current).origin) {
-						headers = Object.fromEntries(
-							Object.entries(headers).filter(
-								([k]) => !SENSITIVE_HEADERS.includes(k.toLowerCase()),
-							),
-						);
+					if (next.origin !== new URL(url).origin) headers = baseHeaders;
+					// Per the fetch spec, 301/302 after POST and every 303 become GET.
+					if (
+						res.status === 303 ||
+						((res.status === 301 || res.status === 302) && method === "POST")
+					) {
+						method = "GET";
+						body = undefined;
 					}
 					current = next.toString();
 					redirected = true;
