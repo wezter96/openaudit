@@ -1,0 +1,30 @@
+name: PR
+on:
+  pull_request_target:
+    types: [opened]
+  issue_comment:
+permissions: write-all
+env:
+  ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+jobs:
+  build:
+    runs-on: [self-hosted, linux]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: some-org/some-action@main
+      - name: Greet
+        run: |
+          echo "Hello"
+          echo "Title: ${{ github.event.pull_request.title }}"
+          echo "${{ secrets.DEPLOY_TOKEN }}"
+      - name: Deploy
+        env:
+          TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+        run: |
+          set -x
+          ./deploy.sh
+      - name: Trivy scan
+        uses: aquasecurity/trivy-action@0.28.0
+        continue-on-error: true

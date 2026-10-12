@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  replicas: 2
+  template:
+    spec:
+      hostNetwork: true
+      containers:
+        - name: web
+          image: nginx:latest
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["SYS_ADMIN"]
+          env:
+            - name: DB_PASSWORD
+              value: hunter2-not-real
+            - name: LOG_LEVEL
+              value: debug
+      volumes:
+        - name: docker
+          hostPath:
+            path: /var/run/docker.sock
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: god
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]

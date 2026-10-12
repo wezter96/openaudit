@@ -1,0 +1,25 @@
+services:
+  web:
+    image: nginx
+    privileged: true
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      DB_PASSWORD: supersecretvalue
+      API_TOKEN: ${API_TOKEN}
+  db:
+    image: postgres:16.4
+    pid: host
+    ports:
+      - "5432:5432"
+      - "127.0.0.1:6379:6379"
+    restart: always
+    healthcheck:
+      test: ["CMD", "pg_isready"]
+    environment:
+      - POSTGRES_PASSWORD=example123x

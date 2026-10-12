@@ -1,3 +1,11 @@
 import type { Auditor } from "@openaudit/core";
 
-export const mobileAuditors: ReadonlyArray<Auditor> = [];
+import { android } from "./android";
+import { ios } from "./ios";
+import { mobileSecrets } from "./secrets";
+
+export const mobileAuditors: ReadonlyArray<Auditor> = [
+	android,
+	ios,
+	mobileSecrets,
+];

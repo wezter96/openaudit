@@ -1,0 +1,129 @@
+{
+  "lighthouseVersion": "12.6.0",
+  "requestedUrl": "https://example.com/",
+  "finalUrl": "https://example.com/",
+  "finalDisplayedUrl": "https://example.com/",
+  "audits": {
+    "largest-contentful-paint": {
+      "id": "largest-contentful-paint",
+      "title": "Largest Contentful Paint",
+      "description": "Largest Contentful Paint marks the time at which the largest text or image is painted. [Learn more about the Largest Contentful Paint metric](https://developer.chrome.com/docs/lighthouse/performance/lighthouse-largest-contentful-paint/)",
+      "score": 0.32,
+      "scoreDisplayMode": "numeric",
+      "numericValue": 5120.4,
+      "numericUnit": "millisecond",
+      "displayValue": "5.1 s"
+    },
+    "first-contentful-paint": {
+      "id": "first-contentful-paint",
+      "title": "First Contentful Paint",
+      "description": "First Contentful Paint marks the time at which the first text or image is painted. [Learn more](https://developer.chrome.com/docs/lighthouse/performance/first-contentful-paint/)",
+      "score": 0.98,
+      "scoreDisplayMode": "numeric",
+      "displayValue": "0.9 s"
+    },
+    "render-blocking-resources": {
+      "id": "render-blocking-resources",
+      "title": "Eliminate render-blocking resources",
+      "description": "Resources are blocking the first paint of your page. [Learn how to eliminate render-blocking resources](https://developer.chrome.com/docs/lighthouse/performance/render-blocking-resources/).",
+      "score": 0.5,
+      "scoreDisplayMode": "metricSavings",
+      "displayValue": "Potential savings of 820 ms",
+      "details": { "type": "opportunity", "items": [{ "url": "https://example.com/app.js", "totalBytes": 120000, "wastedMs": 820 }] }
+    },
+    "image-alt": {
+      "id": "image-alt",
+      "title": "Image elements do not have `[alt]` attributes",
+      "description": "Informative elements should aim for short, descriptive alternate text. [Learn more about the `alt` attribute](https://dequeuniversity.com/rules/axe/4.10/image-alt).",
+      "score": 0,
+      "scoreDisplayMode": "binary",
+      "details": {
+        "type": "table",
+        "items": [
+          { "node": { "type": "node", "selector": "body > main > img.hero", "snippet": "<img class=\"hero\" src=\"/hero.jpg\">", "nodeLabel": "main > img" } },
+          { "node": { "type": "node", "selector": "footer > img", "snippet": "<img src=\"/logo.png\">" } }
+        ]
+      }
+    },
+    "color-contrast": {
+      "id": "color-contrast",
+      "title": "Background and foreground colors have a sufficient contrast ratio",
+      "description": "Low-contrast text is difficult or impossible for many users to read.",
+      "score": 1,
+      "scoreDisplayMode": "binary"
+    },
+    "document-title": {
+      "id": "document-title",
+      "title": "Document has a `<title>` element",
+      "score": null,
+      "scoreDisplayMode": "notApplicable"
+    },
+    "meta-description": {
+      "id": "meta-description",
+      "title": "Document does not have a meta description",
+      "description": "Meta descriptions may be included in search results to concisely summarize page content. [Learn more about the meta description](https://developer.chrome.com/docs/lighthouse/seo/meta-description/).",
+      "score": 0,
+      "scoreDisplayMode": "binary"
+    },
+    "errors-in-console": {
+      "id": "errors-in-console",
+      "title": "Browser errors were logged to the console",
+      "description": "Errors logged to the console indicate unresolved problems. [Learn more about this errors in console diagnostic audit](https://developer.chrome.com/docs/lighthouse/best-practices/errors-in-console/)",
+      "score": 0,
+      "scoreDisplayMode": "binary",
+      "details": { "type": "table", "items": [{ "source": "exception", "description": "TypeError: x is undefined", "sourceLocation": { "url": "https://example.com/app.js" }, "url": "https://example.com/app.js" }] }
+    },
+    "inspector-issues": {
+      "id": "inspector-issues",
+      "title": "No issues in the `Issues` panel in Chrome Devtools",
+      "score": 1,
+      "scoreDisplayMode": "binary"
+    },
+    "screenshot-thumbnails": {
+      "id": "screenshot-thumbnails",
+      "title": "Screenshot Thumbnails",
+      "score": null,
+      "scoreDisplayMode": "informative"
+    }
+  },
+  "categories": {
+    "performance": {
+      "id": "performance",
+      "title": "Performance",
+      "score": 0.61,
+      "auditRefs": [
+        { "id": "first-contentful-paint", "weight": 10, "group": "metrics", "acronym": "FCP" },
+        { "id": "largest-contentful-paint", "weight": 25, "group": "metrics", "acronym": "LCP" },
+        { "id": "render-blocking-resources", "weight": 0, "group": "diagnostics" },
+        { "id": "screenshot-thumbnails", "weight": 0, "group": "hidden" }
+      ]
+    },
+    "accessibility": {
+      "id": "accessibility",
+      "title": "Accessibility",
+      "score": 0.82,
+      "auditRefs": [
+        { "id": "image-alt", "weight": 10, "group": "a11y-names-labels" },
+        { "id": "color-contrast", "weight": 7, "group": "a11y-color-contrast" },
+        { "id": "document-title", "weight": 7, "group": "a11y-names-labels" }
+      ]
+    },
+    "best-practices": {
+      "id": "best-practices",
+      "title": "Best Practices",
+      "score": 0.92,
+      "auditRefs": [
+        { "id": "errors-in-console", "weight": 1, "group": "best-practices-general" },
+        { "id": "inspector-issues", "weight": 1, "group": "best-practices-general" }
+      ]
+    },
+    "seo": {
+      "id": "seo",
+      "title": "SEO",
+      "score": 0.9,
+      "auditRefs": [
+        { "id": "meta-description", "weight": 1, "group": "seo-content" }
+      ]
+    }
+  }
+}

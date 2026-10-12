@@ -1,0 +1,14 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.example.bad'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.example.bad"
+        minSdkVersion 21
+        targetSdkVersion 30
+    }
+}

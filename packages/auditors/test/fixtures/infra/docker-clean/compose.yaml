@@ -1,0 +1,18 @@
+services:
+  app:
+    build: .
+    image: myapp
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/nodejs/bin/node", "/app/health.js"]
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "8080:8080"
+  db:
+    image: postgres:16.4@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready"]
+    ports:
+      - "127.0.0.1:5432:5432"
