@@ -19,3 +19,7 @@ export interface Playbook {
 	/** Concrete items the agent must check off. */
 	readonly checklist: ReadonlyArray<string>;
 }
+
+/** Instructions plus the checklist as one markdown document. */
+export const renderPlaybook = (playbook: Playbook): string =>
+	`${playbook.instructions}\n\n## Checklist\n\n${playbook.checklist.map((item) => `- [ ] ${item}`).join("\n")}\n`;

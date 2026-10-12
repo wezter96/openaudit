@@ -3,11 +3,6 @@
 	"compilerOptions": {
 		"noEmit": true
 	},
-	"include": [
-		"src",
-		"test"
-	],
-	"exclude": [
-		"test/fixtures"
-	]
+	"include": ["src", "test"],
+	"exclude": ["test/fixtures"]
 }
