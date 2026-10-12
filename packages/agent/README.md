@@ -96,7 +96,8 @@ The headless auditors enforce what they can, as hard tool permissions rather tha
 
 Two limits remain:
 
-- The browser is launched with `--isolated` and `--allowed-origins=<target origin>`, so links, redirects and page scripts cannot load other origins. Only an allowlist of observation and interaction tools is available (no script evaluation, file upload or file output).
+- The browser is launched with `--isolated` and `--allowed-origins=<target origin>`, and every URL the agent navigates to must be on the target origin and must not embed another URL (blocking open-redirect hops such as `?next=https://…`). Only an allowlist of observation and interaction tools is available (no script evaluation, file upload or file output).
+- **Residual risk:** Playwright documents `--allowed-origins` as *not* a security boundary, and it does not apply to redirects. The target site itself can still send the browser elsewhere through redirects, links or scripts. Run browser playbooks only against sites you control, and for stronger isolation run them in a network-restricted environment (container or VM with egress limited to the target).
 - These controls are not an OS sandbox.
 
 Run agentic audits against staging environments and test accounts.

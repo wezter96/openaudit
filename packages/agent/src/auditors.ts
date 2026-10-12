@@ -196,6 +196,34 @@ const sameOrigin = (url: unknown, origin: string): boolean => {
 	}
 };
 
+/**
+ * True when a URL carries another URL in its path, query or fragment, e.g.
+ * `/redirect?to=https://evil.example/?d=…`. Navigating there could turn an open
+ * redirect on the target into a way to send data elsewhere, and the browser's
+ * origin allowlist does not apply to redirects.
+ */
+export const embedsUrl = (url: unknown): boolean => {
+	if (typeof url !== "string") return true;
+	try {
+		const u = new URL(url);
+		let rest = `${u.pathname}${u.search}${u.hash}`;
+		for (let i = 0; i < 3; i++) {
+			try {
+				const decoded = decodeURIComponent(rest);
+				if (decoded === rest) break;
+				rest = decoded;
+			} catch {
+				break;
+			}
+		}
+		return /[a-z][a-z0-9+.-]*:\/\/|(^|[=&?#/])\/\/[^/]|\b(javascript|data):/i.test(
+			rest,
+		);
+	} catch {
+		return true;
+	}
+};
+
 /** Literal directory prefix of a glob pattern (`src/**` → `src`). */
 const globBase = (pattern: string) => {
 	const parts = pattern.split("/");
@@ -271,6 +299,10 @@ export const makeToolGuard = (scope: Scope): ToolGuard => {
 				return deny("This browser tool is disabled in read-only audits.");
 			if ("url" in input && !sameOrigin(input.url, origin))
 				return deny(`The browser may only navigate to ${origin}.`);
+			if ("url" in input && embedsUrl(input.url))
+				return deny(
+					"URLs that embed another URL (e.g. redirect parameters) are not allowed in audits.",
+				);
 			return allow;
 		}
 		switch (toolName) {

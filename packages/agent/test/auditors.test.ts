@@ -438,6 +438,19 @@ describe("tool guard", () => {
 			allowed(webGuard, nav, { url: "https://app.example.com.evil.net/" }),
 		).toBe(false);
 		expect(allowed(webGuard, nav, { url: "not a url" })).toBe(false);
+		// Open-redirect hops that carry data to another origin.
+		for (const url of [
+			"https://app.example.com/r?to=https://evil.example/?d=secret",
+			"https://app.example.com/r?to=https%3A%2F%2Fevil.example%2F",
+			"https://app.example.com/r?to=//evil.example/",
+			"https://app.example.com/r#next=https://evil.example",
+		])
+			expect(allowed(webGuard, nav, { url })).toBe(false);
+		expect(
+			allowed(webGuard, nav, {
+				url: "https://app.example.com/search?q=shoes&page=2",
+			}),
+		).toBe(true);
 		expect(allowed(webGuard, nav, { url: "/relative" })).toBe(false);
 		expect(
 			allowed(webGuard, "mcp__playwright__browser_click", { ref: "e1" }),
