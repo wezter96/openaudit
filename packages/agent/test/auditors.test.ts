@@ -323,7 +323,14 @@ describe("agentic auditor (web)", () => {
 		expect(input?.options.mcpServers?.playwright).toEqual({
 			type: "stdio",
 			command: "npx",
-			args: ["-y", PLAYWRIGHT_MCP, "--headless"],
+			args: [
+				"-y",
+				PLAYWRIGHT_MCP,
+				"--headless",
+				"--isolated",
+				"--block-service-workers",
+				"--allowed-origins=https://app.example.com",
+			],
 		});
 	});
 });
@@ -404,6 +411,17 @@ describe("tool guard", () => {
 		expect(allowed(codeGuard, "Glob", { path: "dir-link", pattern: "*" })).toBe(
 			false,
 		);
+		// Patterns the path check doesn't see on its own.
+		expect(allowed(codeGuard, "Glob", { pattern: "src/../../**" })).toBe(false);
+		expect(allowed(codeGuard, "Grep", { pattern: "x", glob: "../**" })).toBe(
+			false,
+		);
+		expect(allowed(codeGuard, "Grep", { pattern: "x", glob: "/etc/*" })).toBe(
+			false,
+		);
+		expect(allowed(codeGuard, "Grep", { pattern: "x", glob: "*.ts" })).toBe(
+			true,
+		);
 		// No files at all in URL runs.
 		expect(allowed(webGuard, "Read", { file_path: "/etc/hosts" })).toBe(false);
 	});
@@ -430,6 +448,13 @@ describe("tool guard", () => {
 		expect(allowed(webGuard, "mcp__playwright__browser_evaluate", {})).toBe(
 			false,
 		);
+		// Allowlist: unknown or future tools are denied.
+		for (const name of [
+			"browser_file_upload",
+			"browser_pdf_save",
+			"browser_new_tool",
+		])
+			expect(allowed(webGuard, `mcp__playwright__${name}`, {})).toBe(false);
 		expect(allowed(codeGuard, nav, { url: "https://app.example.com/" })).toBe(
 			false,
 		);

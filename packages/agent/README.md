@@ -96,7 +96,7 @@ The headless auditors enforce what they can, as hard tool permissions rather tha
 
 Two limits remain:
 
-- A page can still send the browser to another origin through a link it clicks or a redirect. Explicit navigation is guarded; in-page link following is not.
+- The browser is launched with `--isolated` and `--allowed-origins=<target origin>`, so links, redirects and page scripts cannot load other origins. Only an allowlist of observation and interaction tools is available (no script evaluation, file upload or file output).
 - These controls are not an OS sandbox.
 
 Run agentic audits against staging environments and test accounts.

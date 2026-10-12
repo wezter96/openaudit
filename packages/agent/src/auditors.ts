@@ -203,13 +203,38 @@ const globBase = (pattern: string) => {
 	return (index === -1 ? parts : parts.slice(0, index)).join("/") || ".";
 };
 
-/** Playwright MCP tools that run arbitrary code or touch local files. */
-const BLOCKED_BROWSER_TOOLS = new Set([
-	"browser_run_code_unsafe",
-	"browser_evaluate",
-	"browser_file_upload",
-	"browser_install",
+/**
+ * Playwright MCP tools an audit may use: observation and ordinary interaction.
+ * An allowlist, so tools added in future releases (code evaluation, file
+ * upload, installs, PDF/file output) stay unavailable until reviewed.
+ */
+const ALLOWED_BROWSER_TOOLS = new Set([
+	"browser_navigate",
+	"browser_navigate_back",
+	"browser_snapshot",
+	"browser_take_screenshot",
+	"browser_click",
+	"browser_hover",
+	"browser_type",
+	"browser_press_key",
+	"browser_select_option",
+	"browser_fill_form",
+	"browser_drag",
+	"browser_handle_dialog",
+	"browser_wait_for",
+	"browser_resize",
+	"browser_tabs",
+	"browser_close",
+	"browser_console_messages",
+	"browser_network_requests",
 ]);
+
+/** Absolute paths, `~` and `..` segments let a pattern reach outside the root. */
+const escapesRoot = (pattern: unknown): boolean =>
+	typeof pattern === "string" &&
+	(isAbsolute(pattern) ||
+		pattern.startsWith("~") ||
+		pattern.split(/[\\/]/).includes(".."));
 
 export type ToolDecision =
 	| { readonly allow: true }
@@ -242,7 +267,7 @@ export const makeToolGuard = (scope: Scope): ToolGuard => {
 		if (toolName.startsWith("mcp__playwright__")) {
 			const name = toolName.slice("mcp__playwright__".length);
 			if (!scope.browser || !origin) return deny("No browser in this run.");
-			if (BLOCKED_BROWSER_TOOLS.has(name))
+			if (!ALLOWED_BROWSER_TOOLS.has(name))
 				return deny("This browser tool is disabled in read-only audits.");
 			if ("url" in input && !sameOrigin(input.url, origin))
 				return deny(`The browser may only navigate to ${origin}.`);
@@ -256,7 +281,14 @@ export const makeToolGuard = (scope: Scope): ToolGuard => {
 				const paths = [input.file_path, input.path];
 				if (toolName === "Glob" && typeof input.pattern === "string")
 					paths.push(globBase(input.pattern));
-				return paths.every(insideRoot)
+				// The tools also accept patterns the path check would not see.
+				const patterns =
+					toolName === "Glob"
+						? [input.pattern]
+						: toolName === "Grep"
+							? [input.glob]
+							: [];
+				return paths.every(insideRoot) && !patterns.some(escapesRoot)
 					? allow
 					: deny(
 							`Access outside the audited project (${scope.root}) is not allowed, including through symlinks.`,
@@ -789,7 +821,7 @@ export const makeAgenticAuditor = (
 				const mcpServers: Record<string, McpServerConfig> = {
 					openaudit: reportingServer(session),
 				};
-				if (scope.browser)
+				if (scope.browser && scope.url)
 					mcpServers.playwright = {
 						type: "stdio",
 						command: "npx",
@@ -797,6 +829,11 @@ export const makeAgenticAuditor = (
 							"-y",
 							PLAYWRIGHT_MCP,
 							"--headless",
+							"--isolated",
+							"--block-service-workers",
+							// Enforced by the browser for every request, so links, redirects
+							// and scripts cannot take the session off the target origin.
+							`--allowed-origins=${new URL(scope.url).origin}`,
 							...storageStateArgs(settings.storageState, scope.root),
 						],
 					};
