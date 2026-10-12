@@ -6,6 +6,7 @@ import {
 	join,
 	relative,
 	resolve,
+	sep,
 } from "node:path";
 import {
 	type CanUseTool,
@@ -62,10 +63,33 @@ export const AgentSettings = z.object({
 	maxFindings: z.number().int().positive().max(500).optional(),
 	/** Extra context for the agent: test accounts, scope limits, focus areas. */
 	instructions: z.string().max(20_000).optional(),
-	/** Extra CLI args for `@playwright/mcp` (e.g. `--storage-state=auth.json`). */
-	playwrightArgs: z.array(z.string()).optional(),
+	/**
+	 * Playwright storage state (cookies/localStorage of a logged-in test
+	 * account). Must resolve inside the project root, or the working directory
+	 * for URL targets. Free-form Playwright args are deliberately not accepted:
+	 * flags such as `--executable-path` or `--init-script` would run code.
+	 */
+	storageState: z.string().optional(),
 });
 export type AgentSettings = z.infer<typeof AgentSettings>;
+
+/** Pinned so a compromised or breaking release is never pulled implicitly. */
+export const PLAYWRIGHT_MCP = "@playwright/mcp@0.0.83";
+
+/** `--storage-state=<abs path>` when the file resolves inside `base`, else nothing. */
+export const storageStateArgs = (
+	path: string | undefined,
+	root: string | undefined,
+): string[] => {
+	if (!path) return [];
+	try {
+		const base = realpathSync(root ?? process.cwd());
+		const file = realpathSync(resolve(base, path));
+		return file.startsWith(base + sep) ? [`--storage-state=${file}`] : [];
+	} catch {
+		return [];
+	}
+};
 
 const readSettings = (ctx: AuditContext, id: string) => {
 	const parsed = AgentSettings.safeParse({
@@ -771,9 +795,9 @@ export const makeAgenticAuditor = (
 						command: "npx",
 						args: [
 							"-y",
-							"@playwright/mcp@latest",
+							PLAYWRIGHT_MCP,
 							"--headless",
-							...(settings.playwrightArgs ?? []),
+							...storageStateArgs(settings.storageState, scope.root),
 						],
 					};
 

@@ -36,7 +36,7 @@ Each auditor starts a Claude Agent SDK session (`query()`) with:
 - **A system prompt** made of an openaudit preamble, the playbook and its checklist, and a description of the target.
 - **Read-only tools.** `Read`, `Grep` and `Glob` for local targets, with the project root as the working directory. There is no shell: `Bash` is disallowed for every playbook. `WebFetch`, `WebSearch`, `Write`, `Edit` and `NotebookEdit` are also disallowed. The tool guard below enforces this.
 - **An in-process MCP server, `openaudit`.** Its `report_finding` tool validates each finding (schema, and that the file exists), prefixes the rule id with the playbook id, masks common token formats and caps the number of findings. Its `finish` tool closes the run. URL targets also get `http_get`, a same-origin GET/HEAD that returns raw headers and HTML, sends the configured `options.headers` and redacts cookie values.
-- **A browser, only if you ask for one.** With `--browser`, playbooks that need a browser get the Playwright MCP server (`npx -y @playwright/mcp@latest --headless`), with script evaluation and file upload disabled. Without `--browser` they fall back to `http_get` and report an `info` finding, `<id>/reduced-coverage`.
+- **A browser, only if you ask for one.** With `--browser`, playbooks that need a browser get the Playwright MCP server (`npx -y @playwright/mcp@0.0.83 --headless`, pinned), with script evaluation and file upload disabled. Without `--browser` they fall back to `http_get` and report an `info` finding, `<id>/reduced-coverage`.
 - **A tool guard on every call.** One policy runs as a PreToolUse hook, which fires on every tool call, and as `canUseTool`. It assumes the audited code or site may prompt-inject the agent, so it holds even against an adversarial model:
   - `Read`/`Grep`/`Glob` paths (including a `Glob` pattern's base directory) are resolved against the project root with symlinks followed (`realpath`). Anything that ends up outside the root is denied, including `~`, `..`, absolute paths and symlinks pointing out. `report_finding` applies the same check to finding locations.
   - Network access exists only through `http_get` and the browser. Both are pinned to the target's exact origin (scheme, host and port); URLs that fail to parse are denied. Local-file runs have no network tool at all.
@@ -53,13 +53,13 @@ Settings go in `options.settings`, either under `"agent"` (shared by all agentic
     "agent": { "maxTurns": 60, "maxBudgetUsd": 5 },
     "agent.webapp-security": {
       "instructions": "Test accounts: alice@test.example / bob@test.example (passwords in the staging vault). Do not touch /billing.",
-      "playwrightArgs": ["--storage-state=./auth.json"]
+      "storageState": "./auth.json"
     }
   }
 }
 ```
 
-The available keys are `maxTurns`, `maxBudgetUsd`, `effort` (`low` to `max`, default `high`), `maxFindings` (default 40), `instructions` and `playwrightArgs`.
+The available keys are `maxTurns`, `maxBudgetUsd`, `effort` (`low` to `max`, default `high`), `maxFindings` (default 40), `instructions` and `storageState` (a Playwright storage-state file for a logged-in test account; it must live inside the project, or the working directory for URL targets). Arbitrary Playwright flags are not accepted, because several of them execute code.
 
 ### 2. Host agent over MCP
 

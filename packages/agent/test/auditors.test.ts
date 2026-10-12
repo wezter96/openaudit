@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
@@ -13,7 +13,11 @@ import {
 	type Playbook,
 	type ToolGuard,
 } from "../src";
-import { scrubSecrets } from "../src/auditors";
+import {
+	PLAYWRIGHT_MCP,
+	scrubSecrets,
+	storageStateArgs,
+} from "../src/auditors";
 import {
 	assistant,
 	codebaseContext,
@@ -307,7 +311,11 @@ describe("agentic auditor (web)", () => {
 			urlContext("https://app.example.com/", {
 				browser: true,
 				settings: {
-					"agent.webapp-security": { playwrightArgs: ["--isolated"] },
+					"agent.webapp-security": {
+						// Ignored: free-form args are not accepted, and this path escapes the cwd.
+						playwrightArgs: ["--init-script=/tmp/evil.js"],
+						storageState: "../../../etc/passwd",
+					},
 				},
 			}),
 		);
@@ -315,7 +323,7 @@ describe("agentic auditor (web)", () => {
 		expect(input?.options.mcpServers?.playwright).toEqual({
 			type: "stdio",
 			command: "npx",
-			args: ["-y", "@playwright/mcp@latest", "--headless", "--isolated"],
+			args: ["-y", PLAYWRIGHT_MCP, "--headless"],
 		});
 	});
 });
@@ -488,5 +496,18 @@ describe("tool guard", () => {
 		expect(out).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123");
 		expect(out).toContain("AKIA");
 		expect(out).toEndWith(" ok");
+	});
+});
+
+describe("storageStateArgs", () => {
+	const root = mkdtempSync(join(tmpdir(), "openaudit-state-"));
+	writeFileSync(join(root, "auth.json"), "{}");
+	test("accepts files inside the root only", () => {
+		expect(storageStateArgs("auth.json", root)).toEqual([
+			`--storage-state=${realpathSync(join(root, "auth.json"))}`,
+		]);
+		expect(storageStateArgs("../../etc/passwd", root)).toEqual([]);
+		expect(storageStateArgs("missing.json", root)).toEqual([]);
+		expect(storageStateArgs(undefined, root)).toEqual([]);
 	});
 });
