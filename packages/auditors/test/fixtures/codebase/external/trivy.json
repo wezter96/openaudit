@@ -1,0 +1,67 @@
+{
+  "SchemaVersion": 2,
+  "CreatedAt": "2026-01-10T10:00:00.000000+01:00",
+  "ArtifactName": "/repo",
+  "ArtifactType": "filesystem",
+  "Results": [
+    {
+      "Target": "package-lock.json",
+      "Class": "lang-pkgs",
+      "Type": "npm",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2021-23337",
+          "PkgID": "lodash@4.17.20",
+          "PkgName": "lodash",
+          "InstalledVersion": "4.17.20",
+          "FixedVersion": "4.17.21",
+          "Status": "fixed",
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2021-23337",
+          "Title": "nodejs-lodash: command injection via template",
+          "Description": "Lodash versions prior to 4.17.21 are vulnerable to Command Injection via the template function.",
+          "Severity": "HIGH",
+          "CweIDs": ["CWE-77", "CWE-94"]
+        }
+      ]
+    },
+    {
+      "Target": "src/config.js",
+      "Class": "secret",
+      "Secrets": [
+        {
+          "RuleID": "aws-access-key-id",
+          "Category": "AWS",
+          "Severity": "CRITICAL",
+          "Title": "AWS Access Key ID",
+          "StartLine": 3,
+          "EndLine": 3,
+          "Match": "const key = \"********************\";"
+        }
+      ]
+    },
+    {
+      "Target": "Dockerfile",
+      "Class": "config",
+      "Type": "dockerfile",
+      "MisconfSummary": { "Successes": 20, "Failures": 1 },
+      "Misconfigurations": [
+        {
+          "Type": "Dockerfile Security Check",
+          "ID": "DS002",
+          "AVDID": "AVD-DS-0002",
+          "Title": "Image user should not be 'root'",
+          "Description": "Running containers with 'root' user can lead to a container escape situation.",
+          "Message": "Specify at least 1 USER command in Dockerfile with non-root user as argument",
+          "Namespace": "builtin.dockerfile.DS002",
+          "Resolution": "Add 'USER <non root user name>' line to the Dockerfile",
+          "Severity": "HIGH",
+          "PrimaryURL": "https://avd.aquasec.com/misconfig/ds002",
+          "References": ["https://docs.docker.com/develop/develop-images/dockerfile_best-practices/", "https://avd.aquasec.com/misconfig/ds002"],
+          "Status": "FAIL",
+          "CauseMetadata": { "Provider": "Dockerfile", "Service": "general", "StartLine": 1, "Code": { "Lines": null } }
+        }
+      ]
+    }
+  ]
+}

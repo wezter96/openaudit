@@ -1,0 +1,8 @@
+button:focus {
+	outline: none;
+}
+
+.card:focus {
+	outline: 0;
+	box-shadow: 0 0 0 3px rebeccapurple;
+}

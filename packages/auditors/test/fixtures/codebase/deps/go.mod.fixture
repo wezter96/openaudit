@@ -1,0 +1,10 @@
+module example.com/app
+
+go 1.21
+
+require github.com/gin-gonic/gin v1.6.0
+
+require (
+	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9 // indirect
+	github.com/old/thing v2.0.0+incompatible
+)

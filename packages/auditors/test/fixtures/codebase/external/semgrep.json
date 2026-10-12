@@ -1,0 +1,51 @@
+{
+  "version": "1.90.0",
+  "results": [
+    {
+      "check_id": "javascript.express.security.audit.express-open-redirect.express-open-redirect",
+      "path": "src/server.js",
+      "start": { "line": 27, "col": 2, "offset": 600 },
+      "end": { "line": 27, "col": 31, "offset": 629 },
+      "extra": {
+        "message": "The application redirects to a URL specified by user-supplied input `req` that is not validated. This could redirect users to malicious locations.",
+        "metadata": {
+          "cwe": ["CWE-601: URL Redirection to Untrusted Site ('Open Redirect')"],
+          "owasp": ["A01:2021 - Broken Access Control"],
+          "category": "security",
+          "confidence": "HIGH",
+          "impact": "MEDIUM",
+          "likelihood": "MEDIUM",
+          "references": ["https://cheatsheetseries.owasp.org/cheatsheets/Unvalidated_Redirects_and_Forwards_Cheat_Sheet.html"],
+          "source": "https://semgrep.dev/r/javascript.express.security.audit.express-open-redirect.express-open-redirect"
+        },
+        "severity": "WARNING",
+        "fingerprint": "requires login",
+        "lines": "requires login",
+        "is_ignored": false,
+        "engine_kind": "OSS"
+      }
+    },
+    {
+      "check_id": "python.lang.security.audit.subprocess-shell-true.subprocess-shell-true",
+      "path": "/repo/src/app.py",
+      "start": { "line": 14, "col": 12, "offset": 300 },
+      "end": { "line": 14, "col": 80, "offset": 368 },
+      "extra": {
+        "message": "Found 'subprocess' function 'check_output' with 'shell=True'. This is dangerous because this call will spawn the command using a shell process.",
+        "fix": "False",
+        "metadata": {
+          "cwe": ["CWE-78: Improper Neutralization of Special Elements used in an OS Command ('OS Command Injection')"],
+          "owasp": ["A01:2017 - Injection", "A03:2021 - Injection"],
+          "category": "security",
+          "confidence": "MEDIUM",
+          "impact": "HIGH",
+          "references": ["https://stackoverflow.com/questions/3172470"]
+        },
+        "severity": "ERROR",
+        "lines": "    return subprocess.check_output(\"ls \" + request.args[\"dir\"], shell=True)"
+      }
+    }
+  ],
+  "errors": [],
+  "paths": { "scanned": ["src/server.js", "src/app.py"] }
+}

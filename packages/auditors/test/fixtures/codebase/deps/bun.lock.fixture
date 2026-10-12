@@ -1,0 +1,11 @@
+{
+  "lockfileVersion": 1,
+  "workspaces": {
+    "": { "name": "deps-fixture", "dependencies": { "lodash": "^4.17.20", }, },
+  },
+  "packages": {
+    "lodash": ["lodash@4.17.20", "", {}, "sha512-xxx"],
+    "@scope/pkg": ["@scope/pkg@2.0.1", "", {}, "sha512-yyy"],
+    "ws": ["ws@workspace:packages/ws"],
+  }
+}

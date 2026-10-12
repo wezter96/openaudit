@@ -1,0 +1,7 @@
+{
+	// Comments and trailing commas are allowed in tsconfig.
+	"compilerOptions": {
+		"target": "ES2022",
+		"strict": false,
+	},
+}

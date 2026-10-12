@@ -8,25 +8,25 @@ import { toast } from "sonner";
 import { ENV } from "../env";
 
 export function createQueryClient() {
-  return new QueryClient({
-    queryCache: new QueryCache({
-      onError: (error, query) => {
-        toast.error(`Error: ${error.message}`, {
-          action: {
-            label: "retry",
-            onClick: () => {
-              query.invalidate();
-            },
-          },
-        });
-      },
-    }),
-    defaultOptions: { queries: { staleTime: 60 * 1000 } },
-  });
+	return new QueryClient({
+		queryCache: new QueryCache({
+			onError: (error, query) => {
+				toast.error(`Error: ${error.message}`, {
+					action: {
+						label: "retry",
+						onClick: () => {
+							query.invalidate();
+						},
+					},
+				});
+			},
+		}),
+		defaultOptions: { queries: { staleTime: 60 * 1000 } },
+	});
 }
 
 const link = new RPCLink({
-  url: `${ENV.VITE_SERVER_URL.replace(/\/$/, "")}/rpc`,
+	url: `${ENV.VITE_SERVER_URL.replace(/\/$/, "")}/rpc`,
 });
 
 export const client: AppRouterClient = createORPCClient(link);

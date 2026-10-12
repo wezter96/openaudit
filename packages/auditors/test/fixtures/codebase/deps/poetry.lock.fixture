@@ -1,0 +1,12 @@
+[[package]]
+name = "pyyaml"
+version = "5.3"
+description = "YAML parser"
+
+[package.dependencies]
+foo = "*"
+
+[[package]]
+name = "jinja2"
+version = "2.10"
+description = "templates"

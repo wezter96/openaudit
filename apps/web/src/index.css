@@ -1,1 +1,202 @@
 @import "@openaudit/ui/globals.css";
+
+/*
+ * openaudit site tokens. The look borrows from physical inspection paperwork:
+ * cool paper, navy ink, a cobalt signal colour for actions and a manila
+ * "inspection tag" yellow reserved for grades. No web fonts and no third-party
+ * requests: the site should pass its own privacy and performance audits.
+ */
+:root {
+	--paper: #f4f6f9;
+	--surface: #ffffff;
+	--ink: #0f1a2e;
+	--ink-soft: #46546a;
+	--rule: #cfd6e0;
+	--signal: #1d4ed8;
+	--signal-ink: #ffffff;
+	--tag: #f6d24a;
+	--tag-ink: #1c1a10;
+	--tag-edge: #c9a521;
+	--focus: #1d4ed8;
+
+	--sev-critical: #b42318;
+	--sev-high: #b13a08;
+	--sev-medium: #95560a;
+	--sev-low: #1d4ed8;
+	--sev-info: #46546a;
+	--ok: #0b6e36;
+
+	/* shadcn tokens mapped onto the palette so packages/ui matches. */
+	--background: var(--paper);
+	--foreground: var(--ink);
+	--card: var(--surface);
+	--card-foreground: var(--ink);
+	--popover: var(--surface);
+	--popover-foreground: var(--ink);
+	--primary: var(--signal);
+	--primary-foreground: var(--signal-ink);
+	--secondary: #e6eaf0;
+	--secondary-foreground: var(--ink);
+	--muted: #e6eaf0;
+	--muted-foreground: var(--ink-soft);
+	--accent: #e6eaf0;
+	--accent-foreground: var(--ink);
+	--border: var(--rule);
+	--input: #74829a;
+	--ring: var(--focus);
+	--radius: 0.375rem;
+}
+
+.dark {
+	--paper: #0e1726;
+	--surface: #15213a;
+	--ink: #e8edf5;
+	--ink-soft: #a6b3c7;
+	--rule: #2b3a55;
+	--signal: #8fb1ff;
+	--signal-ink: #0e1726;
+	--tag: #f2cf4a;
+	--tag-ink: #1c1a10;
+	--tag-edge: #b8951a;
+	--focus: #f2cf4a;
+
+	--sev-critical: #ff8f86;
+	--sev-high: #ffa36e;
+	--sev-medium: #f3c56b;
+	--sev-low: #9dbbff;
+	--sev-info: #a6b3c7;
+	--ok: #6fdc9b;
+
+	--secondary: #1d2b47;
+	--muted: #1d2b47;
+	--accent: #1d2b47;
+	--input: #6f83a6;
+}
+
+@theme inline {
+	--font-sans:
+		ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+		"Helvetica Neue", Arial, sans-serif;
+	--font-mono:
+		ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas,
+		monospace;
+	--color-paper: var(--paper);
+	--color-surface: var(--surface);
+	--color-ink: var(--ink);
+	--color-ink-soft: var(--ink-soft);
+	--color-rule: var(--rule);
+	--color-signal: var(--signal);
+	--color-signal-ink: var(--signal-ink);
+	--color-tag: var(--tag);
+	--color-tag-ink: var(--tag-ink);
+	--color-tag-edge: var(--tag-edge);
+	--color-sev-critical: var(--sev-critical);
+	--color-sev-high: var(--sev-high);
+	--color-sev-medium: var(--sev-medium);
+	--color-sev-low: var(--sev-low);
+	--color-sev-info: var(--sev-info);
+	--color-ok: var(--ok);
+}
+
+html {
+	color-scheme: light;
+	-webkit-text-size-adjust: 100%;
+}
+html.dark {
+	color-scheme: dark;
+}
+body {
+	font-size: 1rem;
+	line-height: 1.6;
+	text-rendering: optimizeLegibility;
+}
+
+/*
+ * Unlayered on purpose: beats the `outline-none` utilities in packages/ui so
+ * keyboard focus is always clearly visible (WCAG 2.4.7 / 2.4.11).
+ */
+:focus-visible {
+	outline: 3px solid var(--focus);
+	outline-offset: 2px;
+	border-radius: 2px;
+}
+
+/* Headings and <main> receive focus programmatically; no ring needed there. */
+[tabindex="-1"]:focus {
+	outline: none;
+}
+
+.skip-link {
+	position: absolute;
+	left: 1rem;
+	top: -100px;
+	z-index: 50;
+	padding: 0.5rem 0.875rem;
+	background: var(--signal);
+	color: var(--signal-ink);
+	font-weight: 600;
+	border-radius: 0.25rem;
+}
+.skip-link:focus {
+	top: 0.75rem;
+}
+
+/* Long-form copy in docs. */
+.prose-doc {
+	max-width: 72ch;
+}
+.prose-doc h2 {
+	font-size: 1.5rem;
+	font-weight: 700;
+	letter-spacing: -0.015em;
+	margin-top: 3rem;
+	margin-bottom: 0.75rem;
+	scroll-margin-top: 5rem;
+}
+.prose-doc h3 {
+	font-size: 1.125rem;
+	font-weight: 650;
+	margin-top: 2rem;
+	margin-bottom: 0.5rem;
+	scroll-margin-top: 5rem;
+}
+.prose-doc p,
+.prose-doc ul,
+.prose-doc ol {
+	margin-bottom: 1rem;
+}
+.prose-doc ul {
+	list-style: disc;
+	padding-left: 1.25rem;
+}
+.prose-doc ol {
+	list-style: decimal;
+	padding-left: 1.25rem;
+}
+.prose-doc li + li {
+	margin-top: 0.25rem;
+}
+.prose-doc a {
+	color: var(--signal);
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+.prose-doc :not(pre) > code {
+	font-family: var(--font-mono);
+	font-size: 0.875em;
+	background: var(--muted);
+	padding: 0.1em 0.35em;
+	border-radius: 3px;
+}
+
+/* Unlayered, so it overrides Tailwind's layered animation utilities. */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.001ms;
+		animation-iteration-count: 1;
+		transition-duration: 0.001ms;
+		scroll-behavior: auto;
+	}
+}

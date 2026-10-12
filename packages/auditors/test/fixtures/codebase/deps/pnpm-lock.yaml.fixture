@@ -1,0 +1,14 @@
+lockfileVersion: '9.0'
+importers:
+  .:
+    dependencies:
+      axios:
+        specifier: ^0.21.0
+        version: 0.21.0
+packages:
+  axios@0.21.0:
+    resolution: {integrity: sha512-xxx}
+  '@babel/core@7.20.0':
+    resolution: {integrity: sha512-yyy}
+  react-dom@18.2.0(react@18.2.0):
+    resolution: {integrity: sha512-zzz}

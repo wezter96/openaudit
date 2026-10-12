@@ -1,0 +1,47 @@
+{
+  "results": [
+    {
+      "source": { "path": "/repo/package-lock.json", "type": "lockfile" },
+      "packages": [
+        {
+          "package": { "name": "lodash", "version": "4.17.20", "ecosystem": "npm" },
+          "vulnerabilities": [
+            {
+              "modified": "2024-02-20T05:34:49Z",
+              "published": "2021-05-06T16:05:51Z",
+              "schema_version": "1.6.0",
+              "id": "GHSA-35jh-r3h4-6jhm",
+              "aliases": ["CVE-2021-23337"],
+              "summary": "Command Injection in lodash",
+              "affected": [
+                {
+                  "package": { "ecosystem": "npm", "name": "lodash" },
+                  "ranges": [{ "type": "SEMVER", "events": [{ "introduced": "0" }, { "fixed": "4.17.21" }] }]
+                }
+              ],
+              "severity": [{ "type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H" }],
+              "database_specific": { "cwe_ids": ["CWE-77", "CWE-94"], "severity": "HIGH" }
+            },
+            {
+              "id": "GHSA-29mw-wpgm-hmr9",
+              "aliases": ["CVE-2020-28500"],
+              "summary": "Regular Expression Denial of Service (ReDoS) in lodash",
+              "affected": [
+                {
+                  "package": { "ecosystem": "npm", "name": "lodash" },
+                  "ranges": [{ "type": "SEMVER", "events": [{ "introduced": "4.0.0" }, { "fixed": "4.17.21" }] }]
+                }
+              ],
+              "database_specific": { "severity": "MODERATE" }
+            }
+          ],
+          "groups": [
+            { "ids": ["GHSA-35jh-r3h4-6jhm"], "aliases": ["CVE-2021-23337", "GHSA-35jh-r3h4-6jhm"], "max_severity": "7.2" },
+            { "ids": ["GHSA-29mw-wpgm-hmr9"], "aliases": ["CVE-2020-28500", "GHSA-29mw-wpgm-hmr9"], "max_severity": "5.3" }
+          ]
+        }
+      ]
+    }
+  ],
+  "experimental_config": { "licenses": { "summary": false, "allowlist": null } }
+}

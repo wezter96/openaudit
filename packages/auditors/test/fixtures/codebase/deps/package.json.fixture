@@ -1,0 +1,15 @@
+{
+	"name": "deps-fixture",
+	"private": true,
+	"dependencies": {
+		"lodash": "^4.17.20",
+		"left-pad": "*",
+		"my-lib": "github:someone/my-lib",
+		"pinned-lib": "git+https://github.com/someone/pinned-lib.git#0123456789abcdef0123456789abcdef01234567",
+		"local": "file:../local",
+		"ws": "workspace:*"
+	},
+	"devDependencies": {
+		"typescript": "latest"
+	}
+}

@@ -57,6 +57,7 @@
       "name": "web",
       "dependencies": {
         "@openaudit/api": "workspace:*",
+        "@openaudit/core": "workspace:*",
         "@openaudit/ui": "workspace:*",
         "@orpc/client": "catalog:",
         "@orpc/server": "catalog:",
@@ -67,6 +68,7 @@
         "@tanstack/react-router-ssr-query": "^1.167.2",
         "@tanstack/react-start": "^1.168.49",
         "@varlock/vite-integration": "1.5.1",
+        "effect": "4.0.3",
         "lucide-react": "catalog:",
         "next-themes": "catalog:",
         "react": "catalog:",
@@ -109,10 +111,14 @@
     "packages/api": {
       "name": "@openaudit/api",
       "dependencies": {
+        "@openaudit/agent": "workspace:*",
+        "@openaudit/auditors": "workspace:*",
+        "@openaudit/core": "workspace:*",
         "@orpc/client": "catalog:",
         "@orpc/openapi": "catalog:",
         "@orpc/server": "catalog:",
         "@orpc/zod": "catalog:",
+        "effect": "4.0.3",
         "zod": "catalog:",
       },
       "devDependencies": {
