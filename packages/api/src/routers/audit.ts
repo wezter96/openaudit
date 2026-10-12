@@ -50,10 +50,10 @@ export const auditRouter = {
 		)
 		.output(ReportSchema)
 		.handler(async ({ input, context }) => {
-			const global = globalLimiter.hit("*");
-			const rate = global.ok
-				? limiter.hit(clientKey(context.clientIp))
-				: global;
+			// Per-client first: requests a client is already refused must not drain
+			// the shared budget, or one noisy client could lock everyone out.
+			const own = limiter.hit(clientKey(context.clientIp));
+			const rate = own.ok ? globalLimiter.hit("*") : own;
 			if (!rate.ok)
 				throw new ORPCError("TOO_MANY_REQUESTS", {
 					message: `Rate limit reached. Try again in ${Math.ceil(rate.retryAfterMs / 1000)}s.`,
