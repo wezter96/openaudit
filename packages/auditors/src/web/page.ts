@@ -129,8 +129,9 @@ export const originOf = (url: string): string | undefined => {
 };
 
 export const sameOrigin = (a: string, b: string): boolean => {
+	// Exact origin match; opaque origins ("null", e.g. data:) never match.
 	const oa = originOf(a);
-	return oa !== undefined && oa === originOf(b);
+	return oa !== undefined && oa !== "null" && oa === originOf(b);
 };
 
 export const isLoopback = (url: string): boolean => {

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
 import { axeFindings, browser, vitalsFindings } from "../src/web/browser";
 import { runAuditor } from "./helpers";
-import { browserSite, type Site } from "./web-server";
+import { browserSite, redirectingSite, type Site, serve } from "./web-server";
 
 let site: Site;
 beforeAll(() => {
@@ -76,4 +76,44 @@ describe("webapp.browser", () => {
 		const report = await runAuditor(browser, site.url);
 		expect(report.results).toEqual([]);
 	});
+
+	test("does not forward user headers across a same-origin redirect", async () => {
+		const other = serve(
+			{
+				"/other.js": () =>
+					new Response("void 0", {
+						headers: { "content-type": "application/javascript" },
+					}),
+				"/other.png": () =>
+					new Response(new Uint8Array(8), {
+						headers: { "content-type": "image/png" },
+					}),
+			},
+			() => new Response("not found", { status: 404 }),
+		);
+		const target = redirectingSite(other.url);
+		try {
+			const report = await runAuditor(browser, target.url, {
+				browser: true,
+				maxPages: 1,
+				headers: { "x-openaudit-secret": "s3cret" },
+			});
+			if (report.results[0]?.status === "skipped") return;
+			const secret = (s: Site) =>
+				s.received
+					.filter((r) => r.headers.get("x-openaudit-secret") === "s3cret")
+					.map((r) => r.path);
+			// The browser saw the target with the header and followed both redirects...
+			expect(secret(target)).toContain("/hop.js");
+			expect(secret(target)).toContain("/hop.png");
+			expect(other.received.map((r) => r.path)).toEqual(
+				expect.arrayContaining(["/other.js", "/other.png"]),
+			);
+			// ...but the other origin never received it.
+			expect(secret(other)).toEqual([]);
+		} finally {
+			target.stop();
+			other.stop();
+		}
+	}, 90_000);
 });

@@ -4,6 +4,11 @@ import { fixture } from "./helpers";
 export interface Site {
 	readonly url: string;
 	readonly requests: string[];
+	/** Request headers received, keyed like `requests`. */
+	readonly received: Array<{
+		readonly path: string;
+		readonly headers: Headers;
+	}>;
 	readonly stop: () => void;
 }
 
@@ -25,18 +30,21 @@ export const serve = (
 	fallback: Handler,
 ): Site => {
 	const requests: string[] = [];
+	const received: Array<{ path: string; headers: Headers }> = [];
 	const server = Bun.serve({
 		port: 0,
 		hostname: "127.0.0.1",
 		fetch(req) {
 			const { pathname } = new URL(req.url);
 			requests.push(`${req.method} ${pathname}`);
+			received.push({ path: pathname, headers: new Headers(req.headers) });
 			return (routes[pathname] ?? fallback)(req);
 		},
 	});
 	return {
 		url: `http://127.0.0.1:${server.port}/`,
 		requests,
+		received,
 		stop: () => server.stop(true),
 	};
 };
@@ -178,5 +186,25 @@ export const goodSite = (): Site =>
 export const browserSite = (): Site =>
 	serve(
 		{ "/": () => html("browser/index.html") },
+		() => new Response("not found", { status: 404 }),
+	);
+
+/**
+ * A target page whose subresources redirect to `other` (a different origin),
+ * to prove user headers are not forwarded across origins.
+ */
+export const redirectingSite = (other: string): Site =>
+	serve(
+		{
+			"/": () =>
+				new Response(
+					'<!doctype html><html lang="en"><head><title>Redirect fixture</title><script src="/hop.js"></script></head><body><main><h1>Redirects</h1><img src="/hop.png" alt="pixel"></main></body></html>',
+					{ headers: { "content-type": "text/html" } },
+				),
+			"/hop.js": () =>
+				Response.redirect(new URL("/other.js", other).toString(), 302),
+			"/hop.png": () =>
+				Response.redirect(new URL("/other.png", other).toString(), 302),
+		},
 		() => new Response("not found", { status: 404 }),
 	);

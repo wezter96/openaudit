@@ -3,6 +3,7 @@ import {
 	type AuditContext,
 	defineAuditor,
 	type FindingInput,
+	requireUrl,
 	type Severity,
 } from "@openaudit/core";
 import { Effect } from "effect";
@@ -45,11 +46,13 @@ export const inspectTls = (
 		timeoutMs?: number;
 		minVersion?: tls.SecureVersion;
 		maxVersion?: tls.SecureVersion;
+		/** Address to dial instead of resolving `host`; SNI and name checks still use `host`. */
+		connectHost?: string;
 	} = {},
 ): Effect.Effect<TlsInfo, Error> =>
 	Effect.callback<TlsInfo, Error>((resume) => {
 		const socket = tls.connect({
-			host,
+			host: options.connectHost ?? host,
 			port,
 			servername: /^[\d.]+$|:/.test(host) ? undefined : host,
 			// Inspection only: we must complete the handshake to report on a bad
@@ -295,6 +298,17 @@ const checkRedirect = (ctx: AuditContext, url: URL) =>
 		];
 	});
 
+/**
+ * Setting `settings["web.tls"].connectHost`: a pre-validated IP address the TLS
+ * probe connects to instead of resolving the target hostname (SNI and
+ * certificate name checks still use the hostname). Lets callers such as the
+ * public HTTP API pin the address they already vetted against SSRF.
+ */
+const connectHostOf = (ctx: AuditContext): string | undefined => {
+	const value = ctx.options.settings?.["web.tls"]?.connectHost;
+	return typeof value === "string" && value.length > 0 ? value : undefined;
+};
+
 /** HTTPS enforcement, certificate health, protocol versions and mixed content. */
 export const tlsAuditor = defineAuditor({
 	id: "web.tls",
@@ -329,19 +343,33 @@ export const tlsAuditor = defineAuditor({
 				return findings;
 			}
 
-			if (!loopback) {
-				findings.push(...(yield* checkRedirect(ctx, url)));
-				const port = Number(url.port || 443);
-				const info = yield* inspectTls(url.hostname, port).pipe(Effect.option);
+			// The TLS probe dials a raw socket outside ctx.http, so its host and port
+			// come only from the target URL, never from a redirect to another host.
+			const target = new URL(yield* requireUrl(ctx));
+			const tlsUrl =
+				target.protocol === "https:"
+					? target
+					: target.hostname === url.hostname
+						? url
+						: undefined;
+			if (!loopback && tlsUrl) {
+				findings.push(...(yield* checkRedirect(ctx, tlsUrl)));
+				const port = Number(tlsUrl.port || 443);
+				const connectHost = connectHostOf(ctx);
+				const info = yield* inspectTls(tlsUrl.hostname, port, {
+					connectHost,
+				}).pipe(Effect.option);
 				if (info._tag === "Some")
 					findings.push(...certificateFindings(start.url, info.value));
-				else yield* ctx.log(`web.tls: TLS handshake with ${url.host} failed`);
+				else
+					yield* ctx.log(`web.tls: TLS handshake with ${tlsUrl.host} failed`);
 				// Does the server still accept TLS 1.0/1.1? Clients default to 1.2+, so ask explicitly.
 				if (
 					info._tag === "Some" &&
 					!/^(SSLv|TLSv1(\.[01])?$)/.test(info.value.protocol ?? "")
 				) {
-					const legacy = yield* inspectTls(url.hostname, port, {
+					const legacy = yield* inspectTls(tlsUrl.hostname, port, {
+						connectHost,
 						minVersion: "TLSv1",
 						maxVersion: "TLSv1.1",
 						timeoutMs: 5_000,

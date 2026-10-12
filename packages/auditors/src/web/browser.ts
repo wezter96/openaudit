@@ -9,7 +9,7 @@ import {
 import { Effect } from "effect";
 import type { Browser, BrowserContext } from "playwright-core";
 
-import { crawl, sameOrigin } from "./page";
+import { crawl, isLoopback, sameOrigin } from "./page";
 import { formatBytes, truncate } from "./util";
 
 const INSTALL_HINT =
@@ -376,7 +376,15 @@ export const browser = defineAuditor({
 				);
 				const context = yield* Effect.tryPromise({
 					try: () =>
-						b.newContext({ ignoreHTTPSErrors: false, serviceWorkers: "block" }),
+						b.newContext({
+							ignoreHTTPSErrors: false,
+							serviceWorkers: "block",
+							// Responses we fulfil ourselves (header injection below) lose their
+							// address space, so Chrome's Local Network Access would block a local
+							// dev server's own loopback hops. Grant it only for loopback targets;
+							// remote pages must never reach the auditor's local network.
+							permissions: isLoopback(start) ? ["local-network-access"] : [],
+						}),
 					catch: (cause) =>
 						new AuditorError({
 							message: "Failed to open a browser context",
@@ -386,14 +394,24 @@ export const browser = defineAuditor({
 				const headers = ctx.options.headers ?? {};
 				if (Object.keys(headers).length > 0)
 					// Only send user-supplied headers (e.g. auth cookies) to the target origin.
+					// `route.continue({ headers })` would also apply them to redirects, so a
+					// same-origin 3xx to another host would leak them. Instead fetch without
+					// following redirects and hand the 3xx back to the browser, whose next hop
+					// is routed (and origin-checked) again.
 					yield* Effect.promise(() =>
-						context.route("**/*", (route) =>
-							sameOrigin(route.request().url(), start)
-								? route.continue({
-										headers: { ...route.request().headers(), ...headers },
-									})
-								: route.continue(),
-						),
+						context.route("**/*", async (route) => {
+							const request = route.request();
+							if (!sameOrigin(request.url(), start)) return route.continue();
+							try {
+								const response = await route.fetch({
+									headers: { ...request.headers(), ...headers },
+									maxRedirects: 0,
+								});
+								await route.fulfill({ response });
+							} catch {
+								await route.abort().catch(() => {});
+							}
+						}),
 					);
 				const axe = yield* axeSource;
 				if (!axe)

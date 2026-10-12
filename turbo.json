@@ -47,7 +47,11 @@
     "VERCEL_PROJECT_PRODUCTION_URL",
     "VERCEL_URL",
     "VITE_SERVER_URL",
-    "_VARLOCK_ENV_KEY"
+    "_VARLOCK_ENV_KEY",
+    "ALLOW_PRIVATE_TARGETS",
+    "TRUST_PROXY",
+    "ANTHROPIC_API_KEY",
+    "OPENAUDIT_MODEL"
   ],
   "globalDependencies": [
     ".env*",

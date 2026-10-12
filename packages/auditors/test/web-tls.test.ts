@@ -137,6 +137,15 @@ describe("web.tls", () => {
 			);
 			expect(ids).toContain("web.tls/certificate-self-signed");
 			expect(ids).toContain("web.tls/certificate-expiring");
+
+			// connectHost pins the dialled address while SNI/name checks use the hostname.
+			const pinned = await Effect.runPromise(
+				inspectTls("example.test", server.port as number, {
+					connectHost: "127.0.0.1",
+				}),
+			);
+			expect(pinned.subject).toBe("example.test");
+			expect(pinned.hostnameError).toBeUndefined();
 		});
 	});
 
