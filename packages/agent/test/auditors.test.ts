@@ -331,6 +331,7 @@ describe("agentic auditor (web)", () => {
 				"--block-service-workers",
 				"--allowed-origins=https://app.example.com",
 				expect.stringMatching(/^--init-page=.+origin-guard\.ts$/),
+				expect.stringMatching(/^--config=.+playwright-mcp\.json$/),
 			],
 			env: expect.objectContaining({
 				OPENAUDIT_ALLOWED_ORIGIN: "https://app.example.com",
@@ -420,6 +421,9 @@ describe("tool guard", () => {
 		);
 		// Patterns the path check doesn't see on its own.
 		expect(allowed(codeGuard, "Glob", { pattern: "src/../../**" })).toBe(false);
+		for (const pattern of ["{/etc,x}/*", "{x,~/.ssh}/*", "{x, /etc}/*"])
+			expect(allowed(codeGuard, "Glob", { pattern })).toBe(false);
+		expect(allowed(codeGuard, "Glob", { pattern: "**/*.{ts,tsx}" })).toBe(true);
 		expect(allowed(codeGuard, "Glob", { pattern: "{..,x}/{..,y}/**" })).toBe(
 			false,
 		);

@@ -32,7 +32,7 @@ import {
 import { Effect } from "effect";
 import { z } from "zod";
 
-import { browserGuardInitPage, ORIGIN_ENV } from "./browser-guard";
+import { browserGuardFiles, ORIGIN_ENV } from "./browser-guard";
 import { type Playbook, renderPlaybook } from "./playbook";
 import { playbooks } from "./playbooks";
 
@@ -284,7 +284,10 @@ const escapesRoot = (pattern: unknown): boolean =>
 	(isAbsolute(pattern) ||
 		pattern.startsWith("~") ||
 		// Any `..`, including inside braces (`{..,x}`) or character classes.
-		pattern.includes(".."));
+		pattern.includes("..") ||
+		// Brace alternatives can start a new absolute or home path: `{/etc,x}`.
+		/[{,]\s*[/\\~]/.test(pattern) ||
+		/[{,]\s*[a-z]:/i.test(pattern));
 
 export type ToolDecision =
 	| { readonly allow: true }
@@ -888,7 +891,8 @@ export const makeAgenticAuditor = (
 							// Advisory only (Playwright: "not a security boundary"); the
 							// init-page origin guard below is what enforces the origin.
 							`--allowed-origins=${new URL(scope.url).origin}`,
-							`--init-page=${browserGuardInitPage()}`,
+							`--init-page=${browserGuardFiles().initPage}`,
+							`--config=${browserGuardFiles().config}`,
 							...storageStateArgs(settings.storageState, scope.root),
 						],
 						env: browserEnv(new URL(scope.url).origin),

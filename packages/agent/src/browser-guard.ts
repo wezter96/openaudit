@@ -20,10 +20,19 @@ interface GuardRoute {
 		headers?: Record<string, string>;
 	}): Promise<void>;
 }
+interface GuardWebSocketRoute {
+	url(): string;
+	connectToServer(): unknown;
+	close(options?: { code?: number; reason?: string }): Promise<void>;
+}
 interface GuardContext {
 	route(
 		url: string,
 		handler: (route: GuardRoute) => Promise<void>,
+	): Promise<void>;
+	routeWebSocket(
+		url: (url: URL) => boolean,
+		handler: (ws: GuardWebSocketRoute) => unknown,
 	): Promise<void>;
 }
 
@@ -32,8 +41,11 @@ interface GuardContext {
  * any other origin are aborted. Same-origin requests are fetched hop by hop
  * without following redirects, and every hop's origin is checked: Chromium
  * does not route the follow-up request of a fulfilled redirect, so the chain
- * must be walked here. A chain that stays on the origin is answered with one
- * redirect to its verified final URL; one that leaves it is aborted.
+ * is walked here and the verified final response is served directly (under the
+ * original URL). Answering with a redirect instead would let the browser make
+ * an unrouted second request that a stateful server could send elsewhere.
+ * WebSockets are routed separately and held to the same origin. WebRTC and DNS
+ * prefetch are disabled through launch flags (see `browserGuardFiles`).
  *
  * Unlike Playwright MCP's `--allowed-origins` (documented as not a security
  * boundary), this covers redirects, links and page scripts. It is
@@ -50,11 +62,22 @@ export async function installOriginGuard(
 	marked.__openauditGuard = true;
 	const sameOrigin = (url: string) => {
 		try {
-			return new URL(url).origin === origin;
+			const u = new URL(url);
+			// ws(s):// shares the origin of http(s):// on the same host and port.
+			if (u.protocol === "ws:") u.protocol = "http:";
+			if (u.protocol === "wss:") u.protocol = "https:";
+			return u.origin === origin;
 		} catch {
 			return false;
 		}
 	};
+	await context.routeWebSocket(
+		() => true,
+		(ws) =>
+			sameOrigin(ws.url())
+				? ws.connectToServer()
+				: ws.close({ code: 1008, reason: "blocked by openaudit" }),
+	);
 	await context.route("**/*", async (route) => {
 		const first = route.request().url();
 		let url = first;
@@ -68,8 +91,7 @@ export async function installOriginGuard(
 					url = new URL(location, url).toString();
 					continue;
 				}
-				if (url === first) return await route.fulfill({ response });
-				return await route.fulfill({ status: 302, headers: { location: url } });
+				return await route.fulfill({ response });
 			}
 			return await route.abort("failed");
 		} catch {
@@ -81,21 +103,42 @@ export async function installOriginGuard(
 /** Env var through which the allowed origin reaches the init-page script. */
 export const ORIGIN_ENV = "OPENAUDIT_ALLOWED_ORIGIN";
 
-let initPagePath: string | undefined;
+/** Chromium flags closing channels that request routing does not see. */
+export const GUARD_LAUNCH_ARGS = [
+	"--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+	"--webrtc-ip-handling-policy=disable_non_proxied_udp",
+	"--dns-prefetch-disable",
+	"--disable-features=NetworkPrediction,DnsOverHttps",
+];
+
+let files: { initPage: string; config: string } | undefined;
 
 /**
- * Writes the init-page script for Playwright MCP (`--init-page <path>`) once
- * per process. Written at runtime so it also works from a compiled binary.
+ * Writes the init-page script and config file for Playwright MCP
+ * (`--init-page`, `--config`) once per process. Written at runtime so they
+ * also work from a compiled binary.
  */
-export const browserGuardInitPage = (): string => {
-	if (initPagePath) return initPagePath;
+export const browserGuardFiles = (): { initPage: string; config: string } => {
+	if (files) return files;
 	const dir = mkdtempSync(join(tmpdir(), "openaudit-browser-"));
-	initPagePath = join(dir, "origin-guard.ts");
+	const initPage = join(dir, "origin-guard.ts");
+	const config = join(dir, "playwright-mcp.json");
 	writeFileSync(
-		initPagePath,
+		initPage,
 		`const installOriginGuard = ${installOriginGuard.toString()};\n` +
 			`export default async ({ page }) => installOriginGuard(page.context(), process.env.${ORIGIN_ENV});\n`,
 		{ mode: 0o600 },
 	);
-	return initPagePath;
+	writeFileSync(
+		config,
+		JSON.stringify({
+			browser: {
+				launchOptions: { args: GUARD_LAUNCH_ARGS },
+				contextOptions: { serviceWorkers: "block" },
+			},
+		}),
+		{ mode: 0o600 },
+	);
+	files = { initPage, config };
+	return files;
 };
