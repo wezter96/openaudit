@@ -32,6 +32,7 @@ export const DEFAULT_IGNORES = [
 	".venv",
 	"venv",
 	".terraform",
+	".openaudit",
 ];
 
 const MAX_FILES = 50_000;
