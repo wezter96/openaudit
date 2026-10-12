@@ -1,5 +1,7 @@
 import { Parser } from "htmlparser2";
 
+import { type Budget, makeBudget } from "./limits";
+
 /**
  * A minimal XML element tree shared by text manifests, Android binary XML
  * (AXML, used inside APKs) and aapt2 protobuf XML (used inside AABs).
@@ -38,9 +40,13 @@ const ATTR_IDS: Record<number, string> = {
 	16844071: "networkSecurityConfig",
 };
 
+/** Character data kept per element; manifests only need short host names. */
+const MAX_TEXT = 64 * 1024;
+
 const appendText = (el: XmlElement, text: string) => {
 	const t = text.trim();
-	if (t) el.text = el.text ? `${el.text}${t}` : t;
+	if (!t || (el.text?.length ?? 0) >= MAX_TEXT) return;
+	el.text = (el.text ? `${el.text}${t}` : t).slice(0, MAX_TEXT);
 };
 
 /* --------------------------------- AXML ----------------------------------- */
@@ -61,17 +67,38 @@ const TYPE_INT_DEC = 0x10;
 const TYPE_INT_HEX = 0x11;
 const TYPE_INT_BOOLEAN = 0x12;
 
-const readStringPool = (view: DataView, start: number): string[] => {
+const readStringPool = (
+	view: DataView,
+	start: number,
+	end: number,
+	budget: Budget,
+): string[] => {
 	const count = view.getUint32(start + 8, true);
 	const flags = view.getUint32(start + 16, true);
 	const stringsStart = start + view.getUint32(start + 20, true);
 	const headerSize = view.getUint16(start + 2, true);
+	if (start + headerSize + count * 4 > end)
+		throw new Error("String pool index exceeds its chunk");
 	const utf8 = (flags & UTF8_FLAG) !== 0;
 	const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
 	const decoder = new TextDecoder(utf8 ? "utf-8" : "utf-16le");
 	const out: string[] = [];
+	// Offsets may repeat; decode each once so shared strings cost nothing extra.
+	const byOffset = new Map<number, string>();
+	const slice = (from: number, len: number) => {
+		if (from < stringsStart || from + len > end)
+			throw new Error("String exceeds its pool");
+		budget.bytes(len);
+		return decoder.decode(bytes.subarray(from, from + len));
+	};
 	for (let i = 0; i < count; i++) {
-		let p = stringsStart + view.getUint32(start + headerSize + i * 4, true);
+		const offset = view.getUint32(start + headerSize + i * 4, true);
+		const cached = byOffset.get(offset);
+		if (cached !== undefined) {
+			out.push(cached);
+			continue;
+		}
+		let p = stringsStart + offset;
 		if (utf8) {
 			// Length in chars, then in bytes; each 1 or 2 bytes (high bit = 2).
 			p += (view.getUint8(p) & 0x80) !== 0 ? 2 : 1;
@@ -80,15 +107,16 @@ const readStringPool = (view: DataView, start: number): string[] => {
 				len = ((len & 0x7f) << 8) | view.getUint8(p + 1);
 				p += 2;
 			} else p += 1;
-			out.push(decoder.decode(bytes.subarray(p, p + len)));
+			out.push(slice(p, len));
 		} else {
 			let len = view.getUint16(p, true);
 			if ((len & 0x8000) !== 0) {
 				len = ((len & 0x7fff) << 16) | view.getUint16(p + 2, true);
 				p += 4;
 			} else p += 2;
-			out.push(decoder.decode(bytes.subarray(p, p + len * 2)));
+			out.push(slice(p, len * 2));
 		}
+		byOffset.set(offset, out[i] ?? "");
 	}
 	return out;
 };
@@ -130,6 +158,7 @@ export const decodeAxml = (bytes: Uint8Array): XmlElement | undefined => {
 	try {
 		const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 		const end = Math.min(view.getUint32(4, true), bytes.length);
+		const budget = makeBudget();
 		let strings: string[] = [];
 		let resourceIds: number[] = [];
 		const stack: XmlElement[] = [];
@@ -141,7 +170,7 @@ export const decodeAxml = (bytes: Uint8Array): XmlElement | undefined => {
 			const size = view.getUint32(p + 4, true);
 			if (size < 8 || p + size > end) break;
 			if (type === RES_STRING_POOL_TYPE) {
-				strings = readStringPool(view, p);
+				strings = readStringPool(view, p, p + size, budget);
 			} else if (type === RES_XML_RESOURCE_MAP_TYPE) {
 				resourceIds = [];
 				for (let q = p + headerSize; q + 4 <= p + size; q += 4)
@@ -153,8 +182,16 @@ export const decodeAxml = (bytes: Uint8Array): XmlElement | undefined => {
 				const attrStart = view.getUint16(ext + 8, true);
 				const attrSize = view.getUint16(ext + 10, true);
 				const attrCount = view.getUint16(ext + 12, true);
+				if (
+					attrCount > 0 &&
+					(attrSize < 20 || ext + attrStart + attrCount * attrSize > p + size)
+				)
+					throw new Error("Attributes exceed their chunk");
+				budget.node();
+				budget.depth(stack.length);
 				const attrs: Record<string, string> = {};
 				for (let i = 0; i < attrCount; i++) {
+					budget.node();
 					const a = ext + attrStart + i * attrSize;
 					const nameIdx = view.getUint32(a + 4, true);
 					const rawIdx = view.getUint32(a + 8, true);
@@ -268,7 +305,13 @@ const protoItemValue = (item: Uint8Array): string | undefined => {
 	return undefined;
 };
 
-const decodeProtoElement = (buf: Uint8Array): XmlElement => {
+const decodeProtoElement = (
+	buf: Uint8Array,
+	budget: Budget,
+	depth: number,
+): XmlElement => {
+	budget.node();
+	budget.depth(depth);
 	let name = "";
 	const attrs: Record<string, string> = {};
 	const children: XmlElement[] = [];
@@ -276,6 +319,7 @@ const decodeProtoElement = (buf: Uint8Array): XmlElement => {
 	for (const f of protoFields(buf)) {
 		if (f.field === 3) name = protoText(f) ?? "";
 		else if (f.field === 4 && f.bytes) {
+			budget.node();
 			const af = protoFields(f.bytes);
 			const resId = af.find((g) => g.field === 5)?.value;
 			const attrName =
@@ -288,7 +332,7 @@ const decodeProtoElement = (buf: Uint8Array): XmlElement => {
 				(item ? protoItemValue(item) : undefined) ||
 				"";
 		} else if (f.field === 5 && f.bytes) {
-			const child = decodeProtoNode(f.bytes);
+			const child = decodeProtoNode(f.bytes, budget, depth + 1);
 			if (typeof child === "string") text += child;
 			else if (child) children.push(child);
 		}
@@ -299,11 +343,15 @@ const decodeProtoElement = (buf: Uint8Array): XmlElement => {
 };
 
 /** An element, or the text of a text node. */
-const decodeProtoNode = (buf: Uint8Array): XmlElement | string | undefined => {
+const decodeProtoNode = (
+	buf: Uint8Array,
+	budget: Budget,
+	depth: number,
+): XmlElement | string | undefined => {
 	const fields = protoFields(buf);
 	const element = fields.find((f) => f.field === 1)?.bytes;
 	if (!element) return protoText(fields.find((f) => f.field === 2));
-	const el = decodeProtoElement(element);
+	const el = decodeProtoElement(element, budget, depth);
 	// XmlNode.source = SourcePosition { line_number = 1 }
 	const source = fields.find((f) => f.field === 3)?.bytes;
 	const line = source
@@ -315,7 +363,7 @@ const decodeProtoNode = (buf: Uint8Array): XmlElement | string | undefined => {
 /** Decodes an aapt2 protobuf `XmlNode` (manifests inside .aab bundles). */
 export const decodeProtoXml = (bytes: Uint8Array): XmlElement | undefined => {
 	try {
-		const root = decodeProtoNode(bytes);
+		const root = decodeProtoNode(bytes, makeBudget(), 0);
 		return typeof root === "object" && root.name ? root : undefined;
 	} catch {
 		return undefined;
@@ -324,8 +372,12 @@ export const decodeProtoXml = (bytes: Uint8Array): XmlElement | undefined => {
 
 /* -------------------------------- text XML -------------------------------- */
 
-/** Parses a text XML document, stripping the `android:` attribute prefix. */
+/**
+ * Parses a text XML document, stripping the `android:` attribute prefix.
+ * Returns undefined when it exceeds the decode limits.
+ */
 export const parseXmlText = (text: string): XmlElement | undefined => {
+	const budget = makeBudget();
 	const lineStarts = [0];
 	for (let i = 0; i < text.length; i++)
 		if (text.charCodeAt(i) === 10) lineStarts.push(i + 1);
@@ -344,6 +396,8 @@ export const parseXmlText = (text: string): XmlElement | undefined => {
 	const parser: Parser = new Parser(
 		{
 			onopentag(name, attribs) {
+				budget.node();
+				budget.depth(stack.length);
 				const attrs: Record<string, string> = {};
 				for (const [k, v] of Object.entries(attribs))
 					attrs[k.startsWith("android:") ? k.slice(8) : k] = v;
@@ -368,8 +422,12 @@ export const parseXmlText = (text: string): XmlElement | undefined => {
 		},
 		{ xmlMode: true },
 	);
-	parser.write(text);
-	parser.end();
+	try {
+		parser.write(text);
+		parser.end();
+	} catch {
+		return undefined;
+	}
 	return root;
 };
 

@@ -100,7 +100,9 @@ const RULES: ReadonlyArray<SecretRule> = [
 const GOOGLE_KEY_RE = /\b(AIza[0-9A-Za-z_-]{35})(?![0-9A-Za-z_-])/g;
 const FIREBASE_DB_RE =
 	/\b(https:\/\/[a-z0-9-]+\.(?:firebaseio\.com|[a-z0-9-]+\.firebasedatabase\.app))\b/g;
-const HTTP_RE = /\bhttp:\/\/([a-z0-9.-]+)(?::\d+)?[^\s"'<>\\)]*/gi;
+// Optional userinfo is consumed so the host group is the real host.
+const HTTP_RE =
+	/\bhttp:\/\/(?:[^\s/?#@"'<>]+@)?([a-z0-9.-]+)(?::\d+)?[^\s"'<>\\)]*/gi;
 
 /** Assignment-like patterns in JS/JSON, Android string resources, plists and properties. */
 const GENERIC_RES: ReadonlyArray<RegExp> = [
@@ -115,6 +117,31 @@ const PLACEHOLDER =
 
 const IGNORED_HOSTS =
 	/^(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|10\.0\.2\.2|(?:[\w-]+\.)*(?:example\.(?:com|org|net)|w3\.org|android\.com|apple\.com|adobe\.com|xml\.org|xmlpull\.org|purl\.org|json-schema\.org|apache\.org|sun\.com|openxmlformats\.org|microsoft\.com|schemas\.xmlsoap\.org)|[\w-]+\.(?:local|test|example|invalid))$/i;
+
+/**
+ * URL safe for evidence: userinfo masked, query/fragment values masked and
+ * token-like path segments redacted.
+ */
+export const sanitizeUrl = (raw: string, max = 120): string => {
+	const noUser = raw.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#@\s]*@/i, "$1***@");
+	const cut = noUser.search(/[?#]/);
+	const base = cut === -1 ? noUser : noUser.slice(0, cut);
+	const [scheme = "", rest = ""] = base.split(/(?<=:\/\/)/);
+	const path = rest
+		.split("/")
+		.map((seg, i) => (i > 0 && /^[\w-]{20,}$/.test(seg) ? redact(seg) : seg))
+		.join("/");
+	const keys =
+		cut === -1
+			? []
+			: noUser
+					.slice(cut + 1)
+					.split(/[&#;]/)
+					.map((p) => p.split("=")[0])
+					.filter(Boolean);
+	const out = `${scheme}${path}${keys.length ? `?${keys.map((k) => `${k}=***`).join("&")}` : ""}`;
+	return out.length > max ? `${out.slice(0, max)}…` : out;
+};
 
 /** Shannon entropy in bits per character. */
 export const entropy = (s: string): number => {
@@ -172,7 +199,8 @@ export const scanForSecrets = (
 				severity: rule.severity,
 				message: `The app ships ${rule.what}. Anyone can unpack the app and extract it.`,
 				remediation: rule.remediation,
-				evidence: rule.id === "private-key" ? m[0] : redact(secret),
+				// Private keys: only the PEM header, never key material.
+				evidence: rule.id === "private-key" ? `${m[0]} ****` : redact(secret),
 				references: [MASVS_STORAGE, CWE_798],
 				tags: ["masvs-storage-1", "cwe-798", "secret"],
 				confidence: "high",
@@ -212,7 +240,8 @@ export const scanForSecrets = (
 			message: `The app talks to the Firebase Realtime Database ${url}. Misconfigured security rules commonly expose the whole database to anyone with this URL.`,
 			remediation:
 				"Verify the database rules deny unauthenticated reads/writes (try `curl <url>/.json`) and scope access per user.",
-			evidence: url,
+			// FIREBASE_DB_RE stops at the host, so this is a bare origin.
+			evidence: sanitizeUrl(url),
 			references: [
 				"https://firebase.google.com/docs/database/security",
 				"https://mas.owasp.org/MASVS/08-MASVS-NETWORK/",
@@ -271,7 +300,7 @@ export const scanForSecrets = (
 			category: "security",
 			message: `The app references http://${host}. Traffic to it can be read and modified by anyone on the network path.`,
 			remediation: "Use https:// for every endpoint the app contacts.",
-			evidence: m[0].slice(0, 120),
+			evidence: sanitizeUrl(m[0]),
 			references: [
 				"https://mas.owasp.org/MASVS/08-MASVS-NETWORK/",
 				"https://cwe.mitre.org/data/definitions/319.html",

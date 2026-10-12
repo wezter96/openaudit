@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { entropy, mobileSecrets, scanForSecrets } from "../src/mobile/secrets";
+import {
+	entropy,
+	mobileSecrets,
+	sanitizeUrl,
+	scanForSecrets,
+} from "../src/mobile/secrets";
 import { ruleIds, runAuditor } from "./helpers";
 import { writeArchive, writeTree, xmlPlist } from "./mobile-plist-encoder";
 
@@ -121,5 +126,36 @@ describe("mobile.secrets", () => {
 	test("does not report http endpoints or generic assignments in binaries", () => {
 		const text = `http://api.demo-backend.io apiKey="${GENERIC}"`;
 		expect(scanForSecrets(text, "classes.dex", { binary: true })).toEqual([]);
+	});
+
+	test("private key evidence is the PEM header only", () => {
+		const [f] = scanForSecrets(`const k = "${PEM}";`, "assets/key.js");
+		expect(f?.ruleId).toBe("mobile.secrets/private-key");
+		expect(f?.evidence).toBe("-----BEGIN PRIVATE KEY----- ****");
+		expect(f?.evidence).not.toContain("MIIfake");
+	});
+
+	test("http endpoint evidence drops credentials and query values", () => {
+		const password = ["hunter", "2pw"].join("");
+		const token = ["tok", "Secret123"].join("");
+		const url = `http://john.doe:${password}@api.acme-corp.io/v1/users?token=${token}&x=1`;
+		const findings = scanForSecrets(`fetch("${url}")`, "assets/config.js");
+		expect(findings.map((f) => f.ruleId)).toEqual([
+			"mobile.secrets/cleartext-endpoint",
+		]);
+		const [f] = findings;
+		expect(f?.message).toContain("http://api.acme-corp.io");
+		expect(f?.evidence).toBe(
+			"http://***@api.acme-corp.io/v1/users?token=***&x=***",
+		);
+		expect(JSON.stringify(f)).not.toContain(password);
+		expect(JSON.stringify(f)).not.toContain(token);
+	});
+
+	test("sanitizeUrl redacts token-like path segments", () => {
+		const seg = "AbCdEfGhIjKlMnOpQrStUv";
+		expect(sanitizeUrl(`http://hooks.acme.io/services/${seg}`)).toBe(
+			"http://hooks.acme.io/services/AbCd************",
+		);
 	});
 });

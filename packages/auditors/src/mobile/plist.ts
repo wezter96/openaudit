@@ -6,6 +6,7 @@ import {
 	type PlistValue,
 	parseBinaryPlist,
 } from "./bplist";
+import { makeBudget } from "./limits";
 
 export type { PlistDict, PlistValue } from "./bplist";
 
@@ -23,14 +24,19 @@ type Frame =
 	| { readonly kind: "dict"; readonly value: PlistDict; key?: string }
 	| { readonly kind: "array"; readonly value: PlistValue[] };
 
-/** Parses an XML property list. Returns `undefined` when there is no plist root. */
+/**
+ * Parses an XML property list. Returns `undefined` when there is no plist
+ * root; throws when the document exceeds the decode limits.
+ */
 export const parseXmlPlist = (xml: string): PlistValue | undefined => {
+	const budget = makeBudget();
 	const stack: Frame[] = [];
 	let root: PlistValue | undefined;
 	let text = "";
 	let done = false;
 
 	const add = (value: PlistValue) => {
+		budget.node();
 		const top = stack.at(-1);
 		if (!top) {
 			if (root === undefined) root = value;
@@ -47,11 +53,13 @@ export const parseXmlPlist = (xml: string): PlistValue | undefined => {
 			onopentag(name) {
 				text = "";
 				if (done) return;
+				if (name === "dict" || name === "array") budget.depth(stack.length);
 				if (name === "dict")
 					stack.push({ kind: "dict", value: Object.create(null) });
 				else if (name === "array") stack.push({ kind: "array", value: [] });
 			},
 			ontext(chunk) {
+				budget.bytes(chunk.length);
 				text += chunk;
 			},
 			onclosetag(name) {

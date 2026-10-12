@@ -4,6 +4,8 @@
  * ASCII/UTF-16/UTF-8 strings, UID, array, set and dict.
  */
 
+import { makeBudget } from "./limits";
+
 export type PlistValue =
 	| string
 	| number
@@ -26,7 +28,11 @@ const MAGIC = [0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30]; // "bplist00"
 export const isBinaryPlist = (bytes: Uint8Array): boolean =>
 	bytes.length >= MAGIC.length && MAGIC.every((b, i) => bytes[i] === b);
 
-/** Parses a binary plist; throws on malformed input. */
+/**
+ * Parses a binary plist; throws on malformed input. Objects are memoised by
+ * ref, and every ref resolution (including repeats) counts against a node
+ * budget, so shared-reference "billion laughs" plists fail fast.
+ */
 export const parseBinaryPlist = (bytes: Uint8Array): PlistValue => {
 	if (!isBinaryPlist(bytes) || bytes.length < 8 + 32)
 		throw new Error("Not a bplist00 file");
@@ -67,10 +73,25 @@ export const parseBinaryPlist = (bytes: Uint8Array): PlistValue => {
 		return [uint(pos + 2, size), pos + 2 + size];
 	};
 
+	const budget = makeBudget();
+	// ref → parsed value and the logical size of its subtree.
+	const memo = new Map<number, { value: PlistValue; size: number }>();
 	const active = new Set<number>();
 	const parse = (ref: number): PlistValue => {
-		if (active.has(ref) || active.size > 512)
-			throw new Error("Cyclic or too deep binary plist");
+		const cached = memo.get(ref);
+		if (cached) {
+			budget.node(cached.size);
+			return cached.value;
+		}
+		if (active.has(ref)) throw new Error("Cyclic binary plist");
+		budget.depth(active.size);
+		const before = budget.nodes;
+		budget.node();
+		const value = parseObject(ref);
+		memo.set(ref, { value, size: budget.nodes - before });
+		return value;
+	};
+	const parseObject = (ref: number): PlistValue => {
 		const pos = offsetOf(ref);
 		need(pos, 1);
 		const marker = bytes[pos] ?? 0;
@@ -99,11 +120,13 @@ export const parseBinaryPlist = (bytes: Uint8Array): PlistValue => {
 			case 0x4: {
 				const [len, start] = lengthAt(pos, info);
 				need(start, len);
+				budget.bytes(len);
 				return bytes.slice(start, start + len);
 			}
 			case 0x5: {
 				const [len, start] = lengthAt(pos, info);
 				need(start, len);
+				budget.bytes(len);
 				return new TextDecoder("latin1").decode(
 					bytes.subarray(start, start + len),
 				);
@@ -111,6 +134,7 @@ export const parseBinaryPlist = (bytes: Uint8Array): PlistValue => {
 			case 0x6: {
 				const [len, start] = lengthAt(pos, info);
 				need(start, len * 2);
+				budget.bytes(len * 2);
 				let s = "";
 				for (let i = 0; i < len; i++)
 					s += String.fromCharCode(view.getUint16(start + i * 2));
@@ -119,6 +143,7 @@ export const parseBinaryPlist = (bytes: Uint8Array): PlistValue => {
 			case 0x7: {
 				const [len, start] = lengthAt(pos, info);
 				need(start, len);
+				budget.bytes(len);
 				return new TextDecoder().decode(bytes.subarray(start, start + len));
 			}
 			case 0x8:
