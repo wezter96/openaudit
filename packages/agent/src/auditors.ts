@@ -43,7 +43,7 @@ export const resolveModel = (model?: string): string =>
 
 const DEFAULT_MAX_TURNS = 40;
 const DEFAULT_MAX_FINDINGS = 40;
-const MAX_HTTP_CALLS = 60;
+const MAX_HTTP_CALLS = 150;
 const MAX_BODY_CHARS = 40_000;
 const MAX_EVIDENCE_CHARS = 2_000;
 
