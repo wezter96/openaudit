@@ -123,7 +123,9 @@ const IGNORED_HOSTS =
  * token-like path segments redacted.
  */
 export const sanitizeUrl = (raw: string, max = 120): string => {
-	const noUser = raw.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#@\s]*@/i, "$1***@");
+	// Userinfo may itself contain `/`, `?` or `#` (unencoded passwords), so mask
+	// everything between the scheme and the last `@` before any whitespace.
+	const noUser = raw.replace(/^([a-z][a-z0-9+.-]*:\/\/)\S*@/i, "$1***@");
 	const cut = noUser.search(/[?#]/);
 	const base = cut === -1 ? noUser : noUser.slice(0, cut);
 	const [scheme = "", rest = ""] = base.split(/(?<=:\/\/)/);

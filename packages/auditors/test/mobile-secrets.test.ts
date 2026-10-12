@@ -152,6 +152,13 @@ describe("mobile.secrets", () => {
 		expect(JSON.stringify(f)).not.toContain(token);
 	});
 
+	test("sanitizeUrl masks userinfo even when the password contains slashes", () => {
+		const out = sanitizeUrl("http://admin:pa/ss?w#rd@db.internal/x");
+		expect(out).not.toContain("pa/ss");
+		expect(out).not.toContain("rd@");
+		expect(out.startsWith("http://***@")).toBe(true);
+	});
+
 	test("sanitizeUrl redacts token-like path segments", () => {
 		const seg = "AbCdEfGhIjKlMnOpQrStUv";
 		expect(sanitizeUrl(`http://hooks.acme.io/services/${seg}`)).toBe(

@@ -96,8 +96,8 @@ The headless auditors enforce what they can, as hard tool permissions rather tha
 
 Two limits remain:
 
-- The browser is launched with `--isolated` and `--allowed-origins=<target origin>`, and every URL the agent navigates to must be on the target origin and must not embed another URL (blocking open-redirect hops such as `?next=https://…`). Only an allowlist of observation and interaction tools is available (no script evaluation, file upload or file output).
-- **Residual risk:** Playwright documents `--allowed-origins` as *not* a security boundary, and it does not apply to redirects. The target site itself can still send the browser elsewhere through redirects, links or scripts. Run browser playbooks only against sites you control, and for stronger isolation run them in a network-restricted environment (container or VM with egress limited to the target).
+- The browser is confined to the target origin at the network layer. An init-page guard (`src/browser-guard.ts`) aborts every request to another origin and walks redirect chains hop by hop, so links, redirects and page scripts cannot load other sites. Navigation URLs that embed another URL are refused too. Only an allowlist of observation and interaction tools is available (no script evaluation, file upload or file output). The browser runs `--isolated`, without your API keys in its environment.
+- **Residual risk:** the guard runs inside the Playwright MCP process, which is not a sandbox. For hostile targets, run browser playbooks in a container or VM whose egress is limited to the target.
 - These controls are not an OS sandbox.
 
 Run agentic audits against staging environments and test accounts.

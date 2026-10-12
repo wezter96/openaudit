@@ -32,6 +32,7 @@ import {
 import { Effect } from "effect";
 import { z } from "zod";
 
+import { browserGuardInitPage, ORIGIN_ENV } from "./browser-guard";
 import { type Playbook, renderPlaybook } from "./playbook";
 import { playbooks } from "./playbooks";
 
@@ -72,6 +73,25 @@ export const AgentSettings = z.object({
 	storageState: z.string().optional(),
 });
 export type AgentSettings = z.infer<typeof AgentSettings>;
+
+/**
+ * Environment for the Playwright MCP process: just enough to run npx and find
+ * browsers, plus the allowed origin. API keys and other secrets stay out.
+ */
+const browserEnv = (origin: string): Record<string, string> => {
+	const env: Record<string, string> = { [ORIGIN_ENV]: origin };
+	for (const key of [
+		"PATH",
+		"HOME",
+		"TMPDIR",
+		"PLAYWRIGHT_BROWSERS_PATH",
+		"npm_config_cache",
+	]) {
+		const value = process.env[key];
+		if (value) env[key] = value;
+	}
+	return env;
+};
 
 /** Pinned so a compromised or breaking release is never pulled implicitly. */
 export const PLAYWRIGHT_MCP = "@playwright/mcp@0.0.83";
@@ -216,6 +236,7 @@ export const embedsUrl = (url: unknown): boolean => {
 				break;
 			}
 		}
+		rest = rest.replace(/\\/g, "/");
 		return /[a-z][a-z0-9+.-]*:\/\/|(^|[=&?#/])\/\/[^/]|\b(javascript|data):/i.test(
 			rest,
 		);
@@ -257,12 +278,13 @@ const ALLOWED_BROWSER_TOOLS = new Set([
 	"browser_network_requests",
 ]);
 
-/** Absolute paths, `~` and `..` segments let a pattern reach outside the root. */
+/** Absolute paths, `~` and `..` (even via brace expansion) let a pattern reach outside the root. */
 const escapesRoot = (pattern: unknown): boolean =>
 	typeof pattern === "string" &&
 	(isAbsolute(pattern) ||
 		pattern.startsWith("~") ||
-		pattern.split(/[\\/]/).includes(".."));
+		// Any `..`, including inside braces (`{..,x}`) or character classes.
+		pattern.includes(".."));
 
 export type ToolDecision =
 	| { readonly allow: true }
@@ -863,11 +885,13 @@ export const makeAgenticAuditor = (
 							"--headless",
 							"--isolated",
 							"--block-service-workers",
-							// Enforced by the browser for every request, so links, redirects
-							// and scripts cannot take the session off the target origin.
+							// Advisory only (Playwright: "not a security boundary"); the
+							// init-page origin guard below is what enforces the origin.
 							`--allowed-origins=${new URL(scope.url).origin}`,
+							`--init-page=${browserGuardInitPage()}`,
 							...storageStateArgs(settings.storageState, scope.root),
 						],
+						env: browserEnv(new URL(scope.url).origin),
 					};
 
 				const tools = [...(scope.root ? ["Read", "Grep", "Glob"] : [])];

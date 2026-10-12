@@ -330,8 +330,15 @@ describe("agentic auditor (web)", () => {
 				"--isolated",
 				"--block-service-workers",
 				"--allowed-origins=https://app.example.com",
+				expect.stringMatching(/^--init-page=.+origin-guard\.ts$/),
 			],
+			env: expect.objectContaining({
+				OPENAUDIT_ALLOWED_ORIGIN: "https://app.example.com",
+			}),
 		});
+		expect(
+			(input?.options.mcpServers?.playwright as { env: object }).env,
+		).not.toHaveProperty("ANTHROPIC_API_KEY");
 	});
 });
 
@@ -413,6 +420,12 @@ describe("tool guard", () => {
 		);
 		// Patterns the path check doesn't see on its own.
 		expect(allowed(codeGuard, "Glob", { pattern: "src/../../**" })).toBe(false);
+		expect(allowed(codeGuard, "Glob", { pattern: "{..,x}/{..,y}/**" })).toBe(
+			false,
+		);
+		expect(allowed(codeGuard, "Grep", { pattern: "x", glob: "{../,}*" })).toBe(
+			false,
+		);
 		expect(allowed(codeGuard, "Grep", { pattern: "x", glob: "../**" })).toBe(
 			false,
 		);

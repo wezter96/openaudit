@@ -383,7 +383,6 @@ export const browser = defineAuditor({
 							// address space, so Chrome's Local Network Access would block a local
 							// dev server's own loopback hops. Grant it only for loopback targets;
 							// remote pages must never reach the auditor's local network.
-							permissions: isLoopback(start) ? ["local-network-access"] : [],
 						}),
 					catch: (cause) =>
 						new AuditorError({
@@ -391,6 +390,18 @@ export const browser = defineAuditor({
 							cause,
 						}),
 				});
+				// Responses we fulfil ourselves (header injection below) lose their
+				// address space, so Chrome's Local Network Access would block a local
+				// dev server's own loopback hops. Grant it only to a loopback target's
+				// own origin; other origins must never reach the auditor's network.
+				if (isLoopback(start))
+					yield* Effect.promise(() =>
+						context
+							.grantPermissions(["local-network-access"], {
+								origin: new URL(start).origin,
+							})
+							.catch(() => {}),
+					);
 				const headers = ctx.options.headers ?? {};
 				if (Object.keys(headers).length > 0)
 					// Only send user-supplied headers (e.g. auth cookies) to the target origin.
