@@ -1,4 +1,4 @@
-import { readdir, stat } from "node:fs/promises";
+import { lstat, readdir, realpath, stat } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { Context, Effect, Layer } from "effect";
 
@@ -76,11 +76,36 @@ const walk = async (root: string): Promise<string[]> => {
 	return out;
 };
 
+/**
+ * Lists files via git so .gitignore is honoured. The target may be an untrusted
+ * repository, so repo-level config that can execute commands is overridden.
+ */
 const gitFiles = async (root: string): Promise<string[] | undefined> => {
 	try {
 		const proc = Bun.spawn(
-			["git", "ls-files", "-co", "--exclude-standard", "-z"],
-			{ cwd: root, stdout: "pipe", stderr: "ignore" },
+			[
+				"git",
+				"-c",
+				"core.fsmonitor=false",
+				"-c",
+				"core.untrackedCache=false",
+				"-c",
+				`core.hooksPath=${devNull}`,
+				"ls-files",
+				"-co",
+				"--exclude-standard",
+				"-z",
+			],
+			{
+				cwd: root,
+				stdout: "pipe",
+				stderr: "ignore",
+				env: {
+					...process.env,
+					GIT_CONFIG_NOSYSTEM: "1",
+					GIT_TERMINAL_PROMPT: "0",
+				},
+			},
 		);
 		const text = await new Response(proc.stdout).text();
 		if ((await proc.exited) !== 0) return undefined;
@@ -89,19 +114,43 @@ const gitFiles = async (root: string): Promise<string[] | undefined> => {
 			.split("\0")
 			.filter(Boolean)
 			.filter((f) => !f.split("/").some((part) => ignored.has(part)));
-		const existing: string[] = [];
+		const regular: string[] = [];
 		for (const f of files.slice(0, MAX_FILES)) {
-			if (await Bun.file(join(root, f)).exists()) existing.push(f);
+			// Skip symlinks: they can point outside the workspace.
+			const info = await lstat(join(root, f)).catch(() => undefined);
+			if (info?.isFile()) regular.push(f);
 		}
-		return existing;
+		return regular;
 	} catch {
 		return undefined;
 	}
 };
 
+const devNull = process.platform === "win32" ? "NUL" : "/dev/null";
+
+/** Max bytes `readBytes` will load (mobile artifacts can be large). */
+export const MAX_BINARY_BYTES = 512 * 1024 * 1024;
+
 export const makeWorkspace = (rootInput: string): Workspace => {
 	const root = resolve(rootInput);
 	const absolute = (p: string) => join(root, p);
+	let realRoot: Promise<string> | undefined;
+
+	/**
+	 * Resolves a workspace-relative path and refuses anything that escapes the
+	 * root, either lexically (`../`) or through a symlink.
+	 */
+	const safePath = async (p: string): Promise<string> => {
+		const full = resolve(root, p);
+		if (full !== root && !full.startsWith(root + sep))
+			throw new Error(`Path escapes workspace: ${p}`);
+		realRoot ??= realpath(root);
+		const [rr, rf] = await Promise.all([realRoot, realpath(full)]);
+		if (rf !== rr && !rf.startsWith(rr + sep))
+			throw new Error(`Path resolves outside workspace: ${p}`);
+		return rf;
+	};
+
 	let cache: Promise<string[]> | undefined;
 	const listFiles = () => {
 		cache ??= gitFiles(root).then((files) => files ?? walk(root));
@@ -112,6 +161,21 @@ export const makeWorkspace = (rootInput: string): Workspace => {
 		catch: (cause) =>
 			new AuditorError({ message: `Failed to list files in ${root}`, cause }),
 	});
+	const readFile = <A>(
+		p: string,
+		max: number,
+		read: (file: ReturnType<typeof Bun.file>) => Promise<A>,
+	) =>
+		Effect.tryPromise({
+			try: async () => {
+				const file = Bun.file(await safePath(p));
+				if (file.size > max)
+					throw new Error(`File too large (${file.size} bytes)`);
+				return read(file);
+			},
+			catch: (cause) =>
+				new AuditorError({ message: `Failed to read ${p}`, cause }),
+		});
 	return {
 		root,
 		absolute,
@@ -121,33 +185,22 @@ export const makeWorkspace = (rootInput: string): Workspace => {
 				const g = new Bun.Glob(pattern);
 				return all.filter((f) => g.match(f));
 			}),
-		readText: (p) =>
-			Effect.tryPromise({
-				try: async () => {
-					const file = Bun.file(absolute(p));
-					if (file.size > MAX_TEXT_BYTES)
-						throw new Error(`File too large (${file.size} bytes)`);
-					return file.text();
-				},
-				catch: (cause) =>
-					new AuditorError({ message: `Failed to read ${p}`, cause }),
-			}),
+		readText: (p) => readFile(p, MAX_TEXT_BYTES, (f) => f.text()),
 		readBytes: (p) =>
-			Effect.tryPromise({
-				try: async () =>
-					new Uint8Array(await Bun.file(absolute(p)).arrayBuffer()),
-				catch: (cause) =>
-					new AuditorError({ message: `Failed to read ${p}`, cause }),
-			}),
+			readFile(
+				p,
+				MAX_BINARY_BYTES,
+				async (f) => new Uint8Array(await f.arrayBuffer()),
+			),
 		size: (p) =>
 			Effect.tryPromise({
-				try: async () => (await stat(absolute(p))).size,
+				try: async () => (await stat(await safePath(p))).size,
 				catch: (cause) =>
 					new AuditorError({ message: `Failed to stat ${p}`, cause }),
 			}),
 		exists: (p) =>
 			Effect.promise(() =>
-				stat(absolute(p)).then(
+				safePath(p).then(
 					() => true,
 					() => false,
 				),
@@ -177,7 +230,7 @@ export interface HttpRequest {
 	/** `manual` returns 3xx responses instead of following them. */
 	readonly redirect?: "follow" | "manual";
 	readonly timeoutMs?: number;
-	/** Max body bytes to buffer (default 5 MB). */
+	/** Max body bytes to buffer; the rest is discarded (default 5 MB). */
 	readonly maxBytes?: number;
 }
 
@@ -196,6 +249,111 @@ export interface HttpResponse {
 	readonly totalMs: number;
 }
 
+/** Headers that must never follow a redirect to another origin. */
+const SENSITIVE_HEADERS = ["authorization", "cookie", "proxy-authorization"];
+const MAX_REDIRECTS = 10;
+
+/** Reads at most `max` bytes, cancelling the stream beyond that. */
+const readCapped = async (res: Response, max: number) => {
+	const chunks: Uint8Array[] = [];
+	let total = 0;
+	const reader = res.body?.getReader();
+	if (!reader) return { bytes: new Uint8Array(), total: 0 };
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		total += value.byteLength;
+		if (total > max) {
+			chunks.push(value.subarray(0, value.byteLength - (total - max)));
+			await reader.cancel();
+			break;
+		}
+		chunks.push(value);
+	}
+	return { bytes: Buffer.concat(chunks), total };
+};
+
+const httpRequest = (
+	url: string,
+	init: HttpRequest = {},
+): Effect.Effect<HttpResponse, AuditorError> =>
+	Effect.tryPromise({
+		try: async (signal) => {
+			const controller = new AbortController();
+			signal.addEventListener("abort", () => controller.abort());
+			const timer = setTimeout(
+				() => controller.abort(),
+				init.timeoutMs ?? 15_000,
+			);
+			const started = performance.now();
+			try {
+				// Redirects are followed manually so credentials supplied for the
+				// target origin are dropped when a redirect leaves that origin.
+				let current = url;
+				let headers: Record<string, string> = {
+					"user-agent": USER_AGENT,
+					...init.headers,
+				};
+				let redirected = false;
+				let res: Response;
+				for (let hop = 0; ; hop++) {
+					res = await fetch(current, {
+						method: init.method ?? "GET",
+						headers,
+						body: init.body,
+						redirect: "manual",
+						signal: controller.signal,
+					});
+					const location = res.headers.get("location");
+					if (
+						init.redirect === "manual" ||
+						res.status < 300 ||
+						res.status >= 400 ||
+						!location
+					)
+						break;
+					if (hop >= MAX_REDIRECTS) throw new Error("Too many redirects");
+					await res.body?.cancel();
+					const next = new URL(location, current);
+					if (next.protocol !== "http:" && next.protocol !== "https:")
+						throw new Error(`Refusing redirect to ${next.protocol}`);
+					if (next.origin !== new URL(current).origin) {
+						headers = Object.fromEntries(
+							Object.entries(headers).filter(
+								([k]) => !SENSITIVE_HEADERS.includes(k.toLowerCase()),
+							),
+						);
+					}
+					current = next.toString();
+					redirected = true;
+				}
+				const ttfbMs = performance.now() - started;
+				const { bytes, total } = await readCapped(
+					res,
+					init.maxBytes ?? 5 * 1024 * 1024,
+				);
+				return {
+					url: current,
+					status: res.status,
+					headers: res.headers,
+					cookies: res.headers.getSetCookie(),
+					body: new TextDecoder().decode(bytes),
+					bytes: total,
+					redirected,
+					ttfbMs,
+					totalMs: performance.now() - started,
+				};
+			} finally {
+				clearTimeout(timer);
+			}
+		},
+		catch: (cause) =>
+			new AuditorError({
+				message: `Request to ${url} failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+				cause,
+			}),
+	});
+
 export class Http extends Context.Service<
 	Http,
 	{
@@ -205,51 +363,7 @@ export class Http extends Context.Service<
 		) => Effect.Effect<HttpResponse, AuditorError>;
 	}
 >()("openaudit/Http") {
-	static readonly layer = Layer.succeed(this, {
-		request: (url, init = {}) =>
-			Effect.tryPromise({
-				try: async (signal) => {
-					const controller = new AbortController();
-					signal.addEventListener("abort", () => controller.abort());
-					const timer = setTimeout(
-						() => controller.abort(),
-						init.timeoutMs ?? 15_000,
-					);
-					const started = performance.now();
-					try {
-						const res = await fetch(url, {
-							method: init.method ?? "GET",
-							headers: { "user-agent": USER_AGENT, ...init.headers },
-							body: init.body,
-							redirect: init.redirect ?? "follow",
-							signal: controller.signal,
-						});
-						const ttfbMs = performance.now() - started;
-						const buf = new Uint8Array(await res.arrayBuffer());
-						const max = init.maxBytes ?? 5 * 1024 * 1024;
-						const body = new TextDecoder().decode(buf.subarray(0, max));
-						return {
-							url: res.url || url,
-							status: res.status,
-							headers: res.headers,
-							cookies: res.headers.getSetCookie(),
-							body,
-							bytes: buf.byteLength,
-							redirected: res.redirected,
-							ttfbMs,
-							totalMs: performance.now() - started,
-						};
-					} finally {
-						clearTimeout(timer);
-					}
-				},
-				catch: (cause) =>
-					new AuditorError({
-						message: `Request to ${url} failed: ${cause instanceof Error ? cause.message : String(cause)}`,
-						cause,
-					}),
-			}),
-	});
+	static readonly layer = Layer.succeed(this, { request: httpRequest });
 }
 
 /* -------------------------------------------------------------------------- */

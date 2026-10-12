@@ -212,6 +212,19 @@ export const runAudit = (
 		);
 		emit({ type: "target", target: info });
 
+		// User-supplied headers (often credentials) only go to the exact target
+		// origin; a prefix check would also match `https://target.com.evil.net`.
+		const targetOrigin = info.url ? new URL(info.url).origin : undefined;
+		const isTargetOrigin = (url: string) => {
+			try {
+				return (
+					targetOrigin !== undefined && new URL(url).origin === targetOrigin
+				);
+			} catch {
+				return false;
+			}
+		};
+
 		const ctx: AuditContext = {
 			target: info,
 			options,
@@ -219,10 +232,9 @@ export const runAudit = (
 			http: (url, init) =>
 				http.request(url, {
 					...init,
-					headers:
-						info.url && url.startsWith(new URL(info.url).origin)
-							? { ...options.headers, ...init?.headers }
-							: init?.headers,
+					headers: isTargetOrigin(url)
+						? { ...options.headers, ...init?.headers }
+						: init?.headers,
 				}),
 			exec,
 			log: (message) => Effect.logDebug(message),
