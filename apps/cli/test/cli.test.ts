@@ -213,6 +213,9 @@ describe("untrusted target config", () => {
 		expect(json.code).toBe(0);
 		expect(json.stderr).toContain("2 findings suppressed by");
 		expect(JSON.parse(json.stdout).summary.counts.medium).toBe(0);
+		expect(JSON.parse(json.stdout).suppressed).toEqual([
+			{ source: configPath, rules: 1, paths: 1, fingerprints: 0 },
+		]);
 
 		const bypass = await cli(
 			[

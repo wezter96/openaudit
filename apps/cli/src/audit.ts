@@ -267,8 +267,10 @@ const audit = async (
 			fingerprints: baseline,
 		},
 	]);
-	let report = applied.report;
 	const suppressed = applied.suppressed.filter((s) => suppressedTotal(s) > 0);
+	let report: Report = suppressed.length
+		? { ...applied.report, suppressed }
+		: applied.report;
 
 	if (flags.ai || opts.ai)
 		report = await attachInsights(

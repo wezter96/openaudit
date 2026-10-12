@@ -196,6 +196,16 @@ export const AiInsights = Schema.Struct({
 });
 export type AiInsights = typeof AiInsights.Type;
 
+/** Findings removed by one suppression source (config, baseline). */
+export const Suppression = Schema.Struct({
+	/** e.g. `./openaudit.config.json` or `--baseline report.json`. */
+	source: Schema.String,
+	rules: Schema.Number,
+	paths: Schema.Number,
+	fingerprints: Schema.Number,
+});
+export type Suppression = typeof Suppression.Type;
+
 export const Report = Schema.Struct({
 	schemaVersion: Schema.Literal(SCHEMA_VERSION),
 	tool: Schema.Struct({ name: Schema.String, version: Schema.String }),
@@ -206,5 +216,7 @@ export const Report = Schema.Struct({
 	summary: Summary,
 	results: Schema.Array(AuditorResult),
 	ai: Schema.optional(AiInsights),
+	/** Present when suppressions removed findings, so hidden results stay visible. */
+	suppressed: Schema.optional(Schema.Array(Suppression)),
 });
 export type Report = typeof Report.Type;
