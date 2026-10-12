@@ -63,3 +63,61 @@ export const formatDuration = (ms: number): string =>
 		: ms < 60_000
 			? `${(ms / 1000).toFixed(1)}s`
 			: `${Math.floor(ms / 60_000)}m${Math.round((ms % 60_000) / 1000)}s`;
+
+/** ESC-introduced sequences: CSI, OSC/DCS/APC/PM/SOS strings, and two-byte escapes. */
+const ESCAPE_SEQUENCE =
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the point
+	/\x1b(?:\[[0-?]*[ -/]*[@-~]|[\]PX^_][\s\S]*?(?:\x07|\x1b\\|$)|[@-Z\\-_]|[ -/]*[0-~]?)/g;
+/** 8-bit CSI sequences and C1 string introducers (OSC, DCS, ...) with their payload. */
+const C1_STRING =
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the point
+	/\x9b[0-?]*[ -/]*[@-~]|[\x90\x98\x9d\x9e\x9f][\s\S]*?(?:\x07|\x9c|$)/g;
+/** C0 (except tab/newline), DEL, C1, and bidi overrides that can disguise text. */
+const CONTROL =
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the point
+	/[\x00-\x08\x0b-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+
+/**
+ * Makes untrusted text (from audited repos and sites) safe to print: removes
+ * terminal escape sequences (colours, cursor moves, OSC 8 links, OSC 52
+ * clipboard writes), control characters and bidi overrides. Newlines become
+ * spaces unless `multiline` is set; tabs always become spaces.
+ */
+export const sanitizeText = (
+	value: unknown,
+	options: { readonly multiline?: boolean } = {},
+): string => {
+	const text = String(value)
+		.replace(ESCAPE_SEQUENCE, "")
+		.replace(C1_STRING, "")
+		.replace(/\r\n?/g, "\n")
+		.replace(/\t/g, " ")
+		.replace(CONTROL, "");
+	return options.multiline ? text : text.replace(/\n+/g, " ");
+};
+
+/** How many findings one suppression source removed from a report. */
+export interface SuppressionSummary {
+	/** Where the suppression came from, e.g. a config path or `--baseline report.json`. */
+	readonly source: string;
+	readonly rules: number;
+	readonly paths: number;
+	readonly fingerprints: number;
+}
+
+export const suppressedTotal = (s: SuppressionSummary): number =>
+	s.rules + s.paths + s.fingerprints;
+
+/** "12 findings suppressed by ./openaudit.config.json (10 by rule, 2 by path)". */
+export const suppressionLine = (s: SuppressionSummary): string => {
+	const parts = (
+		[
+			["rule", s.rules],
+			["path", s.paths],
+			["fingerprint", s.fingerprints],
+		] as const
+	)
+		.filter(([, n]) => n > 0)
+		.map(([k, n]) => `${n} by ${k}`);
+	return `${plural(suppressedTotal(s), "finding")} suppressed by ${s.source} (${parts.join(", ")})`;
+};

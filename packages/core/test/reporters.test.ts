@@ -306,3 +306,116 @@ describe("terminal", () => {
 		}
 	});
 });
+
+/** Removes CommonMark code spans: a backtick run up to the next run of equal length. */
+const stripCodeSpans = (text: string): string => {
+	let out = "";
+	let i = 0;
+	while (i < text.length) {
+		const open = /`+/g;
+		open.lastIndex = i;
+		const m = open.exec(text);
+		if (!m) break;
+		out += text.slice(i, m.index);
+		const close = new RegExp(`(?<!\`)${m[0]}(?!\`)`, "g");
+		close.lastIndex = m.index + m[0].length;
+		const end = close.exec(text);
+		if (!end) {
+			out += m[0];
+			i = m.index + m[0].length;
+			continue;
+		}
+		i = end.index + m[0].length;
+	}
+	return out + text.slice(i);
+};
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: asserting their absence
+const FOREIGN_CONTROL = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u202e]/;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: asserting their absence
+const ANSI_LIKE = /\u001b[^m]*m/g;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: asserting their absence
+const SGR = /^\u001b\[[0-9;]*m$/;
+
+describe("hostile report content", () => {
+	const ESC = "\x1b";
+	const hostile = finding({
+		ruleId: "code.secrets/evil",
+		title: `${ESC}[2J${ESC}[HAll clear ${ESC}]8;;https://evil.example${ESC}\\click${ESC}]8;;${ESC}\\`,
+		message: `ok${ESC}]52;c;cm0gLXJmIH4=${ESC}\\\u202edone\x9b31m\x07\nnext line`,
+		evidence:
+			"```\n</details>\n## :white_check_mark: No issues found\n<img src=https://beacon.example/p.gif>",
+		remediation:
+			"# Looks good\n- [x] @security-team approved ![x](https://beacon.example/i.png)",
+		location: { file: `src/${ESC}[31mred.ts`, line: 1 },
+		references: [
+			"https://ok.example/a>![b](https://beacon.example/c)",
+			"https://ok.example/docs",
+		],
+		fingerprint: "eeeeeeeeeeeeeeee",
+	});
+	const evil: Report = {
+		...report,
+		results: [
+			{
+				...results[0],
+				findings: [hostile],
+				message: `${ESC}[1Askipped`,
+				status: "error",
+			} as AuditorResult,
+		],
+	};
+
+	test("terminal output carries no foreign escape or control sequences", () => {
+		for (const verbose of [false, true]) {
+			const plain = toTerminal(evil, { color: false, verbose });
+			expect(plain).not.toMatch(FOREIGN_CONTROL);
+			expect(plain).toContain("All clear click");
+			// Our own colours are the only escapes when colour is on.
+			const coloured = toTerminal(evil, { color: true, verbose });
+			const escapes = coloured.match(ANSI_LIKE) ?? [];
+			expect(escapes.every((s) => SGR.test(s))).toBe(true);
+			expect(coloured).not.toContain("]52;");
+			expect(coloured).not.toContain("]8;;");
+		}
+	});
+
+	test("markdown cannot be spoofed", () => {
+		const full = toMarkdown(evil);
+		expect(full).not.toMatch(FOREIGN_CONTROL);
+		// Code spans render literally, so check everything outside them.
+		const text = stripCodeSpans(full);
+		// No raw HTML, images, block elements or shortcodes from finding text.
+		expect(text).not.toMatch(/(^|[^\\])<img/);
+		expect(text.replace(/<https:[^>]+>/g, "")).not.toMatch(/(^|[^\\])!\[/);
+		expect(text).not.toMatch(/^\s*#+ .*Looks good/m);
+		expect(text).not.toMatch(/^\s*## :white_check_mark:/m);
+		expect(text).not.toMatch(/(^|[^\\]):white_check_mark:/);
+		expect(text).not.toContain("@security-team");
+		expect(text.match(/<\/details>/g)).toHaveLength(1); // only our own
+		// The evidence code span outlasts the backtick run in the value.
+		expect(full).toContain("Evidence: ```` ``` </details>");
+		// URL references are normalised so they cannot close `<...>`.
+		expect(full).toContain("<https://ok.example/docs>");
+		expect(full).toContain(
+			"<https://ok.example/a%3E![b](https://beacon.example/c)>",
+		);
+	});
+
+	test("suppressions are disclosed", () => {
+		const suppressed = [
+			{ source: "openaudit.config.json", rules: 3, paths: 1, fingerprints: 0 },
+			{ source: "--baseline old.json", rules: 0, paths: 0, fingerprints: 0 },
+		];
+		const line =
+			"4 findings suppressed by openaudit.config.json (3 by rule, 1 by path)";
+		expect(toTerminal(report, { color: false, suppressed })).toContain(line);
+		expect(toMarkdown(report, { suppressed })).toContain(
+			"4 findings suppressed by openaudit.config.json \\(3 by rule, 1 by path\\)",
+		);
+		expect(toHtml(report, { suppressed })).toContain(line);
+		expect(toTerminal(report, { color: false, suppressed })).not.toContain(
+			"--baseline",
+		);
+	});
+});

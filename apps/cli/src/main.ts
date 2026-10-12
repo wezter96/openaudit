@@ -128,8 +128,9 @@ const auditParams = {
 	verbose: bool("verbose", "Terminal output lists every finding with details"),
 	config: opt(
 		Flag.String("config"),
-		"Config file (default: openaudit.config.json in the target directory)",
+		"Trusted config file. Without it, openaudit.config.json in the target is read with restrictions",
 	),
+	noConfig: bool("no-config", "Ignore openaudit.config.json in the target"),
 };
 
 type ParsedAudit = {
@@ -161,6 +162,7 @@ const toAuditFlags = (p: ParsedAudit): AuditFlags => ({
 	quiet: p.quiet,
 	verbose: p.verbose,
 	config: Option.getOrUndefined(p.config),
+	noConfig: p.noConfig,
 });
 
 const EXAMPLES = [

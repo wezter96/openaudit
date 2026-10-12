@@ -3,6 +3,7 @@ import { toHtml } from "./html";
 import { toJson } from "./json";
 import { toMarkdown } from "./markdown";
 import { toSarif } from "./sarif";
+import type { SuppressionSummary } from "./shared";
 import { toTerminal } from "./terminal";
 
 export { type HtmlOptions, toHtml } from "./html";
@@ -14,7 +15,11 @@ export {
 	escapeHtml,
 	formatDuration,
 	formatLocation,
+	type SuppressionSummary,
+	sanitizeText,
 	sortedFindings,
+	suppressedTotal,
+	suppressionLine,
 	targetLabel,
 } from "./shared";
 export { colorEnabled, type TerminalOptions, toTerminal } from "./terminal";
@@ -44,7 +49,11 @@ export const isReportFormat = (value: string): value is ReportFormat =>
 export const renderReport = (
 	report: Report,
 	format: ReportFormat,
-	options: { readonly color?: boolean; readonly verbose?: boolean } = {},
+	options: {
+		readonly color?: boolean;
+		readonly verbose?: boolean;
+		readonly suppressed?: ReadonlyArray<SuppressionSummary>;
+	} = {},
 ): string => {
 	switch (format) {
 		case "json":
@@ -52,9 +61,9 @@ export const renderReport = (
 		case "sarif":
 			return toSarif(report);
 		case "markdown":
-			return toMarkdown(report);
+			return toMarkdown(report, { suppressed: options.suppressed });
 		case "html":
-			return toHtml(report);
+			return toHtml(report, { suppressed: options.suppressed });
 		case "terminal":
 			return toTerminal(report, options);
 	}

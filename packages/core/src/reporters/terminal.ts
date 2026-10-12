@@ -3,7 +3,11 @@ import {
 	formatDuration,
 	formatLocation,
 	plural,
+	type SuppressionSummary,
+	sanitizeText,
 	sortedFindings,
+	suppressedTotal,
+	suppressionLine,
 	targetLabel,
 } from "./shared";
 
@@ -14,6 +18,8 @@ export interface TerminalOptions {
 	readonly verbose?: boolean;
 	/** Findings shown when not verbose. Defaults to 10. */
 	readonly top?: number;
+	/** Suppression counts to disclose (config ignores, baselines). */
+	readonly suppressed?: ReadonlyArray<SuppressionSummary>;
 }
 
 const CODES = {
@@ -68,11 +74,15 @@ export const toTerminal = (
 	const color = options.color ?? colorEnabled();
 	const paint = (style: Style, text: string) =>
 		color ? `${CODES[style]}${text}${CODES.reset}` : text;
+	// Every string from the report may come from a hostile repo or site.
+	const t = (value: unknown) => sanitizeText(value);
+	const block = (value: unknown) =>
+		sanitizeText(value, { multiline: true }).replace(/\n/g, "\n     ");
 	const { summary } = report;
 	const out: string[] = [];
 
 	out.push(
-		`${paint("bold", "openaudit")} ${paint("dim", report.tool.version)}  ${targetLabel(report)} ${paint("dim", `(${report.target.kinds.join(", ")})`)}`,
+		`${paint("bold", "openaudit")} ${paint("dim", t(report.tool.version))}  ${t(targetLabel(report))} ${paint("dim", `(${t(report.target.kinds.join(", "))})`)}`,
 	);
 	out.push(
 		`${paint("bold", "Score")} ${paint(GRADE_STYLE[summary.grade], `${summary.score}/100 ${summary.grade}`)}   ` +
@@ -89,7 +99,7 @@ export const toTerminal = (
 			summary.categories
 				.map(
 					(c) =>
-						`${c.category} ${paint(GRADE_STYLE[c.grade], `${c.score}${c.grade}`)}`,
+						`${t(c.category)} ${paint(GRADE_STYLE[c.grade], `${c.score}${c.grade}`)}`,
 				)
 				.join(paint("dim", "  ")),
 		);
@@ -103,17 +113,17 @@ export const toTerminal = (
 	if (listed.length) {
 		out.push("");
 		for (const f of listed) {
-			const loc = formatLocation(f.location);
+			const loc = t(formatLocation(f.location));
 			out.push(
-				`${paint(SEVERITY_STYLE[f.severity], SEVERITY_TAG[f.severity])} ${paint("bold", f.title)} ${paint("dim", f.ruleId)}`,
+				`${paint(SEVERITY_STYLE[f.severity], SEVERITY_TAG[f.severity])} ${paint("bold", t(f.title))} ${paint("dim", t(f.ruleId))}`,
 			);
 			if (loc) out.push(`     ${paint("cyan", loc)}`);
 			if (options.verbose) {
-				out.push(`     ${f.message}`);
-				if (f.evidence) out.push(`     ${paint("dim", f.evidence)}`);
+				out.push(`     ${block(f.message)}`);
+				if (f.evidence) out.push(`     ${paint("dim", block(f.evidence))}`);
 				if (f.remediation)
-					out.push(`     ${paint("green", "fix:")} ${f.remediation}`);
-				out.push(`     ${paint("dim", `fingerprint ${f.fingerprint}`)}`);
+					out.push(`     ${paint("green", "fix:")} ${block(f.remediation)}`);
+				out.push(`     ${paint("dim", `fingerprint ${t(f.fingerprint)}`)}`);
 			}
 		}
 		const hidden = findings.length - listed.length;
@@ -136,9 +146,14 @@ export const toTerminal = (
 		out.push("");
 		for (const r of problems) {
 			out.push(
-				`${paint(r.status === "error" ? "red" : "gray", r.status === "error" ? "error" : "skip ")} ${r.auditor}${r.message ? paint("dim", `: ${r.message}`) : ""}`,
+				`${paint(r.status === "error" ? "red" : "gray", r.status === "error" ? "error" : "skip ")} ${t(r.auditor)}${r.message ? paint("dim", `: ${t(r.message)}`) : ""}`,
 			);
 		}
+	}
+
+	for (const s of options.suppressed ?? []) {
+		if (suppressedTotal(s) > 0)
+			out.push("", paint("yellow", t(suppressionLine(s))));
 	}
 
 	const a = summary.auditors;

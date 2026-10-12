@@ -16,6 +16,12 @@ const TARGET_KINDS: ReadonlyArray<TargetKind> = [
 	"mobile",
 ];
 
+/** Ids come from run_audit; the pattern keeps them safe to use in file names. */
+export const reportId = z
+	.string()
+	.regex(/^[a-z0-9-]{1,64}$/, "reportId must match ^[a-z0-9-]+$")
+	.describe("Id returned by run_audit");
+
 export const severity = z.enum(SEVERITIES as [string, ...string[]]);
 export const category = z.enum(CATEGORIES as [string, ...string[]]);
 export const targetKind = z.enum(TARGET_KINDS as [string, ...string[]]);

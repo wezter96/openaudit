@@ -17,11 +17,15 @@ import {
 	runAudit,
 	SEVERITIES,
 	type Severity,
+	sanitizeText,
+	suppressedTotal,
+	suppressionLine,
 } from "@openaudit/core";
 import { Effect } from "effect";
 
-import { ConfigError, loadConfig } from "./config";
+import { CONFIG_FILE, ConfigError, loadConfig } from "./config";
 import { createProgress } from "./progress";
+import { applySuppressions } from "./suppress";
 
 /** Built-in plus agentic auditors; agentic ones only run with `--agentic`. */
 export const allAuditors = (): ReadonlyArray<Auditor> => [
@@ -54,6 +58,8 @@ export interface AuditFlags {
 	readonly quiet: boolean;
 	readonly verbose: boolean;
 	readonly config?: string;
+	/** Ignore `openaudit.config.json` in the target. */
+	readonly noConfig?: boolean;
 }
 
 export interface Io {
@@ -158,12 +164,21 @@ const audit = async (
 	io: Io,
 	auditors: ReadonlyArray<Auditor>,
 ): Promise<number> => {
-	const { config, path: configPath } = await loadConfig({
+	const {
+		config,
+		path: configPath,
+		ignored,
+	} = await loadConfig({
 		explicit: flags.config,
+		noConfig: flags.noConfig,
 		target: flags.target,
 		cwd: io.cwd,
 	});
 	const opts = config.options ?? {};
+	if (ignored.length && !flags.quiet)
+		io.stderr(
+			`openaudit: ignoring ${ignored.join(", ")} in ${configPath}: a config inside the audited target cannot enable settings that send data, cost money or add credentials. Use flags or --config <path> instead.\n`,
+		);
 
 	const formats = flags.json ? ["json"] : splitList(flags.format);
 	if (!formats.length) formats.push("terminal");
@@ -225,15 +240,11 @@ const audit = async (
 					maxPages,
 					agentic: flags.agentic || opts.agentic,
 					model: flags.model ?? opts.model,
-					headers: parseHeaders(flags.header),
+					headers: { ...opts.headers, ...parseHeaders(flags.header) },
 					settings: opts.settings,
 				},
 				selection: { only, exclude, categories },
-				suppress: {
-					rules: config.ignore?.rules,
-					paths: config.ignore?.paths,
-					fingerprints: [...(config.ignore?.fingerprints ?? []), ...baseline],
-				},
+				// Suppressions are applied afterwards so they can be counted and disclosed.
 				concurrency,
 				onEvent: progress?.onEvent,
 			}).pipe(Effect.provide(CoreLive)),
@@ -241,12 +252,25 @@ const audit = async (
 	).finally(() => progress?.stop());
 
 	if (result._tag === "Failure") {
-		io.stderr(`openaudit: ${result.failure.message}\n`);
+		io.stderr(`openaudit: ${sanitizeText(result.failure.message)}\n`);
 		return EXIT.usage;
 	}
-	let report = result.success;
+	const applied = applySuppressions(result.success, [
+		{
+			source: configPath ?? CONFIG_FILE,
+			rules: config.ignore?.rules,
+			paths: config.ignore?.paths,
+			fingerprints: config.ignore?.fingerprints,
+		},
+		{
+			source: `--baseline ${flags.baseline}`,
+			fingerprints: baseline,
+		},
+	]);
+	let report = applied.report;
+	const suppressed = applied.suppressed.filter((s) => suppressedTotal(s) > 0);
 
-	if (flags.ai)
+	if (flags.ai || opts.ai)
 		report = await attachInsights(
 			report,
 			flags.model ?? opts.model,
@@ -261,7 +285,11 @@ const audit = async (
 			const file = join(dir, `openaudit-report.${FORMAT_EXTENSIONS[format]}`);
 			await Bun.write(
 				file,
-				renderReport(report, format, { color: false, verbose: true }),
+				renderReport(report, format, {
+					color: false,
+					verbose: true,
+					suppressed,
+				}),
 			);
 			if (!flags.quiet && !machine) io.stderr(`Wrote ${file}\n`);
 		}
@@ -271,6 +299,7 @@ const audit = async (
 				renderReport(report, "terminal", {
 					color: colorEnabled() && process.stdout.isTTY === true,
 					verbose: flags.verbose,
+					suppressed,
 				}),
 			);
 	} else {
@@ -279,9 +308,19 @@ const audit = async (
 			renderReport(report, format, {
 				color: colorEnabled() && process.stdout.isTTY === true,
 				verbose: flags.verbose,
+				suppressed,
 			}),
 		);
 	}
+	// JSON and SARIF have no place for the notice, so it goes to stderr.
+	const disclosedOnStdout =
+		!machine &&
+		(flags.out
+			? !flags.quiet
+			: ["terminal", "markdown", "html"].includes(uniqueFormats[0] ?? ""));
+	if (!disclosedOnStdout && !flags.quiet)
+		for (const s of suppressed)
+			io.stderr(`openaudit: ${sanitizeText(suppressionLine(s))}\n`);
 
 	if (failOn) {
 		const breached = report.results
@@ -322,7 +361,7 @@ const attachInsights = async (
 	if (res._tag === "Failure") {
 		if (!quiet)
 			io.stderr(
-				`openaudit: AI insights failed, continuing without them: ${res.failure.message}\n`,
+				`openaudit: AI insights failed, continuing without them: ${sanitizeText(res.failure.message)}\n`,
 			);
 		return report;
 	}

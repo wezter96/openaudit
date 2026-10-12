@@ -5,7 +5,11 @@ import {
 	isWebUrl,
 	plural,
 	SEVERITY_LABEL,
+	type SuppressionSummary,
+	sanitizeText,
 	sortedFindings,
+	suppressedTotal,
+	suppressionLine,
 	targetLabel,
 } from "./shared";
 
@@ -14,20 +18,51 @@ export interface MarkdownOptions {
 	readonly maxFindings?: number;
 	/** Heading level of the title (1–4). Defaults to 2, which suits PR comments. */
 	readonly headingLevel?: number;
+	/** Suppression counts to disclose (config ignores, baselines). */
+	readonly suppressed?: ReadonlyArray<SuppressionSummary>;
 }
 
-/** Escapes text so it renders literally inside a table cell or list item. */
-const md = (text: string): string =>
-	text
-		.replace(/\r?\n+/g, " ")
-		.replace(/([\\`*_[\]|<>])/g, "\\$1")
-		.trim();
+/**
+ * Renders untrusted text (from audited repos and sites) literally on one line,
+ * so it cannot inject HTML (`<img>` beacons, `<details>`), links, images,
+ * emphasis, table cells, emoji shortcodes (fake ":white_check_mark: passed")
+ * or @mentions into a PR comment.
+ */
+const md = (text: unknown): string =>
+	sanitizeText(text)
+		.trim()
+		.replace(/([\\`*_{}[\]()<>|~&!])/g, "\\$1")
+		.replace(/:(?=[\w+-]+:)/g, "\\:")
+		.replace(/@(?=\w)/g, "@\u2060")
+		// Block markers would start a heading, quote or list when the text leads a line.
+		.replace(/^([#+=-])/, "\\$1")
+		.replace(/^(\d+)([.)])/, "$1\\$2");
 
-/** Inline code that survives backticks in the value. */
-const code = (text: string): string => {
-	const clean = text.replace(/\r?\n+/g, " ");
-	const fence = clean.includes("`") ? "``" : "`";
-	return `${fence}${clean.includes("`") ? ` ${clean} ` : clean}${fence}`;
+/**
+ * Inline code for untrusted text. The fence is longer than any backtick run in
+ * the value, so the value cannot close it; inside code spans HTML is inert.
+ */
+const code = (text: unknown, options: { readonly table?: boolean } = {}) => {
+	let clean = sanitizeText(text).trim() || " ";
+	if (options.table) clean = clean.replaceAll("|", "\\|");
+	const longest = Math.max(
+		0,
+		...(clean.match(/`+/g) ?? []).map((run) => run.length),
+	);
+	const fence = "`".repeat(longest + 1);
+	const pad = clean.startsWith("`") || clean.endsWith("`") ? " " : "";
+	return `${fence}${pad}${clean}${pad}${fence}`;
+};
+
+/** A normalised http(s) URL that cannot break out of `<...>`, or undefined. */
+const safeUrl = (value: string): string | undefined => {
+	if (!isWebUrl(value)) return undefined;
+	try {
+		const href = new URL(value).href;
+		return /^https?:\/\/[^\s<>`"]+$/.test(href) ? href : undefined;
+	} catch {
+		return undefined;
+	}
 };
 
 const findingLines = (f: Finding): string[] => {
@@ -36,7 +71,7 @@ const findingLines = (f: Finding): string[] => {
 	const lines = [head, `  ${md(f.message)}`];
 	if (f.evidence) lines.push(`  Evidence: ${code(f.evidence)}`);
 	if (f.remediation) lines.push(`  **Fix:** ${md(f.remediation)}`);
-	const refs = (f.references ?? []).filter(isWebUrl);
+	const refs = (f.references ?? []).flatMap((r) => safeUrl(r) ?? []);
 	if (refs.length)
 		lines.push(`  Refs: ${refs.map((r) => `<${r}>`).join(", ")}`);
 	return lines;
@@ -64,6 +99,12 @@ export const toMarkdown = (
 		"",
 	);
 
+	const suppressed = (options.suppressed ?? []).filter(
+		(s) => suppressedTotal(s) > 0,
+	);
+	for (const s of suppressed) out.push(`> **Note:** ${md(suppressionLine(s))}`);
+	if (suppressed.length) out.push("");
+
 	if (summary.categories.length) {
 		out.push(
 			"| Category | Score | Grade | Critical | High | Medium | Low | Info |",
@@ -72,7 +113,7 @@ export const toMarkdown = (
 		for (const c of summary.categories) {
 			const n = c.counts;
 			out.push(
-				`| ${c.category} | ${c.score} | ${c.grade} | ${n.critical} | ${n.high} | ${n.medium} | ${n.low} | ${n.info} |`,
+				`| ${md(c.category)} | ${c.score} | ${md(c.grade)} | ${n.critical} | ${n.high} | ${n.medium} | ${n.low} | ${n.info} |`,
 			);
 		}
 		out.push("");
@@ -135,7 +176,7 @@ export const toMarkdown = (
 		"| --- | --- | ---: | ---: | --- |",
 		...report.results.map(
 			(r) =>
-				`| ${code(r.auditor)} | ${r.status} | ${r.findings.length} | ${formatDuration(r.durationMs)} | ${md(r.message ?? "")} |`,
+				`| ${code(r.auditor, { table: true })} | ${md(r.status)} | ${r.findings.length} | ${formatDuration(r.durationMs)} | ${md(r.message ?? "")} |`,
 		),
 		"",
 		"</details>",

@@ -31,7 +31,8 @@ openaudit [target] [flags]          # same as: openaudit audit [target]
 | `-H, --header "Name: value"` | Extra header for the target origin only, e.g. an auth cookie for staging. Repeatable. |
 | `--agentic`, `--model <id>` | Run the LLM-driven auditors. Needs `ANTHROPIC_API_KEY` or Claude Code auth. |
 | `--ai` | Attach an AI-prioritised summary to the report. If this fails, openaudit prints a warning and continues. |
-| `--concurrency <n>`, `-q/--quiet`, `--verbose`, `--config <path>` | |
+| `--config <path>`, `--no-config` | Use a trusted config file, or ignore the target's `openaudit.config.json`. |
+| `--concurrency <n>`, `-q/--quiet`, `--verbose` | |
 
 Other commands:
 
@@ -55,7 +56,9 @@ An auditor that errors or is skipped does not change the exit code. Its status a
 
 ### Configuration
 
-`openaudit init` writes `openaudit.config.json`. It is read from the target directory, or from the path given with `--config`. Flags on the command line take precedence.
+`openaudit init` writes `openaudit.config.json`. Flags on the command line take precedence over it.
+
+A config found in the audited target is written by whoever controls the target, so it is only partly trusted. From there, openaudit honours `only`, `exclude`, `categories`, `failOn`, `ignore` and `options.maxPages`. Settings that send data, cost money or add credentials (`options.agentic`, `ai`, `model`, `headers`, `settings`, `browser`, ...) are ignored with a warning. Those settings are accepted only from flags or from a file passed explicitly with `--config <path>`. Every report states how many findings each config or baseline suppressed. Use `--no-config` to ignore the target's config entirely.
 
 ```json
 {

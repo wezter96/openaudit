@@ -29,11 +29,20 @@ export const Config = Schema.Struct({
 	),
 	options: Schema.optional(
 		Schema.Struct({
+			/*
+			 * Only `maxPages` is honoured from a config found in the target. The
+			 * rest sends data, spends money or widens access, so it is read only
+			 * from an explicit `--config <path>` (see `untrustedKeys`).
+			 */
 			offline: Schema.optional(Schema.Boolean),
 			browser: Schema.optional(Schema.Boolean),
 			maxPages: Schema.optional(Schema.Number),
 			agentic: Schema.optional(Schema.Boolean),
+			/** Attach AI insights (`--ai`). */
+			ai: Schema.optional(Schema.Boolean),
 			model: Schema.optional(Schema.String),
+			/** Extra headers sent to URL targets (`--header`). */
+			headers: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 			concurrency: Schema.optional(Schema.Number),
 			/** Per-auditor settings keyed by auditor id. */
 			settings: Schema.optional(
@@ -90,29 +99,70 @@ export const configDirFor = async (target: string, cwd: string) => {
 	return stat.isDirectory() ? abs : dirname(abs);
 };
 
+export interface LoadedConfig {
+	readonly config: Config;
+	/** File the config came from, if any. */
+	readonly path?: string;
+	/** True for `--config <path>`; false for a config found in the target. */
+	readonly trusted: boolean;
+	/** Keys present in an untrusted config that were ignored. */
+	readonly ignored: ReadonlyArray<string>;
+}
+
 /**
- * Loads `--config <path>` (must exist) or `openaudit.config.json` next to the
- * target (optional). Returns the config and the path it came from.
+ * A config inside the audited target is written by whoever controls the
+ * target. It may narrow the audit and suppress findings (both disclosed in the
+ * output), but nothing that sends data, costs money or adds credentials.
+ */
+export const restrictUntrusted = (
+	config: Config,
+): { config: Config; ignored: string[] } => {
+	const { options, $schema: _, ...rest } = config;
+	const ignored = Object.keys(options ?? {})
+		.filter((k) => k !== "maxPages")
+		.map((k) => `options.${k}`);
+	return {
+		config: {
+			...rest,
+			...(options?.maxPages !== undefined
+				? { options: { maxPages: options.maxPages } }
+				: {}),
+		},
+		ignored,
+	};
+};
+
+/**
+ * Loads `--config <path>` (must exist, fully trusted) or, unless `noConfig`,
+ * `openaudit.config.json` next to the target (optional, restricted).
  */
 export const loadConfig = async (options: {
 	readonly explicit?: string;
+	readonly noConfig?: boolean;
 	readonly target: string;
 	readonly cwd: string;
-}): Promise<{ config: Config; path?: string }> => {
+}): Promise<LoadedConfig> => {
 	if (options.explicit) {
 		const path = resolve(options.cwd, options.explicit);
 		const file = Bun.file(path);
 		if (!(await file.exists()))
 			throw new ConfigError({ message: `Config file not found: ${path}` });
-		return { config: parseConfig(await file.text(), path), path };
+		return {
+			config: parseConfig(await file.text(), path),
+			path,
+			trusted: true,
+			ignored: [],
+		};
 	}
+	if (options.noConfig) return { config: {}, trusted: true, ignored: [] };
 	const path = join(
 		await configDirFor(options.target, options.cwd),
 		CONFIG_FILE,
 	);
 	const file = Bun.file(path);
-	if (!(await file.exists())) return { config: {} };
-	return { config: parseConfig(await file.text(), path), path };
+	if (!(await file.exists())) return { config: {}, trusted: true, ignored: [] };
+	const restricted = restrictUntrusted(parseConfig(await file.text(), path));
+	return { ...restricted, path, trusted: false };
 };
 
 /** JSON Schema of the config file, for editors and agents. */

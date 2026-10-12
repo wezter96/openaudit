@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Report } from "@openaudit/core";
@@ -147,6 +147,115 @@ describe("openaudit init + config", () => {
 		expect(invalid.code).toBe(2);
 		expect(invalid.stderr).toContain("openaudit.config.json is invalid");
 		await rm(project, { recursive: true, force: true });
+	});
+});
+
+describe("untrusted target config", () => {
+	const project = async (config: object) => {
+		const root = await mkdtemp(join(tmpdir(), "openaudit-trust-"));
+		await writeFile(join(root, "package.json"), "{}");
+		await writeFile(
+			join(root, "openaudit.config.json"),
+			JSON.stringify(config),
+		);
+		return root;
+	};
+
+	test("ignores settings that send data or cost money, with a warning", async () => {
+		const root = await project({
+			only: ["code.hygiene"],
+			options: {
+				agentic: true,
+				ai: true,
+				model: "expensive-model",
+				browser: true,
+				headers: { Authorization: "Bearer stolen" },
+				settings: { "code.hygiene": { x: 1 } },
+				maxPages: 3,
+			},
+		});
+		const res = await cli(["--json"], root);
+		expect(res.code).toBe(0);
+		expect(res.stderr).toContain(
+			"ignoring options.browser, options.agentic, options.ai, options.model, options.headers, options.settings",
+		);
+		expect(res.stderr).not.toContain("maxPages");
+		// options.ai was not honoured: no attempt to produce AI insights.
+		expect(res.stderr).not.toMatch(/AI insights|--ai/);
+		expect(JSON.parse(res.stdout).ai).toBeUndefined();
+
+		// The same file passed explicitly is trusted.
+		const trusted = await cli(
+			["--json", "--config", join(root, "openaudit.config.json")],
+			root,
+		);
+		expect(trusted.stderr).not.toContain("ignoring");
+		expect(trusted.stderr).toMatch(/AI insights|--ai/);
+		await rm(root, { recursive: true, force: true });
+	});
+
+	test("discloses suppressions and --no-config bypasses them", async () => {
+		const root = await project({
+			only: ["code.hygiene"],
+			ignore: {
+				rules: ["code.hygiene/lockfile-missing"],
+				paths: [".gitignore"],
+			},
+		});
+		const configPath = join(await realpath(root), "openaudit.config.json");
+		const terminal = await cli([], root);
+		expect(terminal.stdout).toContain(
+			`2 findings suppressed by ${configPath} (1 by rule, 1 by path)`,
+		);
+		const markdown = await cli(["-f", "markdown"], root);
+		expect(markdown.stdout).toContain("2 findings suppressed by");
+		const json = await cli(["--json", "--fail-on", "medium"], root);
+		expect(json.code).toBe(0);
+		expect(json.stderr).toContain("2 findings suppressed by");
+		expect(JSON.parse(json.stdout).summary.counts.medium).toBe(0);
+
+		const bypass = await cli(
+			[
+				"--json",
+				"--no-config",
+				"--only",
+				"code.hygiene",
+				"--fail-on",
+				"medium",
+			],
+			root,
+		);
+		expect(bypass.code).toBe(1);
+		expect(bypass.stderr).toBe("");
+		await rm(root, { recursive: true, force: true });
+	});
+});
+
+describe("progress output", () => {
+	test("strips terminal escapes from auditor messages", async () => {
+		const { createProgress } = await import("../src/progress");
+		let out = "";
+		const p = createProgress({ color: false, write: (t) => (out += t) });
+		p.onEvent({
+			type: "finish",
+			result: {
+				auditor: "code.x\x1b]52;c;ZXZpbA==\x07",
+				title: "x",
+				engine: "builtin",
+				categories: ["security"],
+				status: "skipped",
+				message: "tool missing\x1b[2J\x1b]8;;https://evil\x07click\x9b1A",
+				durationMs: 1,
+				findings: [],
+			},
+		});
+		p.stop();
+		// Only the progress renderer's own line control remains.
+		const foreign = out.replaceAll("\r\x1b[K", "");
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: asserting their absence
+		const control = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/;
+		expect(foreign).not.toMatch(control);
+		expect(foreign).toContain("code.x skipped: tool missingclick");
 	});
 });
 

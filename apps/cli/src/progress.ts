@@ -1,4 +1,4 @@
-import type { AuditEvent } from "@openaudit/core";
+import { type AuditEvent, sanitizeText } from "@openaudit/core";
 
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -22,7 +22,7 @@ export const createProgress = (options: {
 
 	const status = () => {
 		if (!running.size) return;
-		const names = [...running].slice(0, 3).join(", ");
+		const names = sanitizeText([...running].slice(0, 3).join(", "));
 		const more = running.size > 3 ? ` +${running.size - 3}` : "";
 		write(
 			`\r\x1b[K${paint(c, "36", FRAMES[frame++ % FRAMES.length] ?? "")} ${paint(c, "2", `[${done} done] ${names}${more}`)}`,
@@ -33,7 +33,7 @@ export const createProgress = (options: {
 		switch (event.type) {
 			case "target":
 				write(
-					`${paint(c, "2", `Auditing ${event.target.input} (${event.target.kinds.join(", ")})`)}\n`,
+					`${paint(c, "2", sanitizeText(`Auditing ${event.target.input} (${event.target.kinds.join(", ")})`))}\n`,
 				);
 				timer ??= setInterval(status, 80);
 				break;
@@ -53,13 +53,15 @@ export const createProgress = (options: {
 							: r.status === "skipped"
 								? paint(c, "2", "–")
 								: paint(c, "31", "!");
-				const raw =
+				// Skip reasons and errors can quote target content: strip escapes.
+				const raw = sanitizeText(
 					r.status === "skipped" || r.status === "error"
 						? `${r.status}${r.message ? `: ${r.message}` : ""}`
-						: `${r.findings.length} finding${r.findings.length === 1 ? "" : "s"}`;
+						: `${r.findings.length} finding${r.findings.length === 1 ? "" : "s"}`,
+				);
 				const detail = raw.length > 100 ? `${raw.slice(0, 99)}…` : raw;
 				write(
-					`\r\x1b[K${mark} ${r.auditor} ${paint(c, "2", `${detail} · ${r.durationMs}ms`)}\n`,
+					`\r\x1b[K${mark} ${sanitizeText(r.auditor)} ${paint(c, "2", `${detail} · ${r.durationMs}ms`)}\n`,
 				);
 				status();
 				break;

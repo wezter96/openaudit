@@ -25,7 +25,7 @@ export const countsText = (counts: Report["summary"]["counts"]): string => {
 export const reportSummaryText = (
 	report: Report,
 	reportId: string,
-	options: { readonly maxFindings?: number; readonly reportPath?: string } = {},
+	options: { readonly maxFindings?: number; readonly saveNote?: string } = {},
 ): string => {
 	const max = options.maxFindings ?? 50;
 	const { summary } = report;
@@ -39,7 +39,7 @@ export const reportSummaryText = (
 		lines.push(
 			`Categories: ${summary.categories.map((c) => `${c.category} ${c.score} ${c.grade}`).join(" | ")}`,
 		);
-	if (options.reportPath) lines.push(`Saved: ${options.reportPath}`);
+	if (options.saveNote) lines.push(options.saveNote);
 	if (findings.length) {
 		lines.push(
 			"",

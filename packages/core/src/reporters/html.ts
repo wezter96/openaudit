@@ -7,13 +7,18 @@ import {
 	isWebUrl,
 	plural,
 	SEVERITY_LABEL,
+	type SuppressionSummary,
 	sortedFindings,
+	suppressedTotal,
+	suppressionLine,
 	targetLabel,
 } from "./shared";
 
 export interface HtmlOptions {
 	/** Overrides the document title. */
 	readonly title?: string;
+	/** Suppression counts to disclose (config ignores, baselines). */
+	readonly suppressed?: ReadonlyArray<SuppressionSummary>;
 }
 
 /*
@@ -280,6 +285,13 @@ ${scoreRing(summary.score, summary.grade)}
 <main class="wrap">
 <section aria-labelledby="summary-h">
 <h2 id="summary-h">Summary</h2>
+${(options.suppressed ?? [])
+	.filter((s) => suppressedTotal(s) > 0)
+	.map(
+		(s) =>
+			`<p class="small"><strong>Note:</strong> ${e(suppressionLine(s))}</p>`,
+	)
+	.join("\n")}
 <ul class="chips" aria-label="Findings by severity">${chips}</ul>
 ${cards ? `<ul class="cards" aria-label="Scores by category">${cards}</ul>` : `<p class="small">No categories were examined.</p>`}
 </section>

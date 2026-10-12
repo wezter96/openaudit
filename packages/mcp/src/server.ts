@@ -1,4 +1,4 @@
-import { realpath } from "node:fs/promises";
+import { mkdtemp, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import {
@@ -34,9 +34,11 @@ import { z } from "zod";
 import {
 	breaches,
 	diffReports,
+	isReportId,
 	mergeAgentFindings,
 	persist,
 	ReportStore,
+	saveNote,
 } from "./reports";
 import * as S from "./schemas";
 import { countsText, findingLine, reportSummaryText } from "./text";
@@ -198,6 +200,7 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 	);
 
 	const getReport = (id: string) => {
+		if (!isReportId(id)) throw new Error("reportId must match ^[a-z0-9-]+$");
 		const report = store.get(id);
 		if (!report)
 			throw new Error(
@@ -337,8 +340,12 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 				concurrency: z.number().int().min(1).max(32).optional(),
 			},
 			outputSchema: {
-				reportId: z.string(),
+				reportId: S.reportId,
 				reportPath: z.string().optional(),
+				notSaved: z
+					.string()
+					.optional()
+					.describe("Why the report is kept in memory only"),
 				gatePassed: z.boolean(),
 				failOn: S.severity.optional(),
 				summary: S.summary,
@@ -408,10 +415,13 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 			if (!res.ok) return errorResult(res.error);
 			const report = res.value;
 			const reportId = ReportStore.newId();
-			const reportPath = await store.put(reportId, report);
+			const saved = await store.put(reportId, report);
+			const reportPath = saved?.saved ? saved.path : undefined;
 			const failOn = args.failOn as Severity | undefined;
 			const gatePassed = failOn ? !breaches(report, failOn) : true;
-			let text = reportSummaryText(report, reportId, { reportPath });
+			let text = reportSummaryText(report, reportId, {
+				saveNote: saveNote(saved),
+			});
 			if (failOn)
 				text += `\n\nGate (fail on ${failOn}): ${gatePassed ? "PASSED" : "FAILED"}`;
 			const books = playbooks.filter((p) =>
@@ -422,6 +432,7 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 			return textResult(text, {
 				reportId,
 				...(reportPath ? { reportPath } : {}),
+				...(saved && !saved.saved ? { notSaved: saved.reason } : {}),
 				gatePassed,
 				...(failOn ? { failOn } : {}),
 				summary: report.summary,
@@ -437,13 +448,13 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 			description:
 				"Render a stored report as json, markdown (PR comments), sarif (code scanning) or html. HTML is written to a file and its path returned.",
 			inputSchema: {
-				reportId: z.string(),
+				reportId: S.reportId,
 				format: z
 					.enum(["json", "markdown", "sarif", "html"])
 					.default("markdown"),
 			},
 			outputSchema: {
-				reportId: z.string(),
+				reportId: S.reportId,
 				format: z.string(),
 				content: z.string().optional(),
 				path: z.string().optional(),
@@ -454,11 +465,15 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 			const report = getReport(reportId);
 			if (format === "html") {
 				const html = toHtml(report);
-				const path =
-					(await persist(reportId, report, "html", html).catch(
-						() => undefined,
-					)) ?? join(tmpdir(), `openaudit-${reportId}.html`);
-				if (!(await Bun.file(path).exists())) await Bun.write(path, html);
+				const saved = await persist(reportId, report, "html", html);
+				let path: string;
+				if (saved.saved) path = saved.path;
+				else {
+					// A private, freshly created directory: nothing to follow or race.
+					const dir = await mkdtemp(join(tmpdir(), "openaudit-"));
+					path = join(dir, `${reportId}.html`);
+					await writeFile(path, html, { flag: "wx", mode: 0o600 });
+				}
 				return textResult(`HTML report written to ${path}`, {
 					reportId,
 					format,
@@ -481,7 +496,7 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 			title: "Get finding",
 			description:
 				"Full detail for one finding (by reportId + fingerprint): message, evidence, remediation, references, and ±5 lines of source when it points at a file.",
-			inputSchema: { reportId: z.string(), fingerprint: z.string() },
+			inputSchema: { reportId: S.reportId, fingerprint: z.string() },
 			outputSchema: {
 				finding: S.finding,
 				source: z
@@ -545,8 +560,8 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 			description:
 				"Diff two reports by finding fingerprint: new (in head only), fixed (in base only) and unchanged. Use after fixing issues to verify the fix and catch regressions.",
 			inputSchema: {
-				baseReportId: z.string().describe("Earlier report"),
-				headReportId: z.string().describe("Later report"),
+				baseReportId: S.reportId.describe("Earlier report"),
+				headReportId: S.reportId.describe("Later report"),
 			},
 			outputSchema: {
 				new: z.array(S.finding),
@@ -631,7 +646,7 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 			inputSchema: {
 				playbookId: z.string(),
 				target: z.string().optional(),
-				reportId: z.string().optional(),
+				reportId: S.reportId.optional(),
 			},
 			outputSchema: {
 				playbook: S.playbookInfo.extend({
@@ -680,7 +695,7 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 				"Merge findings you produced for a playbook into a report (as an agentic auditor result named after the playbook) and get the recomputed score. Pass reportId from run_audit, or a target to start a new report. Resubmitting the same finding is idempotent.",
 			inputSchema: {
 				playbookId: z.string(),
-				reportId: z.string().optional(),
+				reportId: S.reportId.optional(),
 				target: z
 					.string()
 					.optional()
@@ -688,8 +703,9 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 				findings: z.array(S.findingInput),
 			},
 			outputSchema: {
-				reportId: z.string(),
+				reportId: S.reportId,
 				reportPath: z.string().optional(),
+				notSaved: z.string().optional(),
 				accepted: z.number(),
 				fingerprints: z.array(z.string()),
 				summary: S.summary,
@@ -723,16 +739,20 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 				p,
 				findings as ReadonlyArray<FindingInput>,
 			);
-			const reportPath = await store.put(id, report);
+			const saved = await store.put(id, report);
+			const reportPath = saved?.saved ? saved.path : undefined;
+			const note = saveNote(saved);
 			return textResult(
 				[
 					`Merged ${added.length} finding(s) from ${p.id} into report ${id}.`,
+					...(note ? [note] : []),
 					`Score: ${report.summary.score}/100 (${report.summary.grade}) | ${countsText(report.summary.counts)}`,
 					...added.map(findingLine),
 				].join("\n"),
 				{
 					reportId: id,
 					...(reportPath ? { reportPath } : {}),
+					...(saved && !saved.saved ? { notSaved: saved.reason } : {}),
 					accepted: added.length,
 					fingerprints: added.map((f) => f.fingerprint),
 					summary: report.summary,
@@ -781,7 +801,7 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 				description: p.summary,
 				argsSchema: {
 					target: z.string().optional(),
-					reportId: z.string().optional(),
+					reportId: S.reportId.optional(),
 				},
 			},
 			({ target, reportId }) => ({
