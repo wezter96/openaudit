@@ -1,93 +1,88 @@
 # openaudit
 
-This project was created with [Better-T-Stack](https://github.com/AmanVarshney01/create-better-t-stack), a modern TypeScript stack that combines React, TanStack Start, Hono, ORPC, and more.
+Audit everything you ship (code, sites, running apps, containers, infrastructure and mobile builds) from your terminal or your AI agent.
 
-## Features
+openaudit runs 23 built-in auditors, wraps 8 established scanners when they're installed, and covers the judgment-heavy work (authorization review, keyboard and screen-reader journeys, privacy data flows and more) with 10 **playbooks** that AI agents execute. Everything lands in one scored report: terminal, JSON, SARIF, Markdown or a self-contained HTML page.
 
-- **TypeScript** - For type safety and improved developer experience
-- **TanStack Start** - SSR framework with TanStack Router
-- **TailwindCSS** - Utility-first CSS for rapid UI development
-- **Shared UI package** - shadcn/ui primitives live in `packages/ui`
-- **Hono** - Lightweight, performant server framework
-- **oRPC** - End-to-end type-safe APIs with OpenAPI integration
-- **Bun** - Runtime environment
-- **Biome** - Linting and formatting
-- **Turborepo** - Optimized monorepo build system
+```bash
+bunx openaudit .                          # a codebase
+bunx openaudit https://example.com        # a live site (add --browser for Playwright + axe-core)
+bunx openaudit ./app-release.apk          # a mobile build (.apk, .aab, .ipa)
+bunx openaudit image:nginx:1.27           # a container image
+```
 
-## Getting Started
+## What it checks
 
-First, install the dependencies:
+| Target | Built-in auditors | Wrapped tools (used when installed) |
+|---|---|---|
+| Codebase | secrets, static security (SAST), vulnerable dependencies (OSV.dev), accessibility, performance, quality, repo hygiene | gitleaks, Semgrep, osv-scanner, Trivy |
+| URL | security headers, TLS, SEO, accessibility, performance, exposed files, privacy and trackers | Lighthouse |
+| Running web app (`--browser`) | axe-core in Chromium, console errors, failed and mixed-content requests, Core Web Vitals | |
+| Containers | Dockerfile, Compose, image (root user, age, size, secrets) | Trivy, hadolint |
+| Infrastructure as code | GitHub Actions, Kubernetes, Terraform | Checkov |
+| Mobile | Android manifest (incl. binary AXML in APKs), iOS Info.plist (incl. binary plists in IPAs), embedded secrets | |
+
+Findings are grouped into security, accessibility, performance, SEO, privacy, best practices, reliability, maintainability, supply chain and compliance. Each category gets a 0–100 score and a grade. `bunx openaudit list` shows every auditor and playbook, and `bunx openaudit doctor` shows which optional tools are available.
+
+## With AI agents
+
+Some audits need judgment rather than patterns. openaudit is built so agents can drive it end to end:
+
+- **MCP server.** `claude mcp add openaudit -- bunx openaudit mcp` (or the equivalent `mcp.json` in Cursor or VS Code) gives an agent `run_audit`, `get_finding`, `compare_reports` and more, plus the playbook tools `list_playbooks`, `get_playbook` and `submit_findings`. Your agent does the review with its own tools, and its findings merge into the same scored report. No extra API key is needed.
+- **Headless agentic auditors.** `openaudit . --agentic` runs the playbooks through the Claude Agent SDK. The agent gets read-only tools, confined to the project and the target origin. It uses `ANTHROPIC_API_KEY` or an existing Claude Code login.
+- **AI triage.** `--ai` turns the findings into a prioritised fix plan. Only finding metadata is sent, never file contents.
+- **Agent mode CLI.** `--json` prints a single JSON report to stdout, and `openaudit schema` gives its JSON Schema.
+- **Skill.** [`skills/openaudit/SKILL.md`](skills/openaudit/SKILL.md) teaches an agent the loop: baseline, triage, playbooks, fix, then verify with `compare_reports`.
+
+Details are in [`apps/cli/README.md`](apps/cli/README.md) (CLI, CI, MCP setup) and [`packages/agent/README.md`](packages/agent/README.md) (playbooks, data handling).
+
+## In CI
+
+```yaml
+- run: bunx openaudit . --format sarif,markdown --out openaudit-report --fail-on high
+- uses: github/codeql-action/upload-sarif@v4
+  with:
+    sarif_file: openaudit-report/openaudit-report.sarif
+```
+
+`--fail-on <severity>` sets the exit code. `--baseline previous.json` reports only new findings, and `openaudit.config.json` (created by `openaudit init`) holds suppressions. This repository audits itself in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+## Safety
+
+openaudit treats every target as hostile:
+- **Files:** reads are confined to the project root and never follow symlinks out of it.
+- **HTTP:** user-supplied headers go only to the exact target origin, and credentials are stripped on cross-origin redirects.
+- **Agents:** agents have no shell, and the browser is held to the target origin at the network layer.
+- **Hosted URL-audit API:** connections are pinned to DNS-validated public IPs.
+- **Evidence:** secrets in evidence are redacted.
+
+URL auditors send only low-volume GET/HEAD requests. **Only audit systems you own or are authorised to test.** Report vulnerabilities via [SECURITY.md](SECURITY.md).
+
+## Repository layout
+
+| Path | What |
+|---|---|
+| `packages/core` | Report model (the public contract), engine, target detection, reporters |
+| `packages/auditors` | Built-in and external-tool auditors: `codebase`, `web`, `infra`, `mobile` |
+| `packages/agent` | Playbooks, agentic auditors (Claude Agent SDK), AI insights |
+| `packages/mcp` | MCP server |
+| `apps/cli` | The `openaudit` binary |
+| `apps/server`, `packages/api` | Hono + oRPC HTTP API (`/api-reference` for OpenAPI docs) |
+| `apps/web` | Website: landing page, live URL audit, report viewer, docs |
+
+## Development
 
 ```bash
 bun install
+bun run test          # all packages
+bun run check-types
+bun run check         # Biome
+bun run audit -- .    # run the CLI from source
+bun run dev           # web on :3001, API on :3000
 ```
 
-Then, run the development server:
+Contributor conventions (auditor contract, Effect 4 notes) are in [AGENTS.md](AGENTS.md).
 
-```bash
-bun run dev
-```
+## License
 
-Open [http://localhost:3001](http://localhost:3001) in your browser to see the web application.
-The API is running at [http://localhost:3000](http://localhost:3000).
-
-## UI Customization
-
-React web apps in this stack share shadcn/ui primitives through `packages/ui`.
-
-- Change design tokens and global styles in `packages/ui/src/styles/globals.css`
-- Update shared primitives in `packages/ui/src/components/*`
-- Adjust shadcn aliases or style config in `packages/ui/components.json` and `apps/web/components.json`
-
-### Add more shared components
-
-Run this from the project root to add more primitives to the shared UI package:
-
-```bash
-npx shadcn@latest add accordion dialog popover sheet table -c packages/ui
-```
-
-Import shared components like this:
-
-```tsx
-import { Button } from "@openaudit/ui/components/button";
-```
-
-### Add app-specific blocks
-
-If you want to add app-specific blocks instead of shared primitives, run the shadcn CLI from `apps/web`.
-
-## Environment Configuration
-
-Each app owns its environment schema in `.env.schema`. Varlock generates `src/env.ts` during installation; run `bun run env:generate` after changing a schema. Commit schemas, and keep secrets in ignored env files or your deployment platform.
-
-Import the generated `ENV` accessor in application code. Shared database and auth packages receive configuration or initialized clients from the application. See [Varlock's monorepo guide](https://varlock.dev/guides/monorepos/).
-
-Bun's automatic env loading is disabled in `bunfig.toml`; the framework integration or server bootstrap loads Varlock. Node deployments must include Varlock and its dependencies alongside the app schema.
-
-Run standalone Node/Bun tools that use Varlock from the owning app directory so they load that app's schema and env files. `env:generate` only generates TypeScript files; it does not initialize environment values in a subsequent command.
-
-## Git Hooks and Formatting
-
-- Run checks: `bun run check`
-
-## Project Structure
-
-```
-openaudit/
-├── apps/
-│   ├── web/         # Frontend application (React + TanStack Start)
-│   └── server/      # Backend API (Hono, ORPC)
-├── packages/
-│   ├── ui/          # Shared shadcn/ui components and styles
-│   ├── api/         # API layer / business logic
-```
-
-## Available Scripts
-
-- `bun run dev`: Start all applications in development mode
-- `bun run build`: Build all applications
-- `bun run dev:web`: Start only the web application
-- `bun run dev:server`: Start only the server
-- `bun run check-types`: Check TypeScript types across all apps
-- `bun run check`: Run Biome formatting and linting
+MIT
