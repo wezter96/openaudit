@@ -1,0 +1,26 @@
+{
+	"name": "openaudit",
+	"version": "0.1.0",
+	"description": "Audit codebases, URLs, running apps, containers, IaC and mobile builds for security, accessibility, performance, SEO and more. Agent-ready via MCP.",
+	"type": "module",
+	"bin": {
+		"openaudit": "./src/bin.ts"
+	},
+	"scripts": {
+		"check-types": "tsc --noEmit",
+		"test": "bun test",
+		"compile": "bun build --compile --minify ./src/bin.ts --outfile dist/openaudit"
+	},
+	"dependencies": {
+		"@openaudit/core": "workspace:*",
+		"@openaudit/auditors": "workspace:*",
+		"@openaudit/agent": "workspace:*",
+		"@openaudit/mcp": "workspace:*",
+		"effect": "4.0.3"
+	},
+	"devDependencies": {
+		"@openaudit/config": "workspace:*",
+		"@types/bun": "catalog:",
+		"typescript": "catalog:"
+	}
+}
