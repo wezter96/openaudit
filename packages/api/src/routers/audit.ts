@@ -5,14 +5,18 @@ import { AuditTimeout, runUrlAudit, URL_AUDIT_LIMITS } from "../audit";
 import { publicProcedure } from "../index";
 import { ReportSchema } from "../schemas";
 import {
+	clientKey,
 	createRateLimiter,
 	type ResolvedUrl,
 	resolvePublicUrl,
 	SsrfError,
 } from "../ssrf";
 
-/** 10 audits per client per minute. */
+/** 10 audits per client (IPv4 address or IPv6 /64) per minute. */
 const limiter = createRateLimiter({ limit: 10, windowMs: 60_000 });
+
+/** Server-wide budget, so many clients together cannot keep the host busy. */
+const globalLimiter = createRateLimiter({ limit: 120, windowMs: 60_000 });
 
 /** Server-wide cap so a burst from many clients cannot exhaust the host. */
 const MAX_CONCURRENT_AUDITS = 4;
@@ -46,7 +50,10 @@ export const auditRouter = {
 		)
 		.output(ReportSchema)
 		.handler(async ({ input, context }) => {
-			const rate = limiter.hit(context.clientIp ?? "unknown");
+			const global = globalLimiter.hit("*");
+			const rate = global.ok
+				? limiter.hit(clientKey(context.clientIp))
+				: global;
 			if (!rate.ok)
 				throw new ORPCError("TOO_MANY_REQUESTS", {
 					message: `Rate limit reached. Try again in ${Math.ceil(rate.retryAfterMs / 1000)}s.`,

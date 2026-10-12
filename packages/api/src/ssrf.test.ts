@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
 	assertPublicUrl,
+	clientKey,
 	createRateLimiter,
 	isPrivateAddress,
 	parseIPv6,
@@ -227,7 +228,7 @@ describe("createRateLimiter", () => {
 		expect(rl.hit("a").ok).toBe(true);
 	});
 
-	test("bounds memory by failing closed when full", () => {
+	test("bounds memory by evicting the oldest window, never locking others out", () => {
 		let t = 0;
 		const rl = createRateLimiter({
 			limit: 1,
@@ -236,9 +237,33 @@ describe("createRateLimiter", () => {
 			now: () => t,
 		});
 		expect(rl.hit("a").ok).toBe(true);
+		t = 1;
 		expect(rl.hit("b").ok).toBe(true);
-		expect(rl.hit("c").ok).toBe(false);
-		t = 1000;
+		// Full: a new client is still served; the oldest window ("a") is evicted.
+		t = 2;
 		expect(rl.hit("c").ok).toBe(true);
+		expect(rl.hit("c").ok).toBe(false);
+		expect(rl.hit("b").ok).toBe(false);
+	});
+
+	test("stays fast under a flood of distinct keys", () => {
+		const rl = createRateLimiter({ limit: 1, windowMs: 60_000, maxKeys: 1000 });
+		const started = performance.now();
+		for (let i = 0; i < 200_000; i++) rl.hit(`k${i}`);
+		expect(rl.hit("fresh").ok).toBe(true);
+		expect(performance.now() - started).toBeLessThan(1000);
+	});
+});
+
+describe("clientKey", () => {
+	test("groups IPv6 by /64 and unwraps mapped IPv4", () => {
+		expect(clientKey("2001:db8:1:2:aaaa::1")).toBe("2001:db8:1:2::/64");
+		expect(clientKey("2001:db8:1:2:ffff:ffff:ffff:ffff")).toBe(
+			"2001:db8:1:2::/64",
+		);
+		expect(clientKey("2001:db8::1")).toBe("2001:db8:0:0::/64");
+		expect(clientKey("::ffff:203.0.113.9")).toBe("203.0.113.9");
+		expect(clientKey("203.0.113.9")).toBe("203.0.113.9");
+		expect(clientKey(undefined)).toBe("unknown");
 	});
 });

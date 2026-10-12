@@ -1,28 +1,28 @@
 {
-  "name": "@openaudit/api",
-  "type": "module",
-  "exports": {
-    ".": "./src/index.ts",
-    "./*": "./src/*.ts"
-  },
-  "scripts": {
-    "build": "tsc -b",
-    "check-types": "tsc -b",
-    "test": "bun test"
-  },
-  "dependencies": {
-    "@openaudit/agent": "workspace:*",
-    "@openaudit/auditors": "workspace:*",
-    "@openaudit/core": "workspace:*",
-    "@orpc/client": "catalog:",
-    "@orpc/openapi": "catalog:",
-    "@orpc/server": "catalog:",
-    "@orpc/zod": "catalog:",
-    "effect": "4.0.3",
-    "zod": "catalog:"
-  },
-  "devDependencies": {
-    "@openaudit/config": "workspace:*",
-    "typescript": "catalog:"
-  }
+	"name": "@openaudit/api",
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./*": "./src/*.ts"
+	},
+	"scripts": {
+		"build": "tsc -b",
+		"check-types": "tsc -b",
+		"test": "bun test"
+	},
+	"dependencies": {
+		"@openaudit/agent": "workspace:*",
+		"@openaudit/auditors": "workspace:*",
+		"@openaudit/core": "workspace:*",
+		"@orpc/client": "catalog:",
+		"@orpc/openapi": "catalog:",
+		"@orpc/server": "catalog:",
+		"@orpc/zod": "catalog:",
+		"effect": "4.0.3",
+		"zod": "catalog:"
+	},
+	"devDependencies": {
+		"@openaudit/config": "workspace:*",
+		"typescript": "catalog:"
+	}
 }
