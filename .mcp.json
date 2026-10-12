@@ -1,0 +1,8 @@
+{
+	"mcpServers": {
+		"openaudit": {
+			"command": "bun",
+			"args": ["apps/cli/src/bin.ts", "mcp"]
+		}
+	}
+}
