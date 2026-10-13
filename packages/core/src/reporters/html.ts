@@ -53,9 +53,16 @@ const CSP = [
 	`style-src 'sha256-${sha256(STYLE)}'`,
 	`script-src 'sha256-${sha256(SCRIPT)}'`,
 	"img-src data:",
+	// Same-origin fetches only: lets crawlers and audits (Lighthouse's robots.txt
+	// check) work on a hosted copy; the report itself makes no requests.
+	"connect-src 'self'",
 	"base-uri 'none'",
 	"form-action 'none'",
 ].join("; ");
+
+/** The shield as an inline favicon, so browsers don't ask the host for one. */
+const FAVICON =
+	"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%230d1522' d='M12 1.5 20.5 4.7v6.1c0 5.3-3.6 9.9-8.5 11.7-4.9-1.8-8.5-6.4-8.5-11.7V4.7z'/%3E%3Cpath fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round' d='m8.2 12.1 2.6 2.6 5-5.3'/%3E%3C/svg%3E";
 
 const MAX_TECH = 8;
 
@@ -288,6 +295,8 @@ export const toHtml = (report: Report, options: HtmlOptions = {}): string => {
 <meta name="color-scheme" content="light dark">
 <meta name="generator" content="${t(report.tool.name)} ${t(report.tool.version)}">
 <title>${t(title)}</title>
+<meta name="description" content="${t(`openaudit report for ${label}: score ${report.summary.score}/100, grade ${report.summary.grade}, ${report.results.length} auditors.`)}">
+<link rel="icon" href="${FAVICON}">
 <style>${STYLE}</style>
 </head>
 <body>

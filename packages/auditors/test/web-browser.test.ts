@@ -78,6 +78,39 @@ describe("webapp.browser", () => {
 		expect(ids.has("webapp.browser/failed-request")).toBe(true);
 	}, 90_000);
 
+	test("runs axe on pages with a strict CSP", async () => {
+		const strict = serve(
+			{
+				"/": () =>
+					new Response(
+						'<!doctype html><html lang="en"><head><title>CSP</title></head><body><main><img src="data:,"></main></body></html>',
+						{
+							headers: {
+								"content-type": "text/html; charset=utf-8",
+								"content-security-policy":
+									"default-src 'none'; script-src 'none'; img-src data:",
+							},
+						},
+					),
+			},
+			() => new Response("not found", { status: 404 }),
+		);
+		try {
+			const report = await runAuditor(browser, strict.url, {
+				browser: true,
+				maxPages: 1,
+			});
+			const result = report.results[0];
+			if (result?.status === "skipped") return;
+			expect(result?.status).not.toBe("error");
+			expect(result?.findings.map((f) => f.ruleId)).toContain(
+				"webapp.browser/axe-image-alt",
+			);
+		} finally {
+			strict.stop();
+		}
+	}, 90_000);
+
 	test("is not selected without --browser", async () => {
 		const report = await runAuditor(browser, site.url);
 		expect(report.results).toEqual([]);

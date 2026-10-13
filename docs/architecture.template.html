@@ -4,12 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>openaudit architecture</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%230d1522' d='M12 1.5 20.5 4.7v6.1c0 5.3-3.6 9.9-8.5 11.7-4.9-1.8-8.5-6.4-8.5-11.7V4.7z'/%3E%3Cpath fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round' d='m8.2 12.1 2.6 2.6 5-5.3'/%3E%3C/svg%3E">
+<meta name="description" content="How openaudit works: every auditor by target and area, the coverage matrix, the agent playbooks and the trust boundary.">
 <style>
 :root {
 	--bg: #f7f7f5; --panel: #ffffff; --ink: #1c1d21; --muted: #62646d; --line: #dcdcd6;
 	--builtin: #0f766e; --builtin-bg: #e3f4f1;
 	--external: #4338ca; --external-bg: #e8e8fb;
-	--agentic: #b45309; --agentic-bg: #fdf0dc;
+	--agentic: #9a4306; --agentic-bg: #fdf0dc;
 	--gap: #fbe9e9; --gap-ink: #a12d2d; --accent: #1c1d21;
 	--heat: 79, 70, 229;
 }
@@ -80,7 +82,7 @@ th { font-weight: 600; color: var(--muted); }
 th.row { text-align: left; color: var(--ink); white-space: nowrap; }
 td.cell { cursor: pointer; font-variant-numeric: tabular-nums; }
 td.cell .n { font-weight: 650; font-size: 14px; display: block; }
-td.cell .mix { font-size: 10.5px; color: var(--muted); }
+td.cell .mix { font-size: 10.5px; color: var(--ink); }
 td.cell.empty { background: var(--gap); color: var(--gap-ink); }
 td.cell.na { color: var(--muted); cursor: default; background: transparent; }
 td.cell.sel { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -108,7 +110,7 @@ ul.plain li { margin: 4px 0; }
 .gap.p1 { border-left-color: var(--gap-ink); }
 .gap.p2 { border-left-color: var(--agentic); }
 .gap.p3 { border-left-color: var(--muted); }
-.gap h4 { margin: 0 0 4px; font-size: 14px; }
+.gap h3 { margin: 0 0 4px; font-size: 14px; }
 .gap p { margin: 0; color: var(--muted); font-size: 13px; }
 .gap .tag { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
 .gap.p1 .tag { color: var(--gap-ink); } .gap.p2 .tag { color: var(--agentic); } .gap.p3 .tag { color: var(--muted); }
@@ -256,13 +258,13 @@ footer { margin-top: 40px; color: var(--muted); font-size: 12px; }
 	<h2>Still open</h2>
 	<p class="sub">Red = worth doing next. Grey = larger scope or blocked upstream.</p>
 	<div class="gaps">
-		<div class="gap p1"><span class="tag">Quality</span><h4>Run the AI paths for real</h4><p><code>--agentic</code> and <code>--ai</code> have never run against the live API. Doing so costs money, so it waits for a go-ahead.</p></div>
-		<div class="gap p1"><span class="tag">Quality</span><h4>Reconstructed fixtures</h4><p>ZAP active scan, Prowler, golangci-lint v2, cargo-audit and the deepsec export are still parsed from documented formats rather than real recordings.</p></div>
-		<div class="gap p1"><span class="tag">Engine</span><h4>Merge IaC and container findings</h4><p>Checkov, KICS, Kubescape, kube-linter and the built-in checks report the same misconfiguration under different rule ids with no shared tag, so they are not merged yet. Needs a rule-equivalence map.</p></div>
-		<div class="gap p3"><span class="tag">Scoring</span><h4>CVSS v4 scores</h4><p>v4 vectors fall back to the advisory database's own label, which is usually present. Scoring them directly needs the MacroVector tables.</p></div>
-		<div class="gap p3"><span class="tag">URL</span><h4>DNSSEC</h4><p>Node's resolver can't validate signatures, so DNSSEC is skipped rather than guessed.</p></div>
-		<div class="gap p3"><span class="tag">Mobile</span><h4>iOS accessibility</h4><p>Compiled storyboards and nibs aren't analysed; iOS gets Info.plist hints only.</p></div>
-		<div class="gap p3"><span class="tag">Compliance</span><h4>ASVS, SOC 2 and CIS views</h4><p>The report maps findings to OWASP Top 10 and the CWE Top 25. Mapping to ASVS, SOC 2 or CIS controls needs curated data.</p></div>
+		<div class="gap p1"><span class="tag">Quality</span><h3>Run the AI paths for real</h3><p><code>--agentic</code> and <code>--ai</code> have never run against the live API. Doing so costs money, so it waits for a go-ahead.</p></div>
+		<div class="gap p1"><span class="tag">Quality</span><h3>Reconstructed fixtures</h3><p>ZAP active scan, Prowler, golangci-lint v2, cargo-audit and the deepsec export are still parsed from documented formats rather than real recordings.</p></div>
+		<div class="gap p1"><span class="tag">Engine</span><h3>Merge IaC and container findings</h3><p>Checkov, KICS, Kubescape, kube-linter and the built-in checks report the same misconfiguration under different rule ids with no shared tag, so they are not merged yet. Needs a rule-equivalence map.</p></div>
+		<div class="gap p3"><span class="tag">Scoring</span><h3>CVSS v4 scores</h3><p>v4 vectors fall back to the advisory database's own label, which is usually present. Scoring them directly needs the MacroVector tables.</p></div>
+		<div class="gap p3"><span class="tag">URL</span><h3>DNSSEC</h3><p>Node's resolver can't validate signatures, so DNSSEC is skipped rather than guessed.</p></div>
+		<div class="gap p3"><span class="tag">Mobile</span><h3>iOS accessibility</h3><p>Compiled storyboards and nibs aren't analysed; iOS gets Info.plist hints only.</p></div>
+		<div class="gap p3"><span class="tag">Compliance</span><h3>ASVS, SOC 2 and CIS views</h3><p>The report maps findings to OWASP Top 10 and the CWE Top 25. Mapping to ASVS, SOC 2 or CIS controls needs curated data.</p></div>
 	</div>
 
 	<footer>openaudit · generated from the auditor registry by <code>bun docs/architecture.ts</code>. Re-run it after adding auditors.</footer>
@@ -333,7 +335,7 @@ for (const [t, hint] of TARGETS) {
 
 // matrix
 const table = document.getElementById("matrix");
-const head = el("tr", {}, el("th", { class: "row" }, ""), ...TARGETS.map(([t]) => el("th", {}, t)));
+const head = el("tr", {}, el("th", { class: "row", scope: "col" }, "Area"), ...TARGETS.map(([t]) => el("th", {}, t)));
 table.append(head);
 const cells = [];
 for (const c of CATS) {

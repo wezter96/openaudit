@@ -635,7 +635,9 @@ const auditPage = (
 				findings.push(...vitalsFindings(finalUrl, metrics));
 
 				if (axe) {
-					await page.addScriptTag({ content: axe });
+					// Evaluated through the DevTools protocol rather than an inline
+					// <script>, so a strict CSP on the audited page can't block it.
+					await page.evaluate(axe);
 					const violations = (await page.evaluate(AXE_EXPR)) as AxeViolation[];
 					findings.push(...axeFindings(finalUrl, violations));
 				}
