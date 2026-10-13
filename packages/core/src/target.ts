@@ -26,7 +26,10 @@ const TECH_MARKERS: ReadonlyArray<readonly [RegExp, string]> = [
 	[/\.vue$/, "vue"],
 	[/\.svelte$/, "svelte"],
 	[/\.html?$/, "html"],
-	[/(^|\/)(Dockerfile|Containerfile)(\.[\w-]+)?$|\.dockerfile$/i, "docker"],
+	[
+		/(^|\/)(Dockerfile|Containerfile)(\.(?!(?:dockerignore|[cm]?[jt]sx?|py|go|rb|rs|java|kt|swift|php|cs|md|mdx|json|ya?ml|toml|txt|sh|snap|map)$)[\w-]+)?$|\.dockerfile$/i,
+		"docker",
+	],
 	[/(^|\/)(docker-)?compose(\.[\w-]+)?\.ya?ml$/, "docker-compose"],
 	[/\.tf$/, "terraform"],
 	[/(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/, "github-actions"],
@@ -160,7 +163,7 @@ export const resolveTarget = (
 		const name = basename(path);
 		const kinds: TargetKind[] = MOBILE_ARTIFACTS.has(ext)
 			? ["mobile"]
-			: /^(Dockerfile|Containerfile)/i.test(name) ||
+			: detectTechnologies([name]).includes("docker") ||
 					/(docker-)?compose.*\.ya?ml$/.test(name)
 				? ["container"]
 				: [".tf", ".yaml", ".yml"].includes(ext)

@@ -56,8 +56,10 @@ export const inspectTls = (
 			port,
 			servername: /^[\d.]+$|:/.test(host) ? undefined : host,
 			// Inspection only: we must complete the handshake to report on a bad
-			// certificate. No application data is sent over this socket.
-			rejectUnauthorized: false,
+			// certificate, which is then verified explicitly below
+			// (`authorizationError`, `checkServerIdentity`). No application data is
+			// sent over this socket.
+			rejectUnauthorized: false, // openaudit-ignore: handshake-only certificate inspection
 			minVersion: options.minVersion,
 			maxVersion: options.maxVersion,
 		});

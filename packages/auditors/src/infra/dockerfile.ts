@@ -18,7 +18,7 @@ import {
 } from "./shared";
 
 export const DOCKERFILE_RE =
-	/(^|\/)(Dockerfile|Containerfile)(\.(?!dockerignore$)[\w.-]+)?$|\.dockerfile$/i;
+	/(^|\/)(Dockerfile|Containerfile)(\.(?!(?:dockerignore|[cm]?[jt]sx?|py|go|rb|rs|java|kt|swift|php|cs|md|mdx|json|ya?ml|toml|txt|sh|snap|map)$)[\w.-]+)?$|\.dockerfile$/i;
 
 const BEST_PRACTICES = "https://docs.docker.com/build/building/best-practices/";
 const CIS_DOCKER = "https://www.cisecurity.org/benchmark/docker";

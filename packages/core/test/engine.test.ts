@@ -6,6 +6,7 @@ import {
 	AuditorError,
 	CoreLive,
 	defineAuditor,
+	detectTechnologies,
 	matchesPattern,
 	runAudit,
 	SkipAudit,
@@ -148,5 +149,24 @@ describe("runAudit", () => {
 			}).pipe(Effect.provide(CoreLive)),
 		);
 		expect(report.target.kinds).toEqual(["url", "webapp"]);
+	});
+});
+
+describe("detectTechnologies", () => {
+	test("Dockerfile variants count, source files named after them do not", () => {
+		expect(
+			detectTechnologies([
+				"Dockerfile",
+				"api/Dockerfile.prod",
+				"web.dockerfile",
+			]),
+		).toEqual(["docker"]);
+		expect(
+			detectTechnologies([
+				"src/dockerfile.ts",
+				"docs/Dockerfile.md",
+				"lib/containerfile.py",
+			]),
+		).not.toContain("docker");
 	});
 });
