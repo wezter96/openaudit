@@ -1,0 +1,5 @@
+# pinned
+requests==2.19.0 \
+    --hash=sha256:abc
+django[argon2]==3.2.0 ; python_version >= "3.6"
+--index-url https://pypi.example.invalid/simple

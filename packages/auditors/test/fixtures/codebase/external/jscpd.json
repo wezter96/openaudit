@@ -1,0 +1,71 @@
+{
+  "duplicates": [
+    {
+      "firstFile": {
+        "end": 16,
+        "endLoc": {
+          "column": 1,
+          "line": 16,
+          "position": 501
+        },
+        "name": "src/invoice.ts",
+        "start": 1,
+        "startLoc": {
+          "column": 32,
+          "line": 1,
+          "position": 32
+        }
+      },
+      "format": "typescript",
+      "fragment": "export function summarizeInvoice(lines: Array<{ sku: string; qty: number; price: number }>, taxRate: number) {\n\tlet subtotal = 0;\n\tconst seen = new Set<string>();\n\tfor (const line of lines) {\n\t\tif (line.qty <= 0) {\n\t\t\tcontinue;\n\t\t}\n\t\tif (seen.has(line.sku)) {\n\t\t\tthrow new Error(`duplicate sku ${line.sku}`);\n\t\t}\n\t\tseen.add(line.sku);\n\t\tsubtotal += line.qty * line.price;\n\t}\n\tconst tax = Math.round(subtotal * taxRate * 100) / 100;\n\treturn { subtotal, tax, total: subtotal + tax, items: seen.size };\n}",
+      "isNew": false,
+      "kind": "exact",
+      "lines": 16,
+      "secondFile": {
+        "end": 16,
+        "endLoc": {
+          "column": 1,
+          "line": 16,
+          "position": 499
+        },
+        "name": "src/order.ts",
+        "start": 1,
+        "startLoc": {
+          "column": 30,
+          "line": 1,
+          "position": 30
+        }
+      },
+      "tokens": 141
+    }
+  ],
+  "statistics": {
+    "detectionDate": "2026-10-13T16:46:27.498Z",
+    "formats": {
+      "typescript": {
+        "clones": 1,
+        "duplicatedLines": 16,
+        "duplicatedTokens": 141,
+        "lines": 32,
+        "newClones": 0,
+        "newDuplicatedLines": 0,
+        "percentage": 50.0,
+        "percentageTokens": 48.95833333333333,
+        "sources": 2,
+        "tokens": 288
+      }
+    },
+    "total": {
+      "clones": 1,
+      "duplicatedLines": 16,
+      "duplicatedTokens": 141,
+      "lines": 32,
+      "newClones": 0,
+      "newDuplicatedLines": 0,
+      "percentage": 50.0,
+      "percentageTokens": 48.95833333333333,
+      "sources": 2,
+      "tokens": 288
+    }
+  }
+}

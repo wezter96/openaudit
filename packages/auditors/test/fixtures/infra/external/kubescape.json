@@ -1,0 +1,217 @@
+{
+  "generationTime": "2026-10-13T16:00:00.000000Z",
+  "clusterAPIServerInfo": null,
+  "customerGUID": "",
+  "clusterName": "",
+  "reportGUID": "",
+  "jobID": "",
+  "summaryDetails": {
+    "controls": {
+      "C-0057": {
+        "controlID": "C-0057",
+        "name": "Privileged container",
+        "status": "failed",
+        "statusInfo": {
+          "status": "failed"
+        },
+        "resourceIDs": {
+          "failed": [
+            "path=/repo/app.yaml/api=apps/v1/Deployment/web"
+          ],
+          "passed": [],
+          "skipped": []
+        },
+        "ResourceCounters": {
+          "passedResources": 0,
+          "failedResources": 1,
+          "skippedResources": 0,
+          "excludedResources": 0
+        },
+        "score": 100,
+        "complianceScore": 0,
+        "scoreFactor": 8
+      },
+      "C-0013": {
+        "controlID": "C-0013",
+        "name": "Non-root containers",
+        "status": "failed",
+        "statusInfo": {
+          "status": "failed"
+        },
+        "resourceIDs": {
+          "failed": [
+            "path=/repo/app.yaml/api=apps/v1/Deployment/web"
+          ],
+          "passed": [],
+          "skipped": []
+        },
+        "ResourceCounters": {
+          "passedResources": 0,
+          "failedResources": 1,
+          "skippedResources": 0,
+          "excludedResources": 0
+        },
+        "score": 100,
+        "complianceScore": 0,
+        "scoreFactor": 6
+      },
+      "C-0004": {
+        "controlID": "C-0004",
+        "name": "Resources memory limit and request",
+        "status": "failed",
+        "statusInfo": {
+          "status": "failed"
+        },
+        "resourceIDs": {
+          "failed": [
+            "path=/repo/app.yaml/api=apps/v1/Deployment/web"
+          ],
+          "passed": [],
+          "skipped": []
+        },
+        "ResourceCounters": {
+          "passedResources": 0,
+          "failedResources": 1,
+          "skippedResources": 0,
+          "excludedResources": 0
+        },
+        "score": 100,
+        "complianceScore": 0,
+        "scoreFactor": 8
+      },
+      "C-0016": {
+        "controlID": "C-0016",
+        "name": "Allow privilege escalation",
+        "status": "passed",
+        "statusInfo": {
+          "status": "passed"
+        },
+        "resourceIDs": {
+          "failed": [],
+          "passed": [
+            "path=/repo/app.yaml/api=apps/v1/Deployment/web"
+          ],
+          "skipped": []
+        },
+        "scoreFactor": 6
+      }
+    },
+    "status": "failed",
+    "score": 62.5,
+    "complianceScore": 37.5
+  },
+  "resources": [
+    {
+      "resourceID": "path=/repo/app.yaml/api=apps/v1/Deployment/web",
+      "object": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+          "name": "web"
+        }
+      },
+      "source": {
+        "path": "/repo/app.yaml",
+        "relativePath": "app.yaml",
+        "fileType": "Deployment"
+      }
+    }
+  ],
+  "results": [
+    {
+      "resourceID": "path=/repo/app.yaml/api=apps/v1/Deployment/web",
+      "controls": [
+        {
+          "controlID": "C-0057",
+          "name": "Privileged container",
+          "status": {
+            "status": "failed"
+          },
+          "rules": [
+            {
+              "name": "rule",
+              "status": "failed",
+              "subStatus": "",
+              "paths": [
+                {
+                  "resourceID": "path=/repo/app.yaml/api=apps/v1/Deployment/web",
+                  "failedPath": "spec.template.spec.containers[0].securityContext.privileged",
+                  "fixPath": {
+                    "path": "",
+                    "value": ""
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "controlID": "C-0013",
+          "name": "Non-root containers",
+          "status": {
+            "status": "failed"
+          },
+          "rules": [
+            {
+              "name": "rule",
+              "status": "failed",
+              "subStatus": "",
+              "paths": [
+                {
+                  "resourceID": "path=/repo/app.yaml/api=apps/v1/Deployment/web",
+                  "fixPath": {
+                    "path": "spec.template.spec.containers[0].securityContext.runAsNonRoot",
+                    "value": "true"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "controlID": "C-0004",
+          "name": "Resources memory limit and request",
+          "status": {
+            "status": "failed"
+          },
+          "rules": [
+            {
+              "name": "rule",
+              "status": "failed",
+              "subStatus": "",
+              "paths": [
+                {
+                  "resourceID": "path=/repo/app.yaml/api=apps/v1/Deployment/web",
+                  "fixPath": {
+                    "path": "spec.template.spec.containers[0].resources.limits.memory",
+                    "value": "YOUR_VALUE"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "controlID": "C-0016",
+          "name": "Allow privilege escalation",
+          "status": {
+            "status": "passed"
+          },
+          "rules": []
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "targetMetadata": {
+      "fileContextMetadata": {
+        "filePath": "/repo/app.yaml",
+        "hostName": "host"
+      }
+    },
+    "scanMetadata": {
+      "targetType": "file",
+      "kubescapeVersion": "v3.0.0"
+    }
+  }
+}

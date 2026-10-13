@@ -1,0 +1,172 @@
+{
+  "kics_version": "v2.1.3",
+  "files_scanned": 3,
+  "lines_scanned": 71,
+  "files_parsed": 3,
+  "lines_parsed": 71,
+  "lines_ignored": 0,
+  "files_failed_to_scan": 0,
+  "queries_total": 2107,
+  "queries_failed_to_execute": 0,
+  "queries_failed_to_compute_similarity_id": 0,
+  "scan_id": "console",
+  "severity_counters": {
+    "CRITICAL": 0,
+    "HIGH": 3,
+    "INFO": 1,
+    "LOW": 0,
+    "MEDIUM": 1,
+    "TRACE": 0
+  },
+  "total_counter": 5,
+  "total_bom_resources": 0,
+  "start": "2026-10-13T16:00:00.000000Z",
+  "end": "2026-10-13T16:00:12.000000Z",
+  "paths": [
+    "/repo"
+  ],
+  "queries": [
+    {
+      "query_name": "Privilege Escalation Allowed",
+      "query_id": "5572cc5e-1e4c-4113-92a6-7a8a3bd25e6d",
+      "query_url": "https://kubernetes.io/docs/tasks/configure-pod-container/security-context/",
+      "severity": "HIGH",
+      "platform": "Kubernetes",
+      "cwe": "269",
+      "risk_score": "7.7",
+      "cloud_provider": "COMMON",
+      "category": "Insecure Configurations",
+      "experimental": false,
+      "description": "Containers should not run with allowPrivilegeEscalation in order to prevent them from gaining more privileges than their parent process",
+      "description_id": "525fccf4",
+      "files": [
+        {
+          "file_name": "/repo/k8s/app.yaml",
+          "similarity_id": "a1",
+          "line": 15,
+          "resource_type": "Deployment",
+          "resource_name": "web",
+          "issue_type": "MissingAttribute",
+          "search_key": "metadata.name={{web}}.spec.template.spec.containers.name={{web}}.securityContext",
+          "search_line": 15,
+          "search_value": "",
+          "expected_value": "'spec.template.spec.containers.name=web.securityContext.allowPrivilegeEscalation' should be set",
+          "actual_value": "'spec.template.spec.containers.name=web.securityContext.allowPrivilegeEscalation' is undefined"
+        }
+      ]
+    },
+    {
+      "query_name": "Missing User Instruction",
+      "query_id": "fd54f200-402c-4333-a5a4-36ef6709af2f",
+      "query_url": "https://docs.docker.com/engine/reference/builder/#user",
+      "severity": "HIGH",
+      "platform": "Dockerfile",
+      "cwe": "250",
+      "risk_score": "7.7",
+      "cloud_provider": "COMMON",
+      "category": "Build Process",
+      "experimental": false,
+      "description": "Always set a user in the runtime stage of your Dockerfile.",
+      "description_id": "eb49caf6",
+      "files": [
+        {
+          "file_name": "/repo/Dockerfile",
+          "similarity_id": "b1",
+          "line": 1,
+          "resource_type": "FROM",
+          "resource_name": "node:latest",
+          "issue_type": "MissingAttribute",
+          "search_key": "FROM={{node:latest}}",
+          "search_line": 1,
+          "search_value": "",
+          "expected_value": "The 'Dockerfile' should contain the 'USER' instruction",
+          "actual_value": "The 'Dockerfile' does not contain any 'USER' instruction"
+        }
+      ]
+    },
+    {
+      "query_name": "S3 Bucket ACL Allows Read to Any Authenticated User",
+      "query_id": "57b9893d-33b1-4419-bcea-a717ea87e139",
+      "query_url": "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket#acl",
+      "severity": "HIGH",
+      "platform": "Terraform",
+      "cwe": "732",
+      "risk_score": "7.7",
+      "cloud_provider": "AWS",
+      "category": "Access Control",
+      "experimental": false,
+      "description": "S3 Buckets should not be readable to any authenticated user",
+      "description_id": "a63624e5",
+      "files": [
+        {
+          "file_name": "/repo/main.tf",
+          "similarity_id": "c1",
+          "line": 8,
+          "resource_type": "aws_s3_bucket",
+          "resource_name": "data",
+          "issue_type": "IncorrectValue",
+          "search_key": "aws_s3_bucket[data].acl",
+          "search_line": 8,
+          "search_value": "",
+          "expected_value": "'acl' should not be 'authenticated-read'",
+          "actual_value": "'acl' is 'authenticated-read'"
+        }
+      ]
+    },
+    {
+      "query_name": "Container Running As Root",
+      "query_id": "cf34805e-3872-4c08-bf92-6ff7bb0cfadb",
+      "query_url": "https://kubernetes.io/docs/concepts/security/pod-security-standards/",
+      "severity": "MEDIUM",
+      "platform": "Kubernetes",
+      "cwe": "250",
+      "cloud_provider": "COMMON",
+      "category": "Insecure Configurations",
+      "experimental": false,
+      "description": "Containers should not run as root.",
+      "description_id": "d4a9e8b0",
+      "files": [
+        {
+          "file_name": "k8s/app.yaml",
+          "similarity_id": "d1",
+          "line": 15,
+          "resource_type": "Deployment",
+          "resource_name": "web",
+          "issue_type": "MissingAttribute",
+          "search_key": "metadata.name={{web}}.spec.template.spec.containers.name={{web}}",
+          "search_line": 15,
+          "search_value": "",
+          "expected_value": "'runAsNonRoot' should be true",
+          "actual_value": "'runAsNonRoot' is undefined"
+        }
+      ]
+    },
+    {
+      "query_name": "Healthcheck Instruction Missing",
+      "query_id": "b03a748a-542d-44f4-bb86-9199ab4fd2d5",
+      "query_url": "https://docs.docker.com/engine/reference/builder/#healthcheck",
+      "severity": "INFO",
+      "platform": "Dockerfile",
+      "cloud_provider": "COMMON",
+      "category": "Insecure Configurations",
+      "experimental": false,
+      "description": "Ensure that HEALTHCHECK is being used.",
+      "description_id": "7f5f0c8e",
+      "files": [
+        {
+          "file_name": "/repo/Dockerfile",
+          "similarity_id": "e1",
+          "line": 1,
+          "resource_type": "FROM",
+          "resource_name": "node:latest",
+          "issue_type": "MissingAttribute",
+          "search_key": "FROM={{node:latest}}",
+          "search_line": 1,
+          "search_value": "",
+          "expected_value": "Dockerfile should contain instruction 'HEALTHCHECK'",
+          "actual_value": "Dockerfile doesn't contain instruction 'HEALTHCHECK'"
+        }
+      ]
+    }
+  ]
+}

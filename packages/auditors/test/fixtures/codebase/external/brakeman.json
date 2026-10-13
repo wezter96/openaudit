@@ -1,0 +1,218 @@
+{
+  "scan_info": {
+    "app_path": "/repo",
+    "rails_version": "7.1.0",
+    "security_warnings": 5,
+    "start_time": "2026-10-13 18:46:37 +0200",
+    "end_time": "2026-10-13 18:46:38 +0200",
+    "duration": 0.119732,
+    "checks_performed": [
+      "BasicAuth",
+      "BasicAuthTimingAttack",
+      "CSRFTokenForgeryCVE",
+      "ContentTag",
+      "CookieSerialization",
+      "CreateWith",
+      "CrossSiteScripting",
+      "DefaultRoutes",
+      "Deserialize",
+      "DetailedExceptions",
+      "DigestDoS",
+      "DynamicFinders",
+      "EOLRails",
+      "EOLRuby",
+      "EscapeFunction",
+      "Evaluation",
+      "Execute",
+      "FileAccess",
+      "FileDisclosure",
+      "FilterSkipping",
+      "ForgerySetting",
+      "HeaderDoS",
+      "I18nXSS",
+      "JRubyXML",
+      "JSONEncoding",
+      "JSONEntityEscape",
+      "JSONParsing",
+      "LinkTo",
+      "LinkToHref",
+      "MailTo",
+      "MassAssignment",
+      "MimeTypeDoS",
+      "ModelAttrAccessible",
+      "ModelAttributes",
+      "ModelSerialize",
+      "NestedAttributes",
+      "NestedAttributesBypass",
+      "NumberToCurrency",
+      "PageCachingCVE",
+      "Pathname",
+      "PermitAttributes",
+      "QuoteTableName",
+      "Ransack",
+      "Redirect",
+      "RegexDoS",
+      "Render",
+      "RenderDoS",
+      "RenderInline",
+      "RenderRCE",
+      "ResponseSplitting",
+      "RouteDoS",
+      "SQL",
+      "SQLCVEs",
+      "SSLVerify",
+      "SafeBufferManipulation",
+      "SanitizeConfigCve",
+      "SanitizeMethods",
+      "SelectTag",
+      "SelectVulnerability",
+      "Send",
+      "SendFile",
+      "SessionManipulation",
+      "SessionSettings",
+      "SimpleFormat",
+      "SingleQuotes",
+      "SkipBeforeFilter",
+      "SprocketsPathTraversal",
+      "StripTags",
+      "SymbolDoSCVE",
+      "TemplateInjection",
+      "TranslateBug",
+      "UnsafeReflection",
+      "UnsafeReflectionMethods",
+      "ValidationRegex",
+      "VerbConfusion",
+      "WeakRSAKey",
+      "WithoutProtection",
+      "XMLDoS",
+      "YAMLParsing"
+    ],
+    "number_of_controllers": 1,
+    "number_of_models": 1,
+    "number_of_templates": 1,
+    "ruby_version": "4.0.7",
+    "brakeman_version": "8.1.0"
+  },
+  "warnings": [
+    {
+      "warning_type": "Cross-Site Scripting",
+      "warning_code": 2,
+      "fingerprint": "5c22a4eeb142a908d07142cd0e827b8f48565d82a179f3a7d8d77dcfd5a15e26",
+      "check_name": "CrossSiteScripting",
+      "message": "Unescaped parameter value",
+      "file": "app/views/users/search.html.erb",
+      "line": 1,
+      "link": "https://brakemanscanner.org/docs/warning_types/cross-site_scripting/",
+      "code": "params[:q]",
+      "render_path": [
+        {
+          "type": "controller",
+          "class": "UsersController",
+          "method": "search",
+          "line": 4,
+          "file": "app/controllers/users_controller.rb",
+          "rendered": {
+            "name": "users/search",
+            "file": "app/views/users/search.html.erb"
+          }
+        }
+      ],
+      "location": {
+        "type": "template",
+        "template": "users/search"
+      },
+      "user_input": null,
+      "confidence": "High",
+      "cwe_id": [
+        79
+      ]
+    },
+    {
+      "warning_type": "Command Injection",
+      "warning_code": 14,
+      "fingerprint": "81b1619b74410292c007f1305198e8122e1e609f1299baae76fccec8972891f2",
+      "check_name": "Execute",
+      "message": "Possible command injection",
+      "file": "app/controllers/users_controller.rb",
+      "line": 8,
+      "link": "https://brakemanscanner.org/docs/warning_types/command_injection/",
+      "code": "system(\"ls #{params[:dir]}\")",
+      "render_path": null,
+      "location": {
+        "type": "method",
+        "class": "UsersController",
+        "method": "run"
+      },
+      "user_input": "params[:dir]",
+      "confidence": "High",
+      "cwe_id": [
+        77
+      ]
+    },
+    {
+      "warning_type": "Redirect",
+      "warning_code": 18,
+      "fingerprint": "b55c1fdd9a64bef5be9f639a77c21f71911d015f6e13470ec3fdcff55e9a4193",
+      "check_name": "Redirect",
+      "message": "Possible unprotected redirect",
+      "file": "app/controllers/users_controller.rb",
+      "line": 9,
+      "link": "https://brakemanscanner.org/docs/warning_types/redirect/",
+      "code": "redirect_to(params[:url])",
+      "render_path": null,
+      "location": {
+        "type": "method",
+        "class": "UsersController",
+        "method": "run"
+      },
+      "user_input": "params[:url]",
+      "confidence": "High",
+      "cwe_id": [
+        601
+      ]
+    },
+    {
+      "warning_type": "Unmaintained Dependency",
+      "warning_code": 120,
+      "fingerprint": "e9d00416c23870f08d30cfda6ad07e2138e0ce51ab6b684814eb69e789cfa631",
+      "check_name": "EOLRails",
+      "message": "Support for Rails 7.1.0 ended on 2025-10-01",
+      "file": "Gemfile",
+      "line": 2,
+      "link": "https://brakemanscanner.org/docs/warning_types/unmaintained_dependency/",
+      "code": null,
+      "render_path": null,
+      "location": null,
+      "user_input": null,
+      "confidence": "High",
+      "cwe_id": [
+        1104
+      ]
+    },
+    {
+      "warning_type": "SQL Injection",
+      "warning_code": 0,
+      "fingerprint": "fecef40f8c62f3b60715cfb94b4c5ecab7207348ae7cb28e0d9a413e27410fbe",
+      "check_name": "SQL",
+      "message": "Possible SQL injection",
+      "file": "app/controllers/users_controller.rb",
+      "line": 3,
+      "link": "https://brakemanscanner.org/docs/warning_types/sql_injection/",
+      "code": "User.where(\"name = '#{params[:name]}'\")",
+      "render_path": null,
+      "location": {
+        "type": "method",
+        "class": "UsersController",
+        "method": "search"
+      },
+      "user_input": "params[:name]",
+      "confidence": "Medium",
+      "cwe_id": [
+        89
+      ]
+    }
+  ],
+  "ignored_warnings": [],
+  "errors": [],
+  "obsolete": []
+}

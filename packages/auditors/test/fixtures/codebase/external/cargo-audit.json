@@ -1,0 +1,93 @@
+{
+  "database": {
+    "advisory-count": 650,
+    "last-commit": "6a1ba8ab2b1ba2bf8d0d4c3a8f5c0d1ad7a5b3a9",
+    "last-updated": "2026-10-09T14:21:08+00:00"
+  },
+  "lockfile": { "dependency-count": 52 },
+  "settings": {
+    "target_arch": [],
+    "target_os": [],
+    "severity": null,
+    "ignore": [],
+    "informational_warnings": ["unmaintained", "unsound", "notice"]
+  },
+  "vulnerabilities": {
+    "found": true,
+    "count": 1,
+    "list": [
+      {
+        "advisory": {
+          "id": "RUSTSEC-2020-0071",
+          "package": "time",
+          "title": "Potential segfault in the time crate",
+          "description": "Unix-like operating systems may segfault due to dereferencing a dangling pointer in specific circumstances.",
+          "date": "2020-11-18",
+          "aliases": ["CVE-2020-26235", "GHSA-wcg3-cvx6-7396"],
+          "related": [],
+          "collection": "crates",
+          "categories": ["code-execution", "memory-corruption"],
+          "keywords": ["segfault"],
+          "cvss": "CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "informational": null,
+          "references": [],
+          "url": "https://github.com/time-rs/time/issues/293",
+          "withdrawn": null,
+          "license": "CC0-1.0"
+        },
+        "versions": {
+          "patched": [">=0.2.23"],
+          "unaffected": ["=0.2.0", "=0.2.1", "=0.2.2", "=0.2.3", "=0.2.4", "=0.2.5", "=0.2.6"]
+        },
+        "affected": {
+          "functions": { "time::OffsetDateTime::now_local": ["<0.2.23"] },
+          "os": ["linux", "redox", "solaris", "android", "ios", "macos", "netbsd", "openbsd", "freebsd"],
+          "arch": null
+        },
+        "package": {
+          "name": "time",
+          "version": "0.1.45",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "1b797afad3f312d1c66a56d11d0316f916356d11bd158fbc6ca6389ff6bf805a",
+          "dependencies": [],
+          "replace": null
+        }
+      }
+    ]
+  },
+  "warnings": {
+    "unmaintained": [
+      {
+        "kind": "unmaintained",
+        "package": {
+          "name": "atty",
+          "version": "0.2.14",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "d9b39be18770d11421cdb1b9947a45dd3f37e93092cbf377614828a319d5fee8",
+          "dependencies": [],
+          "replace": null
+        },
+        "advisory": {
+          "id": "RUSTSEC-2021-0145",
+          "package": "atty",
+          "title": "Potential unaligned read",
+          "description": "On windows, `atty` dereferences a potentially unaligned pointer.",
+          "date": "2021-07-04",
+          "aliases": [],
+          "related": [],
+          "collection": "crates",
+          "categories": [],
+          "keywords": [],
+          "cvss": null,
+          "informational": "unsound",
+          "references": [],
+          "url": "https://github.com/softprops/atty/issues/50",
+          "withdrawn": null,
+          "license": "CC0-1.0"
+        },
+        "affected": null,
+        "versions": { "patched": [], "unaffected": [] }
+      }
+    ]
+  }
+}

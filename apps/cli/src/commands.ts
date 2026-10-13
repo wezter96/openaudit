@@ -94,7 +94,7 @@ export const listCommand = (
 		lines.push(`  ${pad(p.id, width)}${p.title} (${p.targets.join(", ")})`);
 	lines.push(
 		"",
-		"Select with --only <id|prefix|prefix.*>, --exclude, --category. Agentic auditors need --agentic.",
+		"Select with --only <id|prefix|prefix.*>, --exclude, --category. Agentic auditors need --agentic; opt-in auditors run only when selected with --only.",
 	);
 	io.stdout(`${lines.join("\n")}\n`);
 	return EXIT.ok;
@@ -102,16 +102,18 @@ export const listCommand = (
 
 /* --------------------------------- doctor --------------------------------- */
 
-const TOOLS = [
-	"gitleaks",
-	"semgrep",
-	"osv-scanner",
-	"trivy",
-	"hadolint",
-	"checkov",
-	"lighthouse",
-	"docker",
-] as const;
+/** Alternative binary names some tools install under. */
+const TOOL_ALIASES: Record<string, ReadonlyArray<string>> = {
+	"testssl.sh": ["testssl"],
+};
+
+const whichTool = (name: string): string | undefined => {
+	for (const bin of [name, ...(TOOL_ALIASES[name] ?? [])]) {
+		const path = Bun.which(bin);
+		if (path) return path;
+	}
+	return undefined;
+};
 
 const resolveFrom = (pkg: string, from: string): string | undefined => {
 	try {
@@ -152,8 +154,15 @@ const systemChrome = (): string | undefined =>
 export const doctorReport = (
 	auditors: ReadonlyArray<Auditor> = allAuditors(),
 ) => {
-	const tools = TOOLS.map((name) => {
-		const path = Bun.which(name) ?? undefined;
+	// Every binary an auditor wraps, plus docker (image pulls and saves).
+	const names = [
+		...new Set([
+			...auditors.flatMap((a) => (a.tool ? [a.tool] : [])),
+			"docker",
+		]),
+	];
+	const tools = names.map((name) => {
+		const path = whichTool(name);
 		return {
 			name,
 			found: Boolean(path),
@@ -218,7 +227,7 @@ export const doctorCommand = (
 		"External tools (optional; auditors skip with a hint when missing)",
 		...r.tools.map(
 			(t) =>
-				`  ${ok(t.found)} ${pad(t.name, 12)}${t.found ? t.path : "not found"}${t.usedBy.length ? `  → ${t.usedBy.join(", ")}` : ""}`,
+				`  ${ok(t.found)} ${pad(t.name, 14)}${t.found ? t.path : "not found"}${t.usedBy.length ? `  → ${t.usedBy.join(", ")}` : ""}`,
 		),
 		"",
 		"Browser (for --browser and accessibility checks)",

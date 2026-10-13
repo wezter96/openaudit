@@ -1,0 +1,92 @@
+{
+	"Golang errors": {},
+	"Issues": [
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "/repo/main.go",
+			"code": "9: \n10: var awsSecretAccessKey = \"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\"\n11: \n",
+			"line": "10",
+			"column": "5",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G702",
+			"details": "Command injection via taint analysis",
+			"file": "/repo/main.go",
+			"code": "14: \tfmt.Println(h)\n15: \tcmd := exec.Command(\"sh\", \"-c\", os.Args[1])\n16: \t_ = cmd.Run()\n",
+			"line": "15",
+			"column": "21",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "328",
+				"url": "https://cwe.mitre.org/data/definitions/328.html"
+			},
+			"rule_id": "G401",
+			"details": "Use of weak cryptographic primitive",
+			"file": "/repo/main.go",
+			"code": "12: func main() {\n13: \th := md5.New()\n14: \tfmt.Println(h)\n",
+			"line": "13",
+			"column": "7",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/repo/main.go",
+			"code": "14: \tfmt.Println(h)\n15: \tcmd := exec.Command(\"sh\", \"-c\", os.Args[1])\n16: \t_ = cmd.Run()\n",
+			"line": "15",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "327",
+				"url": "https://cwe.mitre.org/data/definitions/327.html"
+			},
+			"rule_id": "G501",
+			"details": "Blocklisted import crypto/md5: weak cryptographic primitive",
+			"file": "/repo/main.go",
+			"code": "3: import (\n4: \t\"crypto/md5\"\n5: \t\"fmt\"\n",
+			"line": "4",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		}
+	],
+	"Stats": {
+		"files": 1,
+		"lines": 17,
+		"nosec": 0,
+		"found": 5
+	},
+	"GosecVersion": "dev"
+}

@@ -1,0 +1,698 @@
+[
+         {
+              "id"           : "engine_problem",
+              "ip"           : "/",
+              "port"         : "443",
+              "severity"     : "WARN",
+              "finding"      : "No engine or GOST support via engine with your /opt/homebrew/bin/openssl"
+          }
+,         {
+              "id"           : "service",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "HTTP"
+          }
+,         {
+              "id"           : "pre_128cipher",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "No 128 cipher limit bug"
+          }
+,         {
+              "id"           : "SSLv2",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "finding"      : "not offered"
+          }
+,         {
+              "id"           : "SSLv3",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "finding"      : "not offered"
+          }
+,         {
+              "id"           : "TLS1",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "LOW",
+              "finding"      : "offered (deprecated)"
+          }
+,         {
+              "id"           : "TLS1_1",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "CRITICAL",
+              "finding"      : "TLSv1.1 is not offered, and downgraded to a weaker protocol"
+          }
+,         {
+              "id"           : "TLS1_2",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "MEDIUM",
+              "finding"      : "not offered and downgraded to a weaker protocol"
+          }
+,         {
+              "id"           : "TLS1_3",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "not offered + downgraded to weaker protocol"
+          }
+,         {
+              "id"           : "NPN",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "offered with http/1.1 (advertised)"
+          }
+,         {
+              "id"           : "ALPN",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "http/1.1"
+          }
+,         {
+              "id"           : "cipherlist_NULL",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "cwe"          : "CWE-327",
+              "finding"      : "not offered"
+          }
+,         {
+              "id"           : "cipherlist_aNULL",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "cwe"          : "CWE-327",
+              "finding"      : "not offered"
+          }
+,         {
+              "id"           : "cipherlist_EXPORT",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "cwe"          : "CWE-327",
+              "finding"      : "not offered"
+          }
+,         {
+              "id"           : "cipherlist_LOW",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "cwe"          : "CWE-327",
+              "finding"      : "not offered"
+          }
+,         {
+              "id"           : "cipherlist_3DES_IDEA",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "cwe"          : "CWE-310",
+              "finding"      : "not offered"
+          }
+,         {
+              "id"           : "cipherlist_OBSOLETED",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "LOW",
+              "cwe"          : "CWE-310",
+              "finding"      : "offered"
+          }
+,         {
+              "id"           : "cipherlist_STRONG_NOFS",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "not offered"
+          }
+,         {
+              "id"           : "cipherlist_STRONG_FS",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "MEDIUM",
+              "finding"      : "not offered"
+          }
+,         {
+              "id"           : "TLS_extensions",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "'server name/#0' 'EC point formats/#11' 'heartbeat/#15' 'application layer protocol negotiation/#16' 'session ticket/#35' 'next protocol/#13172' 'renegotiation info/#65281'"
+          }
+,         {
+              "id"           : "TLS_session_ticket",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "valid for 300 seconds only (<daily)"
+          }
+,         {
+              "id"           : "SSL_sessionID_support",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "yes"
+          }
+,         {
+              "id"           : "sessionresumption_ticket",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "supported"
+          }
+,         {
+              "id"           : "sessionresumption_ID",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "not supported"
+          }
+,         {
+              "id"           : "TLS_timestamp",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "random"
+          }
+,         {
+              "id"           : "cert_compression",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "N/A"
+          }
+,         {
+              "id"           : "clientAuth",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "none"
+          }
+,         {
+              "id"           : "cert_numbers",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "1"
+          }
+,         {
+              "id"           : "cert_signatureAlgorithm",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "finding"      : "SHA256 with RSA"
+          }
+,         {
+              "id"           : "cert_keySize",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "RSA 2048 bits (exponent is 65537)"
+          }
+,         {
+              "id"           : "cert_keyUsage",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "Digital Signature, Key Encipherment"
+          }
+,         {
+              "id"           : "cert_extKeyUsage",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "TLS Web Server Authentication"
+          }
+,         {
+              "id"           : "cert_serialNumber",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "065C62C1D5361BD7E6951263A67064063934"
+          }
+,         {
+              "id"           : "cert_serialNumberLen",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "18"
+          }
+,         {
+              "id"           : "cert_fingerprintSHA1",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "F95E561C27728A1FF8461E7F6C89CB0225674E83"
+          }
+,         {
+              "id"           : "cert_fingerprintSHA256",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "101154813E8FDAB6BA4FAB575185C1A13944BCEC1D849AE2CD94A073494997E3"
+          }
+,         {
+              "id"           : "cert",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "-----BEGIN CERTIFICATE-----\nMIIE/zCCA+egAwIBAgISBlxiwdU2G9fmlRJjpnBkBjk0MA0GCSqGSIb3DQEBCwUAMDMxCzAJBgNVBAYTAlVTMRYwFAYDVQQKEw1MZXQncyBFbmNyeXB0MQwwCgYDVQQDEwNZUjEwHhcNMjYwOTI5MjAwMjU2WhcNMjYxMjI4MjAwMjU1WjAXMRUwEwYDVQQDDAwqLmJhZHNzbC5jb20wggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQCuGPM37Z6OgQLd6QRN4TUVvc8NxZ1+EtR8M+EWbVWb+2v4LERvxRvN3ByvCAAZTR2OyMBRb1xbiqmfQt1xzZgFVygC2d8MHiKSfOTXec47ligR62A2fPmeUcMopFNemJzdSJ2q4RB1sdCutv2eXLEJGtbLsKFCoTBjYNOfg8O4PHI5AL/YATgxLMSieY2mTv6/fftVZ8lVNa65SwGR9ICtdTGhBy7iifyvcLaDUwvXucpKH6pepYjEUTFLtjws+Q515i4RHh0xrqY97P9WG/Vj+Gsm+qYV0FHs/sE+qGJhyEt6teKUIXp8AmRjuJLSylxr68N2qJiQaGbsBYbXBk2PAgMBAAGjggInMIICIzAOBgNVHQ8BAf8EBAMCBaAwEwYDVR0lBAwwCgYIKwYBBQUHAwEwDAYDVR0TAQH/BAIwADAdBgNVHQ4EFgQUS+OeWa3eiWsz0wtEFKK0ww+P/pcwHwYDVR0jBBgwFoAUHy81vkYUgs1Asa55LFV4+vfUaPswMwYIKwYBBQUHAQEEJzAlMCMGCCsGAQUFBzAChhdodHRwOi8veXIxLmkubGVuY3Iub3JnLzAjBgNVHREEHDAaggwqLmJhZHNzbC5jb22CCmJhZHNzbC5jb20wEwYDVR0gBAwwCjAIBgZngQwBAgEwLgYDVR0fBCcwJTAjoCGgH4YdaHR0cDovL3lyMS5jLmxlbmNyLm9yZy81My5jcmwwggENBgorBgEEAdZ5AgQCBIH+BIH7APkAdwDCMX5XRRmjRe5/ON6ykEHrx8IhWiK/f9W1rXaa2Q5SzQAAAaDu+O+2AAAEAwBIMEYCIQCltbzVPre77XfQ7IQXoMW7gL5Klry1UzpTIQxeuLEAxgIhAMSFGiTYkIrojZDTl980aZzLVO05nug+qoq9H2XtUv4yAH4AJuNkblhpISO8ND9HJDWbN5LNJFqI2BXTkzP9mRirRyMAAAGg7vjllwAIAAAFAEfwr6MEAwBHMEUCIQDT0xNru0iThHMzOb35RezPBcXW1xYQIQf67RbwBQ+8VQIgIW/gtjqJZDzMdjSI7iMfy8OGRlDR+5/ennx2I5xCXVQwDQYJKoZIhvcNAQELBQADggEBAE8xDKe9IJf2o4dDS5yG3I8jYxY9EDp583WtCObOYvpeLM9lRTunOxD4vGra+5pax687K3NXCIQZS8MjQcNq6NuEqZybtvH06iuRh8s5AS5qaZYp1QkSQ1SyOzZp93yz7QGG8DMajV3HKkhXQt/Ft0KggqikeaetlHbYcP6bnT/glbm0cYFNLBesXWSB13/TRyidU6SdWS9vLgFp16e7Fl+QlqnfpsyPwz+dILNzzg40tolJzZ7yMMIOa0oP3SZUYBNmYtzlVfPHf4f6z5pdydVBqiKQRzxgAX4huw5rfm/lmKJw34kjJqiPFoi9A07j47PJZ6QptTcVNiP29cdsIAc=\n-----END CERTIFICATE-----"
+          }
+,         {
+              "id"           : "cert_commonName",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "finding"      : "*.badssl.com"
+          }
+,         {
+              "id"           : "cert_commonName_wo_SNI",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "badssl-fallback-unknown-subdomain-or-no-sni"
+          }
+,         {
+              "id"           : "cert_subjectAltName",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "*.badssl.com badssl.com"
+          }
+,         {
+              "id"           : "cert_trust",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "finding"      : "Ok via SAN wildcard and CN wildcard (SNI mandatory)"
+          }
+,         {
+              "id"           : "cert_trust_wildcard",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "LOW",
+              "finding"      : "trust is via wildcard"
+          }
+,         {
+              "id"           : "cert_chain_of_trust",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "finding"      : "passed."
+          }
+,         {
+              "id"           : "cert_certificatePolicies_EV",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "no"
+          }
+,         {
+              "id"           : "cert_expirationStatus",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "finding"      : "76 >= 30 days"
+          }
+,         {
+              "id"           : "cert_notBefore",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "2026-09-29 20:02"
+          }
+,         {
+              "id"           : "cert_notAfter",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "finding"      : "2026-12-28 20:02"
+          }
+,         {
+              "id"           : "cert_extlifeSpan",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "finding"      : "certificate has no extended life time according to browser forum"
+          }
+,         {
+              "id"           : "cert_eTLS",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "not present"
+          }
+,         {
+              "id"           : "cert_crlDistributionPoints",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "http://yr1.c.lencr.org/53.crl"
+          }
+,         {
+              "id"           : "cert_ocspURL",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "--"
+          }
+,         {
+              "id"           : "OCSP_stapling",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "not offered"
+          }
+,         {
+              "id"           : "cert_mustStapleExtension",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "--"
+          }
+,         {
+              "id"           : "DNS_CAArecord",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "LOW",
+              "finding"      : "--"
+          }
+,         {
+              "id"           : "certificate_transparency",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "finding"      : "yes (certificate extension)"
+          }
+,         {
+              "id"           : "certs_countServer",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "3"
+          }
+,         {
+              "id"           : "certs_list_ordering_problem",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "no"
+          }
+,         {
+              "id"           : "cert_caIssuers",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "YR1 (Let's Encrypt from US)"
+          }
+,         {
+              "id"           : "intermediate_cert <#1>",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "-----BEGIN CERTIFICATE-----\nMIIE2zCCAsOgAwIBAgIRAKICU/FfJpHAXcHOE7m8yk4wDQYJKoZIhvcNAQELBQAwLjELMAkGA1UEBhMCVVMxDTALBgNVBAoTBElTUkcxEDAOBgNVBAMTB1Jvb3QgWVIwHhcNMjUwOTAzMDAwMDAwWhcNMjgwOTAyMjM1OTU5WjAzMQswCQYDVQQGEwJVUzEWMBQGA1UEChMNTGV0J3MgRW5jcnlwdDEMMAoGA1UEAxMDWVIxMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoVi8X2xCYgMXvJxNPKp/oF13UMgmPABB07VCLNDtoXmt9luEZNJSBV10VyT1Pz6LD8Zq1d2gc43WNl1AdRrj4sEnazbOiz0nPpmGBp2hui49oZtDIY6wdKeZAi5BbNU20CH6RSBBMLSQ9cXrH8dxdv4PAJ45ssGML68USE3BsjC2a6cAN9L5CgXVIQi5tfNiTPoFZZ3S0OlXqLmmtdV95udWAb5b6e/F49DiCsH0Y00Ag72BVIb1hzynmKe+X0mERBTtsb3BwmpV9ipeBjMLoR/D9cHxHQCWoi5lTmXwY015J5rGelz1nZjJuxc2kioaX29XJBnhMkP531rSdG5uMwIDAQABo4HuMIHrMA4GA1UdDwEB/wQEAwIBhjATBgNVHSUEDDAKBggrBgEFBQcDATASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBQfLzW+RhSCzUCxrnksVXj699Ro+zAfBgNVHSMEGDAWgBTe51tg0CJtQCh9Pw0B/qS1UrRRlDAyBggrBgEFBQcBAQQmMCQwIgYIKwYBBQUHMAKGFmh0dHA6Ly95ci5pLmxlbmNyLm9yZy8wEwYDVR0gBAwwCjAIBgZngQwBAgEwJwYDVR0fBCAwHjAcoBqgGIYWaHR0cDovL3lyLmMubGVuY3Iub3JnLzANBgkqhkiG9w0BAQsFAAOCAgEA0+zvMq3kHig1ddTmmm+RibTr9/RpX7k4buanMMRqbV/yIvP82zAHN3mvaw+cASuVsdpd0ikjhr4hnhJQLQOzOp2ccKrsdGOAgo0vddeISFAqEWEV4lmUM3vFF796up+bSgmJ1u6RupDCMxDgF8M3eLvGuj6L0lu3zkQ0KuQLnKxLtB0oQqn1Idg5CuuGpMvQzk29Pa3D/qHurc0EIM9SxukQuJqq63lxsYyRQFU8yMBOhq1w5LbfaWNRrz1uklOfI/pYkAb2E2MTZrAMQkBIE2S8Jt1F8gRc96o/xOsrgvSka84AisX6xq1lz1Z7jGvrnXc4TMcjxZTjiTaihcYI1JIXZiLtEMSCa5l3cu8YWd6zdLRQlqRdclVjuQfNHawRJ6GWlkK0QJosivTKwdBw3KxEtzGo8yMHERbsy57gP1UXHOMcmZYQC0gtyR3SxfenIM/MxC3Ia2Ypab/kQ/CTnlIn2KQ5JUC6NYrGCbhFN9bp5lKJStEwCUnLpntcrXk5XVDCNv/5RyWpRThkGOV7GetKkQ0qAY8hCzWK6oqnAhDZcjlYVdWfqOw3DIOX6EDNBgAqHarRVxyF9QZdOaXSyPJ0ueD2BYJEBgaCGQ8rAaU/Qc123V5LTXDZW4CcsPBDyhy4v+c8hClAyw/IkJlfBqxB9D+/wvIMHgECZ4ptP6o=\n-----END CERTIFICATE-----"
+          }
+,         {
+              "id"           : "intermediate_cert_fingerprintSHA256 <#1>",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "13949634D99CD6FD6AA80BC034FEFACCEB1969FEEF986586713ECDBB05758D3F"
+          }
+,         {
+              "id"           : "intermediate_cert_notBefore <#1>",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "2025-09-03 00:00"
+          }
+,         {
+              "id"           : "intermediate_cert_notAfter <#1>",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "finding"      : "2028-09-02 23:59"
+          }
+,         {
+              "id"           : "intermediate_cert_expiration <#1>",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "finding"      : "ok > 40 days"
+          }
+,         {
+              "id"           : "intermediate_cert_chain <#1>",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "YR1 <-- Root YR"
+          }
+,         {
+              "id"           : "intermediate_cert <#2>",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "-----BEGIN CERTIFICATE-----\n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\n-----END CERTIFICATE-----"
+          }
+,         {
+              "id"           : "intermediate_cert_fingerprintSHA256 <#2>",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "072639D0B140D5BFFAE16AD9C3F6CC6086040621F51EE61A6D46A8915C07CF76"
+          }
+,         {
+              "id"           : "intermediate_cert_notBefore <#2>",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "2026-05-13 00:00"
+          }
+,         {
+              "id"           : "intermediate_cert_notAfter <#2>",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "finding"      : "2032-09-02 23:59"
+          }
+,         {
+              "id"           : "intermediate_cert_expiration <#2>",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "finding"      : "ok > 40 days"
+          }
+,         {
+              "id"           : "intermediate_cert_chain <#2>",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "Root YR <-- ISRG Root X1"
+          }
+,         {
+              "id"           : "intermediate_cert_badOCSP",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "finding"      : "intermediate certificate(s) is/are ok"
+          }
+,         {
+              "id"           : "heartbleed",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "cve"          : "CVE-2014-0160",
+              "cwe"          : "CWE-119",
+              "finding"      : "not vulnerable , timed out"
+          }
+,         {
+              "id"           : "CCS",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "cve"          : "CVE-2014-0224",
+              "cwe"          : "CWE-310",
+              "finding"      : "not vulnerable"
+          }
+,         {
+              "id"           : "ticketbleed",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "cve"          : "CVE-2016-9244",
+              "cwe"          : "CWE-200",
+              "finding"      : "not vulnerable"
+          }
+,         {
+              "id"           : "ROBOT",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "cve"          : "CVE-2017-17382 CVE-2017-17427 CVE-2017-17428 CVE-2017-13098 CVE-2017-1000385 CVE-2017-13099 CVE-2016-6883 CVE-2012-5081 CVE-2017-6168",
+              "cwe"          : "CWE-203",
+              "finding"      : "not vulnerable"
+          }
+,         {
+              "id"           : "secure_renego",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "cwe"          : "CWE-310",
+              "finding"      : "supported"
+          }
+,         {
+              "id"           : "secure_client_renego",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "cve"          : "CVE-2011-1473",
+              "cwe"          : "CWE-310",
+              "finding"      : "not vulnerable"
+          }
+,         {
+              "id"           : "CRIME_TLS",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "cve"          : "CVE-2012-4929",
+              "cwe"          : "CWE-310",
+              "finding"      : "not vulnerable"
+          }
+,         {
+              "id"           : "BREACH",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "MEDIUM",
+              "cve"          : "CVE-2013-3587",
+              "cwe"          : "CWE-310",
+              "finding"      : "potentially VULNERABLE, gzip HTTP compression detected  - only supplied '/' tested"
+          }
+,         {
+              "id"           : "POODLE_SSL",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "cve"          : "CVE-2014-3566",
+              "cwe"          : "CWE-310",
+              "finding"      : "not vulnerable, no SSLv3"
+          }
+,         {
+              "id"           : "fallback_SCSV",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "finding"      : "no protocol below TLS 1 offered"
+          }
+,         {
+              "id"           : "SWEET32",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "cve"          : "CVE-2016-2183 CVE-2016-6329",
+              "cwe"          : "CWE-327",
+              "finding"      : "not vulnerable"
+          }
+,         {
+              "id"           : "FREAK",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "cve"          : "CVE-2015-0204",
+              "cwe"          : "CWE-310",
+              "finding"      : "not vulnerable"
+          }
+,         {
+              "id"           : "DROWN",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "cve"          : "CVE-2016-0800 CVE-2016-0703",
+              "cwe"          : "CWE-310",
+              "finding"      : "not vulnerable on this host and port"
+          }
+,         {
+              "id"           : "DROWN_hint",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "cve"          : "CVE-2016-0800 CVE-2016-0703",
+              "cwe"          : "CWE-310",
+              "finding"      : "Make sure you don't use this certificate elsewhere with SSLv2 enabled services, see https://search.censys.io/search?resource=hosts&virtual_hosts=INCLUDE&q=101154813E8FDAB6BA4FAB575185C1A13944BCEC1D849AE2CD94A073494997E3"
+          }
+,         {
+              "id"           : "LOGJAM-common_primes",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "HIGH",
+              "cve"          : "CVE-2015-4000",
+              "cwe"          : "CWE-310",
+              "finding"      : "nginx/1024-bit MODP group with safe prime modulus"
+          }
+,         {
+              "id"           : "LOGJAM",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "cve"          : "CVE-2015-4000",
+              "cwe"          : "CWE-310",
+              "finding"      : "not vulnerable, no DH EXPORT ciphers,"
+          }
+,         {
+              "id"           : "BEAST_CBC_TLS1",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "MEDIUM",
+              "cve"          : "CVE-2011-3389",
+              "cwe"          : "CWE-20",
+              "finding"      : "ECDHE-RSA-AES256-SHA DHE-RSA-AES256-SHA DHE-RSA-CAMELLIA256-SHA AES256-SHA CAMELLIA256-SHA ECDHE-RSA-AES128-SHA DHE-RSA-AES128-SHA DHE-RSA-AES128-SHA DHE-RSA-AES128-SHA DHE-RSA-AES128-SHA DHE-RSA-AES128-SHA DHE-RSA-AES128-SHA DHE-RSA-AES128-SHA DHE-RSA-CAMELLIA128-SHA DHE-RSA-CAMELLIA128-SHA DHE-RSA-CAMELLIA128-SHA AES128-SHA CAMELLIA128-SHA"
+          }
+,         {
+              "id"           : "BEAST",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "MEDIUM",
+              "cve"          : "CVE-2011-3389",
+              "cwe"          : "CWE-20",
+              "finding"      : "VULNERABLE -- and no higher protocols as mitigation supported"
+          }
+,         {
+              "id"           : "LUCKY13",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "LOW",
+              "cve"          : "CVE-2013-0169",
+              "cwe"          : "CWE-310",
+              "finding"      : "potentially vulnerable, uses obsolete TLS CBC ciphers"
+          }
+,         {
+              "id"           : "winshock",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "cve"          : "CVE-2014-6321",
+              "cwe"          : "CWE-94",
+              "finding"      : "not vulnerable"
+          }
+,         {
+              "id"           : "RC4",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "OK",
+              "cve"          : "CVE-2013-2566 CVE-2015-2808",
+              "cwe"          : "CWE-310",
+              "finding"      : "not vulnerable"
+          }
+,         {
+              "id"           : "scanTime",
+              "ip"           : "tls-v1-0.badssl.com/104.154.89.105",
+              "port"         : "1010",
+              "severity"     : "INFO",
+              "finding"      : "164"
+          }
+]

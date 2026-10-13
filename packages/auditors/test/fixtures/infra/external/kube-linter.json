@@ -1,0 +1,262 @@
+{
+ "Checks": [],
+ "Reports": [
+  {
+   "Diagnostic": {
+    "Message": "container \"web\" has DROP capabilities: [], but does not drop capability \"NET_RAW\" which is required"
+   },
+   "Check": "drop-net-raw-capability",
+   "Remediation": "NET_RAW makes it so that an application within the container is able to craft raw packets, use raw sockets, and bind to any address. Remove this capability in the containers under containers security contexts.",
+   "Object": {
+    "Metadata": {
+     "FilePath": "/repo/app.yaml"
+    },
+    "K8sObject": {
+     "Namespace": "",
+     "Name": "web",
+     "GroupVersionKind": {
+      "Group": "apps",
+      "Version": "v1",
+      "Kind": "Deployment"
+     }
+    }
+   }
+  },
+  {
+   "Diagnostic": {
+    "Message": "resource shares host's network namespace (via hostNetwork=true)."
+   },
+   "Check": "host-network",
+   "Remediation": "Ensure the host's network namespace is not shared.",
+   "Object": {
+    "Metadata": {
+     "FilePath": "/repo/app.yaml"
+    },
+    "K8sObject": {
+     "Namespace": "",
+     "Name": "web",
+     "GroupVersionKind": {
+      "Group": "apps",
+      "Version": "v1",
+      "Kind": "Deployment"
+     }
+    }
+   }
+  },
+  {
+   "Diagnostic": {
+    "Message": "The container \"web\" is using an invalid container image, \"nginx:latest\". Please use images that are not blocked by the `BlockList` criteria : [\".*:(latest)$\" \"^[^:]*$\" \"(.*/[^:]+)$\"]"
+   },
+   "Check": "latest-tag",
+   "Remediation": "Use a container image with a specific tag other than latest.",
+   "Object": {
+    "Metadata": {
+     "FilePath": "/repo/app.yaml"
+    },
+    "K8sObject": {
+     "Namespace": "",
+     "Name": "web",
+     "GroupVersionKind": {
+      "Group": "apps",
+      "Version": "v1",
+      "Kind": "Deployment"
+     }
+    }
+   }
+  },
+  {
+   "Diagnostic": {
+    "Message": "object has no selector specified"
+   },
+   "Check": "mismatching-selector",
+   "Remediation": "Confirm that your deployment selector correctly matches the labels in its pod template.",
+   "Object": {
+    "Metadata": {
+     "FilePath": "/repo/app.yaml"
+    },
+    "K8sObject": {
+     "Namespace": "",
+     "Name": "web",
+     "GroupVersionKind": {
+      "Group": "apps",
+      "Version": "v1",
+      "Kind": "Deployment"
+     }
+    }
+   }
+  },
+  {
+   "Diagnostic": {
+    "Message": "object has 2 replicas but does not specify inter pod anti-affinity"
+   },
+   "Check": "no-anti-affinity",
+   "Remediation": "Specify anti-affinity in your pod specification to ensure that the orchestrator attempts to schedule replicas on different nodes. Using podAntiAffinity, specify a labelSelector that matches pods for the deployment, and set the topologyKey to kubernetes.io/hostname. Refer to https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#inter-pod-affinity-and-anti-affinity for details.",
+   "Object": {
+    "Metadata": {
+     "FilePath": "/repo/app.yaml"
+    },
+    "K8sObject": {
+     "Namespace": "",
+     "Name": "web",
+     "GroupVersionKind": {
+      "Group": "apps",
+      "Version": "v1",
+      "Kind": "Deployment"
+     }
+    }
+   }
+  },
+  {
+   "Diagnostic": {
+    "Message": "container \"web\" does not have a read-only root file system"
+   },
+   "Check": "no-read-only-root-fs",
+   "Remediation": "Set readOnlyRootFilesystem to true in the container securityContext.",
+   "Object": {
+    "Metadata": {
+     "FilePath": "/repo/app.yaml"
+    },
+    "K8sObject": {
+     "Namespace": "",
+     "Name": "web",
+     "GroupVersionKind": {
+      "Group": "apps",
+      "Version": "v1",
+      "Kind": "Deployment"
+     }
+    }
+   }
+  },
+  {
+   "Diagnostic": {
+    "Message": "container \"web\" is Privileged hence allows privilege escalation."
+   },
+   "Check": "privilege-escalation-container",
+   "Remediation": "Ensure containers do not allow privilege escalation by setting allowPrivilegeEscalation=false, privileged=false and removing CAP_SYS_ADMIN capability. See https://kubernetes.io/docs/tasks/configure-pod-container/security-context/ for more details.",
+   "Object": {
+    "Metadata": {
+     "FilePath": "/repo/app.yaml"
+    },
+    "K8sObject": {
+     "Namespace": "",
+     "Name": "web",
+     "GroupVersionKind": {
+      "Group": "apps",
+      "Version": "v1",
+      "Kind": "Deployment"
+     }
+    }
+   }
+  },
+  {
+   "Diagnostic": {
+    "Message": "container \"web\" is privileged"
+   },
+   "Check": "privileged-container",
+   "Remediation": "Do not run your container as privileged unless it is required.",
+   "Object": {
+    "Metadata": {
+     "FilePath": "/repo/app.yaml"
+    },
+    "K8sObject": {
+     "Namespace": "",
+     "Name": "web",
+     "GroupVersionKind": {
+      "Group": "apps",
+      "Version": "v1",
+      "Kind": "Deployment"
+     }
+    }
+   }
+  },
+  {
+   "Diagnostic": {
+    "Message": "container \"web\" is not set to runAsNonRoot"
+   },
+   "Check": "run-as-non-root",
+   "Remediation": "Set runAsUser to a non-zero number and runAsNonRoot to true in your pod or container securityContext. Refer to https://kubernetes.io/docs/tasks/configure-pod-container/security-context/ for details.",
+   "Object": {
+    "Metadata": {
+     "FilePath": "/repo/app.yaml"
+    },
+    "K8sObject": {
+     "Namespace": "",
+     "Name": "web",
+     "GroupVersionKind": {
+      "Group": "apps",
+      "Version": "v1",
+      "Kind": "Deployment"
+     }
+    }
+   }
+  },
+  {
+   "Diagnostic": {
+    "Message": "container \"web\" has cpu request 0"
+   },
+   "Check": "unset-cpu-requirements",
+   "Remediation": "Set CPU requests for your container based on its requirements. Refer to https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#requests-and-limits for details.",
+   "Object": {
+    "Metadata": {
+     "FilePath": "/repo/app.yaml"
+    },
+    "K8sObject": {
+     "Namespace": "",
+     "Name": "web",
+     "GroupVersionKind": {
+      "Group": "apps",
+      "Version": "v1",
+      "Kind": "Deployment"
+     }
+    }
+   }
+  },
+  {
+   "Diagnostic": {
+    "Message": "container \"web\" has memory limit 0"
+   },
+   "Check": "unset-memory-requirements",
+   "Remediation": "Set memory limits for your container based on its requirements. Refer to https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#requests-and-limits for details.",
+   "Object": {
+    "Metadata": {
+     "FilePath": "/repo/app.yaml"
+    },
+    "K8sObject": {
+     "Namespace": "",
+     "Name": "web",
+     "GroupVersionKind": {
+      "Group": "apps",
+      "Version": "v1",
+      "Kind": "Deployment"
+     }
+    }
+   }
+  },
+  {
+   "Diagnostic": {
+    "Message": "service has no selector specified"
+   },
+   "Check": "dangling-service",
+   "Remediation": "Confirm that your service's selector correctly matches the labels on one of your deployments.",
+   "Object": {
+    "Metadata": {
+     "FilePath": "/repo/app.yaml"
+    },
+    "K8sObject": {
+     "Namespace": "",
+     "Name": "web",
+     "GroupVersionKind": {
+      "Group": "",
+      "Version": "v1",
+      "Kind": "Service"
+     }
+    }
+   }
+  }
+ ],
+ "Summary": {
+  "ChecksStatus": "Failed",
+  "CheckEndTime": "2026-10-13T16:46:18.76141Z",
+  "KubeLinterVersion": "development"
+ }
+}

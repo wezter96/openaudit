@@ -1,0 +1,94 @@
+{
+  "date": "2026-10-12T09:41:17Z",
+  "repo": {
+    "name": "github.com/example/widgets",
+    "commit": "5f2a8c3d9e1b4a7f6c0d2e8b1a3c5d7e9f0a1b2c"
+  },
+  "scorecard": {
+    "version": "v5.1.1",
+    "commit": "a4d8c1e2f3b5967088c9d0e1f2a3b4c5d6e7f801"
+  },
+  "score": 5.4,
+  "checks": [
+    {
+      "name": "Pinned-Dependencies",
+      "score": 3,
+      "reason": "dependency not pinned by hash detected -- score normalized to 3",
+      "details": [
+        "Warn: GitHub-owned GitHubAction not pinned by hash: .github/workflows/ci.yml:14: update your workflow using https://app.stepsecurity.io/secureworkflow/example/widgets/ci.yml/main?enable=pin",
+        "Warn: containerImage not pinned by hash: Dockerfile:1: pin your Docker image by updating node:20 to node:20@sha256:0a1b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5061728394a5b6c7d8e9f",
+        "Info:   0 out of   2 GitHub-owned GitHubAction dependencies pinned"
+      ],
+      "documentation": {
+        "short": "Determines if the project has declared and pinned the dependencies of its build process.",
+        "url": "https://github.com/ossf/scorecard/blob/v5.1.1/docs/checks.md#pinned-dependencies"
+      }
+    },
+    {
+      "name": "Token-Permissions",
+      "score": 0,
+      "reason": "detected GitHub workflow tokens with excessive permissions",
+      "details": [
+        "Warn: no topLevel permission defined: .github/workflows/ci.yml:1"
+      ],
+      "documentation": {
+        "short": "Determines if the project's workflows follow the principle of least privilege.",
+        "url": "https://github.com/ossf/scorecard/blob/v5.1.1/docs/checks.md#token-permissions"
+      }
+    },
+    {
+      "name": "Security-Policy",
+      "score": 9,
+      "reason": "security policy file detected",
+      "details": [
+        "Info: security policy file detected: SECURITY.md:1",
+        "Warn: no linked content found"
+      ],
+      "documentation": {
+        "short": "Determines if the project has published a security policy.",
+        "url": "https://github.com/ossf/scorecard/blob/v5.1.1/docs/checks.md#security-policy"
+      }
+    },
+    {
+      "name": "Dangerous-Workflow",
+      "score": 10,
+      "reason": "no dangerous workflow patterns detected",
+      "details": null,
+      "documentation": {
+        "short": "Determines if the project's GitHub Action workflows avoid dangerous patterns.",
+        "url": "https://github.com/ossf/scorecard/blob/v5.1.1/docs/checks.md#dangerous-workflow"
+      }
+    },
+    {
+      "name": "Fuzzing",
+      "score": 0,
+      "reason": "project is not fuzzed",
+      "details": ["Warn: no fuzzer integrations found"],
+      "documentation": {
+        "short": "Determines if the project uses fuzzing.",
+        "url": "https://github.com/ossf/scorecard/blob/v5.1.1/docs/checks.md#fuzzing"
+      }
+    },
+    {
+      "name": "Signed-Releases",
+      "score": -1,
+      "reason": "no releases found",
+      "details": null,
+      "documentation": {
+        "short": "Determines if the project cryptographically signs release artifacts.",
+        "url": "https://github.com/ossf/scorecard/blob/v5.1.1/docs/checks.md#signed-releases"
+      }
+    },
+    {
+      "name": "License",
+      "score": 9,
+      "reason": "license file detected",
+      "details": ["Info: project has a license file: LICENSE:0", "Warn: license file not detected in GitHub repo"],
+      "documentation": {
+        "short": "Determines if the project has defined a license.",
+        "url": "https://github.com/ossf/scorecard/blob/v5.1.1/docs/checks.md#license"
+      }
+    }
+  ],
+  "metadata": null
+}

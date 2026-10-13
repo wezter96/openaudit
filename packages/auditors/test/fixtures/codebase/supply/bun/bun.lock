@@ -1,0 +1,18 @@
+{
+  "lockfileVersion": 2,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "t",
+      "dependencies": {
+        "lodash": "4.17.15",
+        "minimist": "1.2.0",
+      },
+    },
+  },
+  "packages": {
+    "lodash": ["lodash@4.17.15", "", {}, "sha512-8xOcRHvCjnocdS5cpwXQXVzmmh5e5+saE2QGoeQmbKmRS6J3VQppPOIt0MnmE+4xlZoumy0GPG0D0MVIQbNA1A=="],
+
+    "minimist": ["minimist@1.2.0", "", {}, "sha512-7Wl+Jz+IGWuSdgsQEJ4JunV0si/iMhg42MnQQG6h1R6TNeVenp4U9x5CC5v/gYqz/fENLQITAWXidNtVL0NNbw=="],
+  }
+}
