@@ -1,0 +1,10 @@
+# Build output and Astro's generated types
+dist
+.astro
+.wrangler
+
+# Written by scripts/prepare.ts from the rest of the repository
+src/generated
+public/report
+public/architecture
+public/img/report-*.webp

@@ -1,0 +1,154 @@
+---
+import "../styles/global.css";
+import Icon from "../components/Icon.astro";
+import Logo from "../components/Logo.astro";
+import { clamp } from "../lib/dial";
+import { BLOB, NAV, OPENSVERIGE, ogName, pageUrl, REPO, self, u, unbase } from "../lib/site";
+
+interface Props {
+	readonly title: string;
+	readonly description: string;
+	/** Hero pages show the compact grade only after their own dial scrolls away. */
+	readonly heroDial?: boolean;
+	readonly ogTitle?: string;
+	/** Use the title as is, without the "| openaudit" suffix. */
+	readonly bareTitle?: boolean;
+	readonly noindex?: boolean;
+}
+
+const { title, heroDial = false, noindex = false, bareTitle = false } = Astro.props;
+/** Search results show about 160 characters; cut at a sentence or a word. */
+const clip = (text: string, max = 160) => {
+	if (text.length <= max) return text;
+	const cut = text.slice(0, max - 1);
+	const sentence = cut.lastIndexOf(". ");
+	return sentence > 80 ? cut.slice(0, sentence + 1) : `${cut.slice(0, cut.lastIndexOf(" "))}…`;
+};
+const description = clip(Astro.props.description);
+const path = unbase(Astro.url.pathname);
+const canonical = pageUrl(path);
+const fullTitle = path === "/" ? `openaudit: ${title}` : bareTitle ? title : `${title} | openaudit`;
+const og = pageUrl(`/og/${ogName(path === "/404/" || path === "/404" ? "/404/" : path)}.png`);
+const current = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
+const score = self.available && self.score !== undefined ? clamp(self.score) : null;
+const grade = self.grade ?? "";
+---
+
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>{fullTitle}</title>
+		<meta name="description" content={description} />
+		<link rel="canonical" href={canonical} />
+		{noindex && <meta name="robots" content="noindex" />}
+		<meta name="color-scheme" content="light dark" />
+		<meta name="theme-color" media="(prefers-color-scheme: light)" content="#eef1f4" />
+		<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b111b" />
+		<meta name="referrer" content="strict-origin-when-cross-origin" />
+		<link rel="icon" href={u("/favicon.svg")} type="image/svg+xml" />
+		<link rel="icon" href={u("/favicon-32.png")} type="image/png" sizes="32x32" />
+		<link rel="apple-touch-icon" href={u("/apple-touch-icon.png")} />
+		<link rel="sitemap" href={u("/sitemap-index.xml")} />
+		<meta property="og:type" content="website" />
+		<meta property="og:site_name" content="openaudit" />
+		<meta property="og:title" content={Astro.props.ogTitle ?? title} />
+		<meta property="og:description" content={description} />
+		<meta property="og:url" content={canonical} />
+		<meta property="og:image" content={og} />
+		<meta property="og:image:width" content="1200" />
+		<meta property="og:image:height" content="630" />
+		<meta property="og:image:alt" content={`openaudit grade dial beside the title “${Astro.props.ogTitle ?? title}”`} />
+		<meta name="twitter:card" content="summary_large_image" />
+		<script is:inline>
+			(() => {
+				const d = document.documentElement;
+				d.classList.add("js");
+				try {
+					const t = localStorage.getItem("theme");
+					if (t === "light" || t === "dark") d.dataset.theme = t;
+				} catch {}
+			})();
+		</script>
+		<slot name="head" />
+	</head>
+	<body>
+		<a class="skip" href="#main">Skip to content</a>
+		<header class:list={["site-head", { "stuck-dial": !heroDial }]} data-head>
+			<div class="frame">
+				<a class="brand" href={u("/")} aria-label="openaudit home"><Logo /><span>openaudit</span></a>
+				{
+					score !== null && (
+						<a class="mini" href={u("/report/")} tabindex={heroDial ? -1 : undefined} data-mini>
+							<svg viewBox="0 0 28 28" aria-hidden="true" focusable="false">
+								<circle class="track" cx="14" cy="14" r="11" fill="none" stroke-width="4" />
+								<circle class={`a-${grade}`} cx="14" cy="14" r="11" fill="none" stroke-width="4" pathLength="100" stroke-dasharray={`${score} 100`} />
+							</svg>
+							<b class={`gm-${grade}`}>{grade}</b>
+							<span class="num">{score}</span>
+							<span class="sr-only">out of 100: openaudit's audit of itself</span>
+						</a>
+					)
+				}
+				<button class="icon-btn menu-btn needs-js" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Menu" data-menu>
+					<Icon name="menu" />
+				</button>
+				<nav class="nav" id="site-nav" aria-label="Main">
+					{NAV.map((n) => <a href={u(n.href)} aria-current={current(n.href) ? "page" : undefined}>{n.label}</a>)}
+					<a href={REPO}>GitHub</a>
+				</nav>
+				<button class="icon-btn theme needs-js" type="button" aria-label="Switch theme" data-theme-toggle>
+					<Icon name="moon" class="moon" />
+					<Icon name="sun" class="sun" />
+				</button>
+			</div>
+		</header>
+		<main id="main" tabindex="-1">
+			<slot />
+		</main>
+		<footer class="site-foot">
+			<div class="frame">
+				<div>
+					<div>
+						<a class="brand" href={u("/")}><Logo /><span>openaudit</span></a>
+						<p>One scored audit of everything you ship, from your terminal, your CI or your AI agent.</p>
+						<p class="fine">MIT licence. Scanners keep their own licences.</p>
+					</div>
+					<div>
+						<h2>Use it</h2>
+						<ul>
+							<li><a href={u("/docs/")}>Getting started</a></li>
+							<li><a href={u("/docs/cli/")}>CLI reference</a></li>
+							<li><a href={u("/docs/ci/")}>CI and integrations</a></li>
+							<li><a href={u("/docs/agents/")}>MCP and agents</a></li>
+							<li><a href={u("/auditors/")}>Auditor catalogue</a></li>
+						</ul>
+					</div>
+					<div>
+						<h2>See it</h2>
+						<ul>
+							<li><a href={u("/report/")}>Live report</a></li>
+							<li><a href={u("/architecture/")}>Architecture</a></li>
+							<li><a href={u("/docs/report/")}>Report and scoring</a></li>
+							<li><a href={u("/docs/safety/")}>Safety</a></li>
+						</ul>
+					</div>
+					<div>
+						<h2>Project</h2>
+						<ul>
+							<li><a href={REPO}>GitHub</a></li>
+							<li><a href={u("/docs/contributing/")}>Contributing</a></li>
+							<li><a href={`${BLOB}/SECURITY.md`}>Security policy</a></li>
+							<li><a href={`${BLOB}/LICENSE`}>Licence (MIT)</a></li>
+							<li><a href={OPENSVERIGE}>OpenSverige</a></li>
+						</ul>
+					</div>
+				</div>
+			</div>
+		</footer>
+		<script>
+			import "../scripts/site";
+		</script>
+	</body>
+</html>

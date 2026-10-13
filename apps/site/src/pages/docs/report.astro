@@ -1,0 +1,136 @@
+---
+import scoring from "../../generated/scoring.json";
+import Docs from "../../layouts/Docs.astro";
+import { inline, paragraphsIn, readRepo, render, renderSection, section } from "../../lib/markdown";
+import { u } from "../../lib/site";
+
+const lede = paragraphsIn("README.md", "The report")[0] ?? "";
+// CONTRIBUTING: "`critical` for directly exploitable …, `high` for …"
+const severityLine = /\*\*Severity\*\*[^\n]+/.exec(readRepo("CONTRIBUTING.md"))?.[0] ?? "";
+const severities = [...severityLine.matchAll(/`(critical|high|medium|low|info)` for ([^,.]+?)(?=, and |, |\.)/g)].map((m) => ({
+	id: m[1] ?? "",
+	text: m[2] ?? "",
+}));
+const label = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const plural = (n: number, s: string) => `${n} ${s}${n === 1 ? "" : "s"}`;
+---
+
+<Docs
+	title="Report and scoring"
+	description="How openaudit scores each area from 0 to 100, how grades and severities are defined, and what the interactive HTML, JSON, SARIF and Markdown reports contain."
+	lede={inline(lede)}
+	sources={["README.md", "CONTRIBUTING.md", "packages/core/src/scoring.ts"]}
+>
+	<Fragment set:html={render(section(readRepo("README.md"), "The report", { body: true }).replace(lede, ""), "README.md")} />
+	<p>See one: <a href={u("/report/")}>openaudit's audit of its own repository</a>, rebuilt on every push.</p>
+
+	<h2 id="scoring">Scoring</h2>
+	<p>
+		Each finding adds a penalty by severity, and an area's score decays as the penalty grows, so the first serious finding costs the most. Info findings never lower a score. The overall score is the average of the areas that were examined. These examples are computed by openaudit's own scoring code when the site is built:
+	</p>
+	<div class="table">
+		<table>
+			<thead><tr><th scope="col">Findings in one area</th><th scope="col" class="r">Score</th><th scope="col">Grade</th></tr></thead>
+			<tbody>
+				{
+					scoring.examples.map((e) => (
+						<tr>
+							<th scope="row"><span class={`sev sev-${e.severity}`}>{plural(e.n, label(e.severity))}</span></th>
+							<td class="r num">{e.score}</td>
+							<td><b class={`gm-${e.grade} grade`}>{e.grade}</b></td>
+						</tr>
+					))
+				}
+			</tbody>
+		</table>
+	</div>
+	<h3 id="grades">Grades</h3>
+	<ol class="bands" aria-label="Grade bands">
+		{
+			scoring.bands.map((b, i) => {
+				const upper = i === 0 ? 100 : (scoring.bands[i - 1]?.min ?? 100) - 1;
+				return (
+					<li>
+						<b class={`gm-${b.grade}`}>{b.grade}</b>
+						<span class="num">{b.min === upper ? b.min : `${b.min}–${upper}`}</span>
+					</li>
+				);
+			})
+		}
+	</ol>
+
+	<h2 id="severity">Severity</h2>
+	<p>Severity reflects real impact. Each level has its own colour and glyph in the report, so colour is never the only signal.</p>
+	<dl class="sevs">
+		{
+			severities.map((s) => (
+				<div>
+					<dt><span class={`sev sev-${s.id}`}>{label(s.id)}</span></dt>
+					<dd>{s.text.charAt(0).toUpperCase() + s.text.slice(1)}.</dd>
+				</div>
+			))
+		}
+	</dl>
+
+	<Fragment set:html={renderSection("README.md", "What it audits")} />
+</Docs>
+
+<style>
+	.r {
+		text-align: right;
+	}
+
+	.grade {
+		font-weight: 800;
+		font-size: 1.125rem;
+		letter-spacing: -0.04em;
+	}
+
+	.bands {
+		display: grid;
+		grid-template-columns: repeat(5, minmax(0, 1fr));
+		gap: 0;
+		padding: 0;
+		list-style: none;
+		border-top: 1px solid var(--ink);
+	}
+
+	.bands li {
+		margin: 0;
+		padding: 0.8rem 0.25rem 0.9rem;
+		border-bottom: 1px solid var(--hair);
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+	}
+
+	.bands b {
+		font-family: var(--display);
+		font-size: 2.25rem;
+		font-weight: 800;
+		letter-spacing: -0.07em;
+		line-height: 1;
+	}
+
+	.bands .num {
+		font-size: 0.8125rem;
+		color: var(--graphite);
+	}
+
+	.sevs {
+		border-top: 1px solid var(--ink);
+	}
+
+	.sevs div {
+		display: grid;
+		grid-template-columns: 8rem minmax(0, 1fr);
+		gap: 1rem;
+		padding: 0.75rem 0;
+		border-bottom: 1px solid var(--hair-soft);
+		align-items: baseline;
+	}
+
+	.sevs dd {
+		color: var(--graphite);
+	}
+</style>

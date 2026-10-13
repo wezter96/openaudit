@@ -1,0 +1,57 @@
+---
+import action from "../../generated/action.json";
+import Docs from "../../layouts/Docs.astro";
+import { inline, paragraphsIn, readRepo, render, renderSection, section } from "../../lib/markdown";
+
+const CLI = "apps/cli/README.md";
+const INT = "integrations/README.md";
+const intro = paragraphsIn(INT, "Integrations")[0] ?? "";
+---
+
+<Docs
+	title="CI and integrations"
+	description="Run openaudit in GitHub Actions, GitLab CI, pre-commit or the Docker image, upload SARIF to code scanning and fail builds on new findings."
+	lede={inline(intro, INT)}
+	sources={["action.yml", "README.md", CLI, INT, ".pre-commit-hooks.yaml"]}
+>
+	<h2 id="github-action">GitHub Action</h2>
+	<Fragment set:html={render(section(readRepo("README.md"), "In CI", { body: true }), "README.md")} />
+	<h3 id="inputs">Inputs</h3>
+	<div class="table">
+		<table>
+			<thead><tr><th scope="col">Input</th><th scope="col">Default</th><th scope="col">Description</th></tr></thead>
+			<tbody>
+				{
+					action.inputs.map((i) => (
+						<tr>
+							<th scope="row"><code>{i.name}</code></th>
+							<td>{i.default ? <code>{i.default}</code> : <span class="muted">empty</span>}</td>
+							<td set:html={inline(i.description)} />
+						</tr>
+					))
+				}
+			</tbody>
+		</table>
+	</div>
+	<h3 id="outputs">Outputs</h3>
+	<div class="table">
+		<table>
+			<thead><tr><th scope="col">Output</th><th scope="col">Description</th></tr></thead>
+			<tbody>
+				{
+					action.outputs.map((o) => (
+						<tr>
+							<th scope="row"><code>{o.name}</code></th>
+							<td set:html={inline(o.description)} />
+						</tr>
+					))
+				}
+			</tbody>
+		</table>
+	</div>
+	<h2 id="sarif-and-code-scanning">SARIF and code scanning</h2>
+	<Fragment set:html={render(section(readRepo(CLI), "CI: GitHub code scanning", { body: true }), CLI)} />
+	<Fragment set:html={renderSection(INT, "Docker")} />
+	<Fragment set:html={renderSection(INT, "GitLab CI")} />
+	<Fragment set:html={renderSection(INT, "pre-commit")} />
+</Docs>

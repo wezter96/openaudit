@@ -1,8 +1,13 @@
 name: Pages
 
-# Publishes openaudit's audit of itself (the interactive HTML report plus the
-# JSON, SARIF and Markdown versions) and the architecture diagram to GitHub
-# Pages, so the README can link to a live, current example.
+# Builds the website (apps/site) and publishes it to GitHub Pages. The build
+# audits this repository for /report/ (the interactive HTML report plus the
+# JSON, SARIF and Markdown versions) and regenerates /architecture/, so both
+# are current on every push.
+#
+# The site is served under /openaudit/ on github.io. To move it to a custom
+# domain, set the repository variables SITE_URL (https://openaudit.se),
+# BASE_PATH (/) and CUSTOM_DOMAIN (openaudit.se).
 
 on:
   push:
@@ -19,6 +24,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -29,16 +35,19 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Audit this repository
         # The page is published whatever the result; CI is where the gate lives.
-        run: bun apps/cli/src/bin.ts . --format html,json,sarif,markdown --out _site/report --fail-on none --quiet
-      - name: Assemble the site
-        run: |
-          mv _site/report/openaudit-report.html _site/report/index.html
-          bun docs/architecture.ts
-          cp docs/architecture.html _site/architecture.html
-          cp docs/site-index.html _site/index.html
+        run: bun apps/cli/src/bin.ts . --format html,json,sarif,markdown --out apps/site/public/report --fail-on none --quiet
+      - name: Regenerate the architecture page
+        run: bun docs/architecture.ts
+      - name: Build the site
+        working-directory: apps/site
+        env:
+          SITE_URL: ${{ vars.SITE_URL || 'https://wezter96.github.io' }}
+          BASE_PATH: ${{ vars.BASE_PATH || '/openaudit' }}
+          CUSTOM_DOMAIN: ${{ vars.CUSTOM_DOMAIN }}
+        run: bun run build
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: _site
+          path: apps/site/dist
 
   deploy:
     needs: build

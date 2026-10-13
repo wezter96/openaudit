@@ -1,0 +1,22 @@
+{
+	"$schema": "../../node_modules/@biomejs/biome/configuration_schema.json",
+	"root": false,
+	"extends": "//",
+	"files": {
+		"includes": [
+			"**",
+			"!dist",
+			"!.astro",
+			"!.wrangler",
+			"!src/generated",
+			"!public/report",
+			"!public/architecture"
+		]
+	},
+	"html": {
+		"experimentalFullSupportEnabled": true,
+		"formatter": {
+			"enabled": false
+		}
+	}
+}

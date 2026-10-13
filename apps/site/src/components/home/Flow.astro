@@ -1,0 +1,449 @@
+---
+import scoring from "../../generated/scoring.json";
+import Icon from "../Icon.astro";
+
+// What one critical finding does to an area, from openaudit's own scoring.
+const critical = scoring.examples.find((e) => e.severity === "critical" && e.n === 1);
+const score = critical?.score ?? 50;
+const grade = critical?.grade ?? "D";
+const ring = 2 * Math.PI * 15;
+---
+
+<section class="sheet" id="how" aria-labelledby="how-title">
+	<div class="frame">
+		<div class="sheet-head">
+			<h2 id="how-title" class="rise">One issue, one finding</h2>
+			<p class="rise">
+				Most audits are a pile of tool outputs that disagree. openaudit runs the tools, merges what they agree on, and hands you one scored result.
+			</p>
+		</div>
+		<ol class="steps">
+			<li class="step s1" data-arrive>
+				<span class="no num" aria-hidden="true">1</span>
+				<h3>Run</h3>
+				<p>Point it at a folder, a URL, an image or a cloud account. It picks the auditors that apply and runs them in parallel. A scanner that isn't installed is skipped with an install hint.</p>
+				<div class="vis term" aria-hidden="true">
+					<p class="cmdline"><span class="pr">$</span> bunx openaudit .</p>
+					<ul class="runs">
+						<li><i></i>code.secrets</li>
+						<li><i></i>gitleaks</li>
+						<li><i></i>TruffleHog</li>
+						<li><i></i>Semgrep</li>
+						<li><i></i>osv-scanner</li>
+						<li class="off"><i></i>clippy <em>opt-in</em></li>
+					</ul>
+				</div>
+			</li>
+			<li class="step s2" data-arrive>
+				<span class="no num" aria-hidden="true">2</span>
+				<h3>Merge and score</h3>
+				<p>When several tools report the same issue, you get one finding that names who confirmed it, scored once. Each area scores 0 to 100 from what remains.</p>
+				<div class="vis merge" aria-hidden="true">
+					<ul class="src">
+						<li><span class="sev sev-critical bare"></span>gitleaks</li>
+						<li><span class="sev sev-critical bare"></span>TruffleHog</li>
+						<li><span class="sev sev-critical bare"></span>code.secrets</li>
+					</ul>
+					<svg class="lines" viewBox="0 0 300 40" aria-hidden="true" focusable="false">
+						<path pathLength="1" d="M50 0 C50 22 150 18 150 40"></path>
+						<path pathLength="1" d="M150 0 L150 40"></path>
+						<path pathLength="1" d="M250 0 C250 22 150 18 150 40"></path>
+					</svg>
+					<div class="one">
+						<span class="sev sev-critical">Critical</span>
+						<span class="one-main">
+							<strong>AWS access key ID</strong>
+							<span class="confirm"><Icon name="check" />Confirmed by gitleaks and TruffleHog</span>
+						</span>
+					</div>
+					<div class="scored">
+						<svg viewBox="0 0 36 36" aria-hidden="true" focusable="false">
+							<circle class="trk" cx="18" cy="18" r="15"></circle>
+							<circle
+								class={`arc a-${grade}`}
+								cx="18"
+								cy="18"
+								r="15"
+								stroke-dasharray={`${((score / 100) * ring).toFixed(2)} ${ring.toFixed(2)}`}
+								transform="rotate(-90 18 18)"></circle>
+						</svg>
+						<span>Security <b class={`gm-${grade}`}>{grade}</b> <span class="num">{score}</span></span>
+					</div>
+				</div>
+				<p class="vis-cap">Example: one leaked key, three tools, one finding. A single critical finding takes an area to {score}.</p>
+			</li>
+			<li class="step s3" data-arrive>
+				<span class="no num" aria-hidden="true">3</span>
+				<h3>Report and gate</h3>
+				<p>One report as HTML, JSON, SARIF, Markdown or CSV. <code>--fail-on</code> sets the exit code for CI, and <code>--diff</code> keeps a pull request to the files it changed.</p>
+				<div class="vis gate" aria-hidden="true">
+					<ul class="formats">
+						<li>HTML</li>
+						<li>JSON</li>
+						<li>SARIF</li>
+						<li>Markdown</li>
+						<li>CSV</li>
+					</ul>
+					<p class="cmdline"><span class="pr">$</span> bunx openaudit . --fail-on high</p>
+					<p class="exit"><span class="num">exit 1</span> 1 finding at or above high</p>
+				</div>
+			</li>
+		</ol>
+	</div>
+</section>
+
+<style>
+	.steps {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 2.5rem clamp(1.5rem, 3vw, 3rem);
+		position: relative;
+		counter-reset: none;
+	}
+
+	.step {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		padding-top: 1.25rem;
+		border-top: 1px solid var(--ink);
+	}
+
+	.no {
+		font-size: 0.875rem;
+		color: var(--accent);
+		font-weight: 600;
+	}
+
+	.step h3 {
+		margin-top: 0.4rem;
+		font-family: var(--display);
+		font-size: clamp(1.5rem, 1.2rem + 0.9vw, 2rem);
+		font-weight: 760;
+		letter-spacing: -0.035em;
+	}
+
+	.step > p {
+		margin-top: 0.6rem;
+		color: var(--graphite);
+		text-wrap: pretty;
+	}
+
+	.vis {
+		margin-top: 1.5rem;
+		padding: 1rem 1.1rem;
+		background: var(--paper-2);
+		border: 1px solid var(--hair-soft);
+		border-radius: 10px;
+		box-shadow: var(--lift);
+		min-height: 13.5rem;
+		font-size: 0.8125rem;
+	}
+
+	.vis-cap {
+		margin-top: 0.75rem;
+		font-size: 0.8125rem;
+		color: var(--graphite);
+	}
+
+	.cmdline {
+		font-family: var(--mono);
+		font-size: 0.8125rem;
+		color: var(--ink);
+	}
+
+	.pr {
+		color: var(--graphite);
+	}
+
+	.runs {
+		margin-top: 0.75rem;
+		display: grid;
+		gap: 0.35rem;
+		font-family: var(--mono);
+		font-size: 0.78rem;
+	}
+
+	.runs li {
+		display: flex;
+		align-items: center;
+		gap: 0.55rem;
+	}
+
+	.runs i {
+		width: 0.55rem;
+		height: 0.55rem;
+		border-radius: 1px;
+		background: var(--a-A);
+	}
+
+	.runs .off {
+		color: var(--graphite);
+	}
+
+	.runs .off i {
+		background: transparent;
+		box-shadow: inset 0 0 0 1.5px var(--c-none);
+	}
+
+	.runs em {
+		font-style: normal;
+		font-family: var(--sans);
+		font-size: 0.72rem;
+		margin-left: auto;
+	}
+
+	.src {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 0.35rem;
+	}
+
+	.src li {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.35rem;
+		padding: 0.3rem 0.25rem;
+		border: 1px solid var(--hair);
+		border-radius: 6px;
+		font-family: var(--mono);
+		font-size: 0.7rem;
+		white-space: nowrap;
+		overflow: hidden;
+	}
+
+	.sev.bare {
+		gap: 0;
+	}
+
+	.lines {
+		display: block;
+		width: 100%;
+		height: auto;
+		overflow: visible;
+	}
+
+	.lines path {
+		fill: none;
+		stroke: var(--c-critical);
+		stroke-width: 1;
+		stroke-dasharray: 1 1;
+	}
+
+	.one {
+		position: relative;
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr);
+		gap: 0.6rem;
+		align-items: baseline;
+		padding: 0.6rem 0.7rem 0.6rem 0.85rem;
+		border-radius: 7px;
+		background: var(--paper);
+		border: 1px solid var(--hair-soft);
+	}
+
+	.one::before {
+		content: "";
+		position: absolute;
+		left: 0;
+		top: 0.4rem;
+		bottom: 0.4rem;
+		width: 2px;
+		border-radius: 2px;
+		background: var(--c-critical);
+	}
+
+	.one-main {
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+	}
+
+	.one-main strong {
+		font-weight: 650;
+		font-size: 0.875rem;
+	}
+
+	.confirm {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		font-size: 0.72rem;
+		font-weight: 600;
+		color: var(--ok);
+	}
+
+	.confirm :global(svg) {
+		width: 0.8rem;
+		height: 0.8rem;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 2.4;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+
+	.scored {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		margin-top: 0.7rem;
+		font-size: 0.875rem;
+	}
+
+	.scored svg {
+		width: 2.1rem;
+		height: 2.1rem;
+	}
+
+	.scored b {
+		font-family: var(--display);
+		font-weight: 800;
+		font-size: 1.1rem;
+		letter-spacing: -0.04em;
+	}
+
+	.trk {
+		fill: none;
+		stroke: var(--c-none);
+		stroke-width: 4;
+	}
+
+	.arc {
+		fill: none;
+		stroke-width: 4;
+		stroke-linecap: round;
+	}
+
+	.formats {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+		margin-bottom: 1rem;
+	}
+
+	.formats li {
+		padding: 0.2rem 0.55rem;
+		border-radius: 5px;
+		border: 1px solid var(--hair);
+		font-family: var(--mono);
+		font-size: 0.75rem;
+	}
+
+	.exit {
+		display: flex;
+		gap: 0.6rem;
+		align-items: baseline;
+		margin-top: 0.6rem;
+		color: var(--graphite);
+	}
+
+	.exit .num {
+		color: var(--t-high);
+		font-weight: 600;
+	}
+
+	/* each step plays once as it arrives; side by side, they play in turn */
+	.step {
+		--d: 0s;
+	}
+
+	.s2 {
+		--d: 0.7s;
+	}
+
+	.s3 {
+		--d: 1.9s;
+	}
+
+	.runs li:nth-child(2) {
+		--t: 0.08s;
+	}
+
+	.runs li:nth-child(3) {
+		--t: 0.16s;
+	}
+
+	.runs li:nth-child(4) {
+		--t: 0.24s;
+	}
+
+	.runs li:nth-child(5) {
+		--t: 0.32s;
+	}
+
+	.runs li:nth-child(6) {
+		--t: 0.4s;
+	}
+
+	.one {
+		--t: 1s;
+	}
+
+	.scored {
+		--t: 1.35s;
+	}
+
+	.gate .cmdline {
+		--t: 0.25s;
+	}
+
+	.exit {
+		--t: 0.5s;
+	}
+
+	@media (prefers-reduced-motion: no-preference) {
+		:global(.js) .runs li,
+		:global(.js) .src li,
+		:global(.js) .one,
+		:global(.js) .scored,
+		:global(.js) .formats li,
+		:global(.js) .gate .cmdline,
+		:global(.js) .exit {
+			transition:
+				opacity 0.5s var(--soft),
+				transform 0.8s var(--settle);
+			transition-delay: calc(var(--d) + var(--t, 0s));
+		}
+
+		:global(.js) .lines path {
+			transition: stroke-dashoffset 0.8s var(--soft) calc(var(--d) + 0.3s);
+		}
+
+		:global(.js) .step:not(.in) .runs li,
+		:global(.js) .step:not(.in) .src li {
+			opacity: 0;
+			transform: translateY(-6px);
+		}
+
+		:global(.js) .step:not(.in) .lines path {
+			stroke-dashoffset: 1;
+		}
+
+		:global(.js) .step:not(.in) .one,
+		:global(.js) .step:not(.in) .scored,
+		:global(.js) .step:not(.in) .formats li,
+		:global(.js) .step:not(.in) .gate .cmdline,
+		:global(.js) .step:not(.in) .exit {
+			opacity: 0;
+			transform: translateY(10px);
+		}
+	}
+
+	@media (max-width: 60rem) {
+		.steps {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.s2,
+		.s3 {
+			--d: 0s;
+		}
+
+		.vis {
+			min-height: 0;
+			max-width: 30rem;
+		}
+	}
+</style>

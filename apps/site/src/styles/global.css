@@ -1,0 +1,1465 @@
+/*
+ * openaudit.se: the report's "Calibration sheet", opened up into a site.
+ * - Paper: cool fog with a millimetre dot grid. Hairlines separate things;
+ *   boxes are the exception (commands, code), never the default.
+ * - Type: one system sans, set large and tight; a monospace data layer for
+ *   every command, id, count and score. No web fonts.
+ * - Colour: ink and graphite on fog, one ultramarine accent for anything you
+ *   can act on, the report's heat ramp and grade colours for data only.
+ * - Motion: springs, not eases. One choreographed load (the dial draws
+ *   itself), then each sheet settles once as it arrives. Reduced motion and
+ *   no-JS show every final state at once.
+ */
+
+:root {
+	color-scheme: light dark;
+	--paper: #eef1f4;
+	--paper-2: #f8fafb;
+	--paper-3: #e4e8ed;
+	--ink: #0d1522;
+	--graphite: #4a5668;
+	--hair: #c9d1db;
+	--hair-soft: #dce2e9;
+	--dot: rgb(13 21 34 / 0.085);
+	--accent: #2340e8;
+	--accent-ink: #1b33c4;
+	--accent-soft: #e2e7ff;
+	--focus: #2340e8;
+	--c-critical: #a1123a;
+	--c-high: #e04a1f;
+	--c-medium: #f0a22b;
+	--c-low: #dfbc4f;
+	--c-info: #a3adba;
+	--c-none: #d5dbe3;
+	--t-critical: #a1123a;
+	--t-high: #b4380f;
+	--t-medium: #8c5600;
+	--t-low: #6b570a;
+	--t-info: #556070;
+	--g-A: #0b7a4e;
+	--g-B: #4f7a12;
+	--g-C: #8c5600;
+	--g-D: #b4380f;
+	--g-F: #a1123a;
+	--a-A: #19a86a;
+	--a-B: #7fb236;
+	--a-C: #f0a22b;
+	--a-D: #e04a1f;
+	--a-F: #a1123a;
+	--ok: #0b7a4e;
+	--lift:
+		0 1px 2px rgb(13 21 34 / 0.06), 0 10px 28px -14px rgb(13 21 34 / 0.22);
+	--shot:
+		0 1px 1px rgb(13 21 34 / 0.05), 0 30px 60px -30px rgb(13 21 34 / 0.35);
+	--sans:
+		ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
+		"Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+	--display:
+		ui-sans-serif, -apple-system, BlinkMacSystemFont,
+		"Segoe UI Variable Display", "Segoe UI", Inter, Roboto, "Helvetica Neue",
+		Arial, sans-serif;
+	--mono:
+		ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", "Cascadia Mono",
+		"Segoe UI Mono", Menlo, Consolas, monospace;
+	--settle: cubic-bezier(0.22, 1.25, 0.36, 1);
+	--soft: cubic-bezier(0.2, 0.8, 0.2, 1);
+	--frame: 84rem;
+	--gutter: clamp(1rem, 0.4rem + 2.6vw, 2.25rem);
+	--head: 3.75rem;
+}
+
+@supports (transition-timing-function: linear(0, 1)) {
+	:root {
+		--settle: linear(
+			0,
+			0.033,
+			0.102,
+			0.195,
+			0.309,
+			0.416,
+			0.52,
+			0.616,
+			0.702,
+			0.783,
+			0.846,
+			0.897,
+			0.938,
+			0.972,
+			0.995,
+			1.012,
+			1.023,
+			1.03,
+			1.033,
+			1.033,
+			1.032,
+			1.029,
+			1.026,
+			1.023,
+			1.019,
+			1.015,
+			1.012,
+			1.009,
+			1.007,
+			1.005,
+			1.003,
+			1.002,
+			1.001,
+			1,
+			0.999,
+			0.999,
+			0.999,
+			0.999,
+			0.999,
+			0.999,
+			0.999,
+			0.999,
+			0.999,
+			0.999,
+			1,
+			1,
+			1,
+			1,
+			1
+		);
+		--soft: linear(
+			0,
+			0.019,
+			0.056,
+			0.113,
+			0.18,
+			0.241,
+			0.312,
+			0.373,
+			0.44,
+			0.495,
+			0.553,
+			0.6,
+			0.643,
+			0.688,
+			0.723,
+			0.759,
+			0.787,
+			0.815,
+			0.837,
+			0.859,
+			0.877,
+			0.894,
+			0.907,
+			0.92,
+			0.93,
+			0.94,
+			0.949,
+			0.955,
+			0.962,
+			0.967,
+			0.971,
+			0.975,
+			0.979,
+			0.982,
+			0.984,
+			0.986,
+			0.988,
+			0.99,
+			0.991,
+			0.993,
+			0.994,
+			0.994,
+			0.995,
+			0.996,
+			0.997,
+			0.997,
+			0.997,
+			0.998,
+			1
+		);
+	}
+}
+
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		--paper: #0b111b;
+		--paper-2: #111a27;
+		--paper-3: #172233;
+		--ink: #e7ecf3;
+		--graphite: #9aa7b9;
+		--hair: #2a374c;
+		--hair-soft: #1b2636;
+		--dot: rgb(154 167 185 / 0.08);
+		--accent: #8fa2ff;
+		--accent-ink: #b3c0ff;
+		--accent-soft: #1a2246;
+		--focus: #8fa2ff;
+		--c-critical: #ff4f75;
+		--c-high: #ff7442;
+		--c-medium: #ffb13d;
+		--c-low: #e9d38a;
+		--c-info: #6f7b8e;
+		--c-none: #243145;
+		--t-critical: #ff8aa3;
+		--t-high: #ff9f7a;
+		--t-medium: #ffc46e;
+		--t-low: #e9d38a;
+		--t-info: #a6b1c1;
+		--g-A: #4fd49b;
+		--g-B: #a6d96c;
+		--g-C: #ffc46e;
+		--g-D: #ff9f7a;
+		--g-F: #ff8aa3;
+		--a-A: #3cc98c;
+		--a-B: #98cf55;
+		--a-C: #ffb13d;
+		--a-D: #ff7442;
+		--a-F: #ff4f75;
+		--ok: #4fd49b;
+		--lift: 0 1px 2px rgb(0 0 0 / 0.4), 0 14px 30px -14px rgb(0 0 0 / 0.7);
+		--shot: 0 1px 1px rgb(0 0 0 / 0.4), 0 30px 60px -30px rgb(0 0 0 / 0.8);
+	}
+}
+
+:root[data-theme="dark"] {
+	color-scheme: dark;
+	--paper: #0b111b;
+	--paper-2: #111a27;
+	--paper-3: #172233;
+	--ink: #e7ecf3;
+	--graphite: #9aa7b9;
+	--hair: #2a374c;
+	--hair-soft: #1b2636;
+	--dot: rgb(154 167 185 / 0.08);
+	--accent: #8fa2ff;
+	--accent-ink: #b3c0ff;
+	--accent-soft: #1a2246;
+	--focus: #8fa2ff;
+	--c-critical: #ff4f75;
+	--c-high: #ff7442;
+	--c-medium: #ffb13d;
+	--c-low: #e9d38a;
+	--c-info: #6f7b8e;
+	--c-none: #243145;
+	--t-critical: #ff8aa3;
+	--t-high: #ff9f7a;
+	--t-medium: #ffc46e;
+	--t-low: #e9d38a;
+	--t-info: #a6b1c1;
+	--g-A: #4fd49b;
+	--g-B: #a6d96c;
+	--g-C: #ffc46e;
+	--g-D: #ff9f7a;
+	--g-F: #ff8aa3;
+	--a-A: #3cc98c;
+	--a-B: #98cf55;
+	--a-C: #ffb13d;
+	--a-D: #ff7442;
+	--a-F: #ff4f75;
+	--ok: #4fd49b;
+	--lift: 0 1px 2px rgb(0 0 0 / 0.4), 0 14px 30px -14px rgb(0 0 0 / 0.7);
+	--shot: 0 1px 1px rgb(0 0 0 / 0.4), 0 30px 60px -30px rgb(0 0 0 / 0.8);
+}
+
+:root[data-theme="light"] {
+	color-scheme: light;
+}
+
+/* ------------------------------------------------------------------ base */
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+html {
+	-webkit-text-size-adjust: 100%;
+	text-size-adjust: 100%;
+	scroll-padding-top: calc(var(--head) + 1.5rem);
+	background-color: var(--paper);
+}
+
+body {
+	margin: 0;
+	min-height: 100vh;
+	display: flex;
+	flex-direction: column;
+	background-color: var(--paper);
+	background-image: radial-gradient(
+		circle at 1px 1px,
+		var(--dot) 1px,
+		transparent 0
+	);
+	background-size: 20px 20px;
+	color: var(--ink);
+	font: 400 1.0625rem / 1.6 var(--sans);
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
+	font-kerning: normal;
+}
+
+main {
+	flex: 1;
+	display: block;
+}
+
+main:focus {
+	outline: 0;
+}
+
+h1,
+h2,
+h3,
+h4 {
+	margin: 0;
+	font-weight: 680;
+	letter-spacing: -0.015em;
+	text-wrap: balance;
+}
+
+p,
+dl,
+dd,
+figure,
+blockquote {
+	margin: 0;
+}
+
+ul,
+ol {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+img,
+svg {
+	display: block;
+	max-width: 100%;
+}
+
+a {
+	color: var(--accent);
+	text-decoration-thickness: 1px;
+	text-underline-offset: 0.2em;
+	transition:
+		text-decoration-thickness 0.2s,
+		color 0.2s;
+}
+
+a:hover {
+	text-decoration-thickness: 2px;
+}
+
+:focus-visible {
+	outline: 2px solid var(--focus);
+	outline-offset: 3px;
+	border-radius: 4px;
+}
+
+::selection {
+	background: var(--accent-soft);
+	color: var(--ink);
+}
+
+code,
+kbd,
+pre,
+.mono {
+	font-family: var(--mono);
+	font-variant-ligatures: none;
+}
+
+code {
+	font-size: 0.86em;
+}
+
+[hidden] {
+	/* biome-ignore lint/complexity/noImportantStyles: hidden must win over any display rule */
+	display: none !important;
+}
+
+/* controls that only work with script; .js is set before the first paint,
+   so showing them never shifts the layout */
+html:not(.js) .needs-js {
+	display: none;
+}
+
+.sr-only {
+	position: absolute;
+	/* anchored, so a long label can never widen the page from its static position */
+	top: 0;
+	left: 0;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}
+
+.skip {
+	position: absolute;
+	left: 1rem;
+	top: -4rem;
+	z-index: 100;
+	background: var(--paper-2);
+	color: var(--accent);
+	padding: 0.6rem 1rem;
+	border-radius: 6px;
+	box-shadow: var(--lift);
+}
+
+.skip:focus {
+	top: 0.75rem;
+}
+
+.frame {
+	width: 100%;
+	max-width: var(--frame);
+	margin-inline: auto;
+	padding-inline: var(--gutter);
+}
+
+.muted {
+	color: var(--graphite);
+}
+
+.num {
+	font-family: var(--mono);
+	font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- header */
+
+.site-head {
+	position: sticky;
+	top: 0;
+	z-index: 40;
+	height: var(--head);
+	transition:
+		background-color 0.3s,
+		border-color 0.3s;
+	border-bottom: 1px solid transparent;
+}
+
+.site-head.stuck {
+	background: color-mix(in srgb, var(--paper) 84%, transparent);
+	-webkit-backdrop-filter: saturate(1.4) blur(14px);
+	backdrop-filter: saturate(1.4) blur(14px);
+	border-bottom-color: var(--hair);
+}
+
+.site-head .frame {
+	display: flex;
+	align-items: center;
+	gap: 1.5rem;
+	height: 100%;
+}
+
+.brand {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.55rem;
+	font-weight: 700;
+	font-size: 1rem;
+	letter-spacing: -0.02em;
+	color: var(--ink);
+	text-decoration: none;
+	flex: none;
+}
+
+.brand svg {
+	width: 1.3rem;
+	height: 1.3rem;
+}
+
+.logo-a {
+	fill: var(--ink);
+}
+
+.logo-b {
+	fill: none;
+	stroke: var(--paper);
+	stroke-width: 2.4;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+/* the compact grade that joins the header once the hero dial is gone */
+.mini {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.45rem;
+	font-size: 0.8125rem;
+	color: var(--graphite);
+	text-decoration: none;
+	opacity: 0;
+	transform: translateX(-6px);
+	pointer-events: none;
+	transition:
+		opacity 0.25s,
+		transform 0.6s var(--settle);
+}
+
+.stuck-dial .mini {
+	opacity: 1;
+	transform: none;
+	pointer-events: auto;
+}
+
+.mini svg {
+	width: 1.45rem;
+	height: 1.45rem;
+	transform: rotate(-90deg);
+}
+
+.mini .track {
+	stroke: var(--c-none);
+}
+
+.mini b {
+	font-size: 1rem;
+	font-weight: 800;
+	letter-spacing: -0.03em;
+}
+
+.mini:hover .num {
+	color: var(--accent);
+}
+
+.nav {
+	display: flex;
+	align-items: center;
+	gap: 0.25rem;
+	margin-left: auto;
+}
+
+.nav a {
+	position: relative;
+	color: var(--graphite);
+	text-decoration: none;
+	font-size: 0.9375rem;
+	font-weight: 550;
+	padding: 0.4rem 0.65rem;
+	border-radius: 6px;
+	transition: color 0.2s;
+}
+
+.nav a:hover,
+.nav a[aria-current="page"] {
+	color: var(--ink);
+}
+
+.nav a::after {
+	content: "";
+	position: absolute;
+	left: 0.65rem;
+	right: 0.65rem;
+	bottom: 0.15rem;
+	height: 1.5px;
+	background: var(--accent);
+	transform: scaleX(0);
+	transform-origin: left;
+	transition: transform 0.5s var(--settle);
+}
+
+.nav a:hover::after,
+.nav a[aria-current="page"]::after {
+	transform: none;
+}
+
+.icon-btn {
+	display: inline-grid;
+	place-items: center;
+	width: 2.4rem;
+	height: 2.4rem;
+	border-radius: 7px;
+	border: 1px solid transparent;
+	background: none;
+	color: var(--graphite);
+	cursor: pointer;
+	transition:
+		color 0.2s,
+		border-color 0.2s,
+		background-color 0.2s;
+	flex: none;
+}
+
+.icon-btn:hover {
+	color: var(--ink);
+	border-color: var(--hair);
+	background: var(--paper-2);
+}
+
+.icon-btn svg {
+	width: 1.15rem;
+	height: 1.15rem;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.8;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.theme .sun,
+:root[data-theme="dark"] .theme .moon {
+	display: none;
+}
+
+:root[data-theme="dark"] .theme .sun {
+	display: block;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) .theme .moon {
+		display: none;
+	}
+
+	:root:not([data-theme="light"]) .theme .sun {
+		display: block;
+	}
+}
+
+.menu-btn {
+	display: none;
+}
+
+@media (max-width: 52rem) {
+	.site-head .frame {
+		gap: 0.75rem;
+	}
+
+	.menu-btn {
+		display: inline-grid;
+		margin-left: auto;
+	}
+
+	.nav {
+		flex-wrap: wrap;
+	}
+
+	.js .nav {
+		position: absolute;
+		top: var(--head);
+		left: 0;
+		right: 0;
+		flex-direction: column;
+		align-items: stretch;
+		gap: 0;
+		margin: 0;
+		padding: 0.5rem var(--gutter) 1rem;
+		background: var(--paper);
+		border-bottom: 1px solid var(--hair);
+		box-shadow: var(--lift);
+	}
+
+	.js .nav:not(.open) {
+		display: none;
+	}
+
+	.js .nav a {
+		padding: 0.85rem 0;
+		font-size: 1.0625rem;
+		border-bottom: 1px solid var(--hair-soft);
+		border-radius: 0;
+	}
+
+	.nav a::after {
+		display: none;
+	}
+
+	.nav a[aria-current="page"] {
+		color: var(--accent);
+	}
+
+	.mini {
+		display: none;
+	}
+}
+
+/* --------------------------------------------------------------- buttons */
+
+.btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	font: inherit;
+	font-size: 0.9375rem;
+	font-weight: 620;
+	color: var(--ink);
+	background: transparent;
+	border: 1px solid var(--hair);
+	border-radius: 8px;
+	padding: 0.55rem 1rem;
+	min-height: 2.75rem;
+	cursor: pointer;
+	text-decoration: none;
+	transition:
+		border-color 0.2s,
+		background-color 0.2s,
+		color 0.2s,
+		transform 0.35s var(--settle);
+}
+
+.btn:hover {
+	border-color: var(--ink);
+	background: var(--paper-2);
+}
+
+.btn:active {
+	transform: scale(0.97);
+}
+
+.btn.primary {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: #fff;
+}
+
+.btn.primary:hover {
+	background: var(--accent-ink);
+	border-color: var(--accent-ink);
+}
+
+:root[data-theme="dark"] .btn.primary {
+	color: #0b111b;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) .btn.primary {
+		color: #0b111b;
+	}
+}
+
+.btn svg {
+	width: 1.05rem;
+	height: 1.05rem;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.9;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+/* -------------------------------------------------------------- command */
+
+.cmd {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	max-width: 32rem;
+	padding: 0.5rem 0.5rem 0.5rem 1.1rem;
+	background: var(--paper-2);
+	border: 1px solid var(--hair);
+	border-radius: 10px;
+	box-shadow: var(--lift);
+}
+
+.cmd code {
+	flex: 1;
+	min-width: 0;
+	font-size: 1.0625rem;
+	font-weight: 500;
+	overflow-wrap: anywhere;
+}
+
+.cmd code::before {
+	content: "$ ";
+	color: var(--graphite);
+	user-select: none;
+}
+
+.copy-btn {
+	position: relative;
+	flex: none;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	font: inherit;
+	font-size: 0.8125rem;
+	font-weight: 620;
+	color: var(--graphite);
+	background: transparent;
+	border: 1px solid var(--hair);
+	border-radius: 7px;
+	padding: 0.4rem 0.7rem;
+	min-height: 2.25rem;
+	cursor: pointer;
+	transition:
+		color 0.2s,
+		border-color 0.2s,
+		background-color 0.2s;
+}
+
+.copy-btn:hover {
+	color: var(--ink);
+	border-color: var(--ink);
+}
+
+.copy-btn svg {
+	width: 0.95rem;
+	height: 0.95rem;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.9;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.copy-btn .done {
+	display: none;
+}
+
+.copy-btn.copied {
+	color: var(--ok);
+	border-color: var(--ok);
+}
+
+.copy-btn.copied .idle {
+	display: none;
+}
+
+.copy-btn.copied .done {
+	display: block;
+	animation: tick 0.5s var(--settle);
+}
+
+@keyframes tick {
+	from {
+		transform: scale(0.4);
+		opacity: 0;
+	}
+}
+
+/* ------------------------------------------------------------ severities */
+
+.sev {
+	--s: var(--c-info);
+	display: inline-flex;
+	align-items: center;
+	gap: 0.45rem;
+	font-size: 0.8125rem;
+	font-weight: 600;
+	white-space: nowrap;
+	color: var(--t-info);
+}
+
+.sev::before {
+	content: "";
+	display: inline-block;
+	width: 0.62rem;
+	height: 0.62rem;
+	flex: none;
+	background: var(--s);
+}
+
+.sev-critical {
+	--s: var(--c-critical);
+	color: var(--t-critical);
+}
+
+.sev-high {
+	--s: var(--c-high);
+	color: var(--t-high);
+}
+
+.sev-medium {
+	--s: var(--c-medium);
+	color: var(--t-medium);
+}
+
+.sev-low {
+	--s: var(--c-low);
+	color: var(--t-low);
+}
+
+.sev-critical::before {
+	transform: rotate(45deg) scale(0.86);
+	border-radius: 1px;
+}
+
+.sev-high::before {
+	clip-path: polygon(50% 4%, 100% 96%, 0 96%);
+}
+
+.sev-medium::before {
+	border-radius: 50%;
+}
+
+.sev-low::before {
+	border-radius: 50%;
+	background: transparent;
+	box-shadow: inset 0 0 0 2px var(--s);
+}
+
+.sev-info::before {
+	height: 2px;
+	border-radius: 1px;
+}
+
+.gm-A {
+	color: var(--g-A);
+}
+
+.gm-B {
+	color: var(--g-B);
+}
+
+.gm-C {
+	color: var(--g-C);
+}
+
+.gm-D {
+	color: var(--g-D);
+}
+
+.gm-F {
+	color: var(--g-F);
+}
+
+.a-A {
+	stroke: var(--a-A);
+}
+
+.a-B {
+	stroke: var(--a-B);
+}
+
+.a-C {
+	stroke: var(--a-C);
+}
+
+.a-D {
+	stroke: var(--a-D);
+}
+
+.a-F {
+	stroke: var(--a-F);
+}
+
+/* ------------------------------------------------------------ page head */
+
+.page-head {
+	padding-block: clamp(2.5rem, 1.5rem + 4vw, 5rem) 2rem;
+}
+
+.page-head h1 {
+	font-family: var(--display);
+	font-size: clamp(2.5rem, 1.4rem + 4.6vw, 5rem);
+	font-weight: 780;
+	letter-spacing: -0.05em;
+	line-height: 0.95;
+	max-width: 18ch;
+}
+
+.page-head .lede {
+	margin-top: 1.25rem;
+	max-width: 40rem;
+	font-size: clamp(1.0625rem, 1rem + 0.3vw, 1.25rem);
+	color: var(--graphite);
+	text-wrap: pretty;
+}
+
+/* --------------------------------------------------------------- sheets */
+
+.sheet {
+	position: relative;
+	padding-block: clamp(3.5rem, 2.25rem + 4.5vw, 6.5rem);
+}
+
+.sheet::before {
+	content: "";
+	position: absolute;
+	left: var(--gutter);
+	right: var(--gutter);
+	top: 0;
+	max-width: calc(var(--frame) - 2 * var(--gutter));
+	margin-inline: auto;
+	border-top: 1px solid var(--ink);
+	transform-origin: left;
+}
+
+.sheet-head {
+	display: grid;
+	grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+	gap: 1.25rem clamp(1.5rem, 4vw, 4rem);
+	align-items: end;
+	margin-bottom: clamp(2rem, 1.25rem + 2.5vw, 3.5rem);
+}
+
+.sheet-head h2 {
+	font-family: var(--display);
+	font-size: clamp(2.125rem, 1.3rem + 3.2vw, 3.75rem);
+	font-weight: 760;
+	letter-spacing: -0.045em;
+	line-height: 0.98;
+}
+
+.sheet-head p {
+	max-width: 36rem;
+	color: var(--graphite);
+	font-size: 1.125rem;
+	text-wrap: pretty;
+}
+
+.sheet-head p b {
+	color: var(--ink);
+	font-weight: 600;
+}
+
+@media (max-width: 52rem) {
+	.sheet-head {
+		grid-template-columns: 1fr;
+	}
+}
+
+/*
+ * Scroll choreography. Where the browser has scroll-driven animations, a
+ * sheet's rule draws and its parts rise in step with the scroll itself;
+ * elsewhere the script adds .in once and transitions play. Reduced motion
+ * gets neither: everything is simply there.
+ */
+@keyframes rise {
+	from {
+		opacity: 0;
+		transform: translateY(28px);
+	}
+}
+
+@keyframes draw {
+	from {
+		transform: scaleX(0);
+	}
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	@supports (animation-timeline: view()) {
+		.sheet::before {
+			animation: draw linear both;
+			animation-timeline: view();
+			animation-range: entry 0% entry 80%;
+		}
+
+		.rise {
+			animation: rise linear both;
+			animation-timeline: view();
+			animation-range: entry 0% entry 75%;
+		}
+
+		.rise:nth-child(2) {
+			animation-range: entry 6% entry 81%;
+		}
+
+		.rise:nth-child(3) {
+			animation-range: entry 12% entry 87%;
+		}
+
+		.rise:nth-child(4) {
+			animation-range: entry 18% entry 93%;
+		}
+
+		.rise:nth-child(n + 5) {
+			animation-range: entry 24% entry 99%;
+		}
+	}
+
+	@supports not (animation-timeline: view()) {
+		.js .sheet:not(.in)::before {
+			transform: scaleX(0);
+		}
+
+		.js .sheet .rise {
+			transition:
+				opacity 0.7s var(--soft),
+				transform 0.9s var(--soft);
+		}
+
+		.js .sheet:not(.in) .rise {
+			opacity: 0;
+			transform: translateY(18px);
+		}
+
+		.js .sheet .rise:nth-child(2) {
+			transition-delay: 0.08s;
+		}
+
+		.js .sheet .rise:nth-child(3) {
+			transition-delay: 0.16s;
+		}
+
+		.js .sheet .rise:nth-child(4) {
+			transition-delay: 0.24s;
+		}
+
+		.js .sheet .rise:nth-child(n + 5) {
+			transition-delay: 0.32s;
+		}
+
+		/* if the script never runs, nothing stays hidden for long */
+		.js:not(.ready) .sheet .rise,
+		.js:not(.ready) .sheet::before {
+			animation: failsafe 0s 2.5s forwards;
+		}
+	}
+}
+
+@keyframes failsafe {
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+.sentinel {
+	position: absolute;
+	top: 0;
+	width: 1px;
+	height: 1px;
+}
+
+/* --------------------------------------------------------------- tables */
+
+.table {
+	overflow-x: auto;
+	border-top: 1px solid var(--ink);
+}
+
+.table table {
+	border-collapse: collapse;
+	width: 100%;
+	font-size: 0.9375rem;
+}
+
+.table th,
+.table td {
+	text-align: left;
+	padding: 0.8rem 0.75rem;
+	border-bottom: 1px solid var(--hair-soft);
+	vertical-align: top;
+}
+
+.table th:first-child,
+.table td:first-child {
+	padding-left: 0;
+}
+
+.table thead th {
+	font-size: 0.8125rem;
+	font-weight: 550;
+	color: var(--graphite);
+	white-space: nowrap;
+	border-bottom-color: var(--hair);
+}
+
+.table td code,
+.table th code {
+	white-space: nowrap;
+	overflow-wrap: normal;
+}
+
+/* ----------------------------------------------------------------- code */
+
+.code {
+	position: relative;
+	margin: 1.25rem 0;
+}
+
+.code pre {
+	margin: 0;
+	background: var(--paper-2);
+	border: 1px solid var(--hair-soft);
+	border-radius: 8px;
+	padding: 1rem 1.15rem;
+	overflow-x: auto;
+	font-size: 0.875rem;
+	line-height: 1.65;
+	tab-size: 2;
+}
+
+.code pre code {
+	font-size: inherit;
+}
+
+.code .copy {
+	position: absolute;
+	top: 0.5rem;
+	right: 0.5rem;
+	font: inherit;
+	font-size: 0.75rem;
+	font-weight: 600;
+	color: var(--graphite);
+	background: var(--paper-2);
+	border: 1px solid var(--hair);
+	border-radius: 6px;
+	padding: 0.25rem 0.55rem;
+	cursor: pointer;
+	opacity: 0;
+	transition:
+		opacity 0.2s,
+		color 0.2s,
+		border-color 0.2s;
+}
+
+.code:hover .copy,
+.code .copy:focus-visible,
+.code .copy.copied {
+	opacity: 1;
+}
+
+.code .copy.copied {
+	color: var(--ok);
+	border-color: var(--ok);
+}
+
+@media (hover: none) {
+	.code .copy {
+		opacity: 1;
+	}
+}
+
+pre .c {
+	color: var(--graphite);
+}
+
+pre .k {
+	color: var(--accent);
+}
+
+pre .s {
+	color: var(--t-high);
+}
+
+/* ---------------------------------------------------------------- prose */
+
+.prose {
+	max-width: 46rem;
+	font-size: 1.0625rem;
+	line-height: 1.65;
+}
+
+.prose > * + * {
+	margin-top: 1.1rem;
+}
+
+.prose h2 {
+	margin-top: 3.5rem;
+	padding-top: 1.25rem;
+	border-top: 1px solid var(--hair);
+	font-size: clamp(1.625rem, 1.3rem + 1vw, 2.125rem);
+	font-weight: 740;
+	letter-spacing: -0.035em;
+	line-height: 1.1;
+}
+
+.prose > h2:first-child {
+	margin-top: 2.5rem;
+	padding-top: 0;
+	border-top: 0;
+}
+
+.prose h3 {
+	margin-top: 2.25rem;
+	font-size: 1.25rem;
+	font-weight: 680;
+	letter-spacing: -0.02em;
+}
+
+.prose h4 {
+	margin-top: 1.75rem;
+	font-size: 1.0625rem;
+	font-weight: 650;
+}
+
+.prose h2 + *,
+.prose h3 + *,
+.prose h4 + * {
+	margin-top: 0.75rem;
+}
+
+.prose p,
+.prose li {
+	text-wrap: pretty;
+}
+
+.prose ul,
+.prose ol {
+	padding-left: 1.25rem;
+}
+
+.prose ul {
+	list-style: square;
+}
+
+.prose ul ::marker {
+	color: var(--graphite);
+}
+
+.prose ol {
+	list-style: decimal;
+}
+
+.prose li + li {
+	margin-top: 0.4rem;
+}
+
+.prose li > ul,
+.prose li > ol {
+	margin-top: 0.4rem;
+}
+
+.prose strong {
+	font-weight: 650;
+}
+
+.prose :not(pre) > code {
+	padding: 0.08em 0.3em;
+	border-radius: 4px;
+	background: var(--paper-3);
+	overflow-wrap: anywhere;
+}
+
+.prose .table {
+	margin-top: 1.5rem;
+}
+
+.prose .table table {
+	font-size: 0.9375rem;
+}
+
+.prose .code {
+	margin-top: 1.25rem;
+}
+
+.prose details {
+	border-top: 1px solid var(--hair-soft);
+	padding: 0.25rem 0;
+}
+
+.prose details:last-of-type {
+	border-bottom: 1px solid var(--hair-soft);
+}
+
+.prose summary {
+	cursor: pointer;
+	padding: 0.6rem 0;
+	font-weight: 600;
+}
+
+.prose summary code {
+	font-size: 0.9em;
+}
+
+/* help output and schemas wrap instead of scrolling sideways */
+.prose details pre {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	margin: 0.25rem 0 1rem;
+	padding: 1rem 1.15rem;
+	background: var(--paper-2);
+	border: 1px solid var(--hair-soft);
+	border-radius: 8px;
+	font-size: 0.8125rem;
+	line-height: 1.6;
+}
+
+.prose blockquote {
+	padding-left: 1.25rem;
+	border-left: 2px solid var(--accent);
+	color: var(--graphite);
+}
+
+.prose .note {
+	padding: 0.9rem 1.1rem;
+	border-left: 2px solid var(--accent);
+	background: color-mix(in srgb, var(--accent-soft) 55%, transparent);
+	border-radius: 0 6px 6px 0;
+	font-size: 0.9375rem;
+}
+
+/* --------------------------------------------------------------- footer */
+
+.site-foot {
+	margin-top: clamp(3rem, 2rem + 4vw, 6rem);
+	padding: 0 0 3rem;
+	font-size: 0.875rem;
+	color: var(--graphite);
+}
+
+.site-foot .frame > div {
+	display: grid;
+	grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr));
+	gap: 2rem;
+	padding-top: 2rem;
+	border-top: 1px solid var(--ink);
+}
+
+.site-foot h2 {
+	font-size: 0.875rem;
+	font-weight: 650;
+	color: var(--ink);
+	margin-bottom: 0.75rem;
+}
+
+.site-foot li + li {
+	margin-top: 0.4rem;
+}
+
+.site-foot a {
+	color: var(--graphite);
+	text-decoration: none;
+}
+
+.site-foot a:hover {
+	color: var(--accent);
+	text-decoration: underline;
+}
+
+.site-foot .brand {
+	margin-bottom: 0.9rem;
+}
+
+.site-foot p {
+	max-width: 22rem;
+}
+
+.site-foot .fine {
+	margin-top: 1rem;
+	font-family: var(--mono);
+	font-size: 0.75rem;
+}
+
+@media (max-width: 52rem) {
+	.site-foot .frame > div {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.site-foot .frame > div > :first-child {
+		grid-column: 1 / -1;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	/* biome-ignore-start lint/complexity/noImportantStyles: reduced motion overrides every component's transition */
+	*,
+	*::before,
+	*::after {
+		transition-duration: 0s !important;
+		transition-delay: 0s !important;
+		animation-duration: 0s !important;
+		scroll-behavior: auto !important;
+	}
+	/* biome-ignore-end lint/complexity/noImportantStyles: reduced motion overrides every component's transition */
+}
+
+@media print {
+	.site-head,
+	.site-foot,
+	.copy-btn,
+	.code .copy {
+		/* biome-ignore lint/complexity/noImportantStyles: chrome stays off paper whatever the page sets */
+		display: none !important;
+	}
+
+	body {
+		background: #fff;
+	}
+}

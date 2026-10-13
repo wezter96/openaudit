@@ -1,0 +1,18 @@
+---
+import Icon from "./Icon.astro";
+
+interface Props {
+	readonly command: string;
+	readonly label?: string;
+}
+const { command, label = "Copy command" } = Astro.props;
+---
+
+<div class="cmd">
+	<code>{command}</code>
+	<button class="copy-btn needs-js" type="button" data-copy-text={command} aria-label={label}>
+		<Icon name="copy" class="idle" />
+		<Icon name="check" class="done" />
+		<span class="copy-label">Copy</span>
+	</button>
+</div>

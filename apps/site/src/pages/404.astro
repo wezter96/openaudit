@@ -1,0 +1,89 @@
+---
+import Base from "../layouts/Base.astro";
+import { u } from "../lib/site";
+---
+
+<Base title="Page not found" description="There is no page at this address on openaudit.se." noindex>
+	<section class="frame nf">
+		<svg class="nf-dial" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
+			<circle class="nf-track" cx="60" cy="60" r="50"></circle>
+			<circle class="nf-ring" cx="60" cy="60" r="50" pathLength="100" stroke-dasharray="0 100" transform="rotate(-90 60 60)"></circle>
+			<text x="60" y="60" class="nf-mark" text-anchor="middle" dominant-baseline="central">?</text>
+		</svg>
+		<div>
+			<h1>No page at this address</h1>
+			<p class="lede">Nothing was found here, so there is nothing to score. The address may be mistyped, or the page may have moved.</p>
+			<ul class="nf-links">
+				<li><a class="btn primary" href={u("/")}>Go to the home page</a></li>
+				<li><a class="btn" href={u("/docs/")}>Read the docs</a></li>
+				<li><a class="btn" href={u("/auditors/")}>Browse auditors</a></li>
+			</ul>
+		</div>
+	</section>
+</Base>
+
+<style>
+	.nf {
+		display: grid;
+		grid-template-columns: minmax(0, 18rem) minmax(0, 1fr);
+		gap: 2rem clamp(2rem, 6vw, 5rem);
+		align-items: center;
+		padding-block: clamp(3rem, 2rem + 6vw, 8rem);
+	}
+
+	.nf-dial {
+		width: 100%;
+		max-width: 18rem;
+	}
+
+	.nf-track {
+		fill: var(--paper-2);
+		stroke: var(--c-none);
+		stroke-width: 9;
+		stroke-dasharray: 2 2.5;
+	}
+
+	.nf-ring {
+		fill: none;
+	}
+
+	.nf-mark {
+		font-family: var(--display);
+		font-size: 52px;
+		font-weight: 800;
+		fill: var(--graphite);
+	}
+
+	.nf h1 {
+		font-family: var(--display);
+		font-size: clamp(2.5rem, 1.6rem + 3.4vw, 4.25rem);
+		font-weight: 780;
+		letter-spacing: -0.05em;
+		line-height: 0.95;
+		max-width: 14ch;
+	}
+
+	.nf .lede {
+		margin-top: 1rem;
+		color: var(--graphite);
+		font-size: 1.125rem;
+		max-width: 34rem;
+	}
+
+	.nf-links {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.6rem;
+		margin-top: 1.75rem;
+	}
+
+	@media (max-width: 40rem) {
+		.nf {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.nf-dial {
+			max-width: 9rem;
+		}
+	}
+</style>

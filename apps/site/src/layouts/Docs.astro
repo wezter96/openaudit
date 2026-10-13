@@ -1,0 +1,298 @@
+---
+import { DOCS, REPO, u, unbase } from "../lib/site";
+import Base from "./Base.astro";
+
+interface Props {
+	readonly title: string;
+	readonly description: string;
+	readonly lede?: string;
+	/** Repository files this page is built from, linked under "Sources". */
+	readonly sources?: ReadonlyArray<string>;
+}
+
+const { title, description, lede, sources = [] } = Astro.props;
+const html = await Astro.slots.render("default");
+// "On this page": every h2 in the rendered content.
+const toc = [...html.matchAll(/<h2 id="([^"]+)"[^>]*>([\s\S]*?)<\/h2>/g)].map((m) => ({
+	id: m[1] ?? "",
+	text: (m[2] ?? "").replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&#39;/g, "'"),
+}));
+const path = unbase(Astro.url.pathname);
+const index = DOCS.findIndex((d) => `/docs/${d.slug ? `${d.slug}/` : ""}` === path);
+const prev = index > 0 ? DOCS[index - 1] : undefined;
+const next = index >= 0 && index < DOCS.length - 1 ? DOCS[index + 1] : undefined;
+const href = (slug: string) => `/docs/${slug ? `${slug}/` : ""}`;
+---
+
+<Base title={title} description={description}>
+	<div class="frame docs">
+		<nav class="docs-nav" aria-label="Documentation">
+			<p class="docs-nav-title">Documentation</p>
+			<ol>
+				{
+					DOCS.map((d) => (
+						<li>
+							<a href={u(href(d.slug))} aria-current={href(d.slug) === path ? "page" : undefined}>
+								{d.title}
+							</a>
+						</li>
+					))
+				}
+			</ol>
+		</nav>
+		<article class="docs-main">
+			<header class="docs-head">
+				<h1>{title}</h1>
+				{lede && <p class="lede" set:html={lede} />}
+			</header>
+			<div class="prose">
+				<Fragment set:html={html} />
+			</div>
+			<footer class="docs-foot">
+				{
+					sources.length > 0 && (
+						<p class="sources">
+							Built from{" "}
+							{sources.map((s, i) => (
+								<>
+									<a href={`${REPO}/blob/main/${s}`}>
+										<code>{s}</code>
+									</a>
+									{i < sources.length - 2 ? ", " : i === sources.length - 2 ? " and " : ""}
+								</>
+							))}
+							.
+						</p>
+					)
+				}
+				<nav class="pager" aria-label="Previous and next page">
+					{
+						prev && (
+							<a class="prev" href={u(href(prev.slug))}>
+								<span>Previous</span>
+								{prev.title}
+							</a>
+						)
+					}
+					{
+						next && (
+							<a class="next" href={u(href(next.slug))}>
+								<span>Next</span>
+								{next.title}
+							</a>
+						)
+					}
+				</nav>
+			</footer>
+		</article>
+		{
+			toc.length > 1 && (
+				<nav class="toc" aria-label="On this page">
+					<p class="docs-nav-title">On this page</p>
+					<ol>
+						{toc.map((t) => (
+							<li>
+								<a href={`#${t.id}`}>{t.text}</a>
+							</li>
+						))}
+					</ol>
+				</nav>
+			)
+		}
+	</div>
+</Base>
+
+<style>
+	.docs {
+		display: grid;
+		grid-template-columns: 13rem minmax(0, 1fr) 13rem;
+		gap: 0 clamp(2rem, 4vw, 4rem);
+		align-items: start;
+		padding-top: clamp(2rem, 1rem + 3vw, 4rem);
+	}
+
+	.docs-nav,
+	.toc {
+		position: sticky;
+		top: calc(var(--head) + 1.5rem);
+		max-height: calc(100vh - var(--head) - 3rem);
+		overflow: auto;
+		scrollbar-width: none;
+		font-size: 0.9375rem;
+	}
+
+	.docs-nav-title {
+		font-size: 0.8125rem;
+		font-weight: 650;
+		color: var(--ink);
+		padding-bottom: 0.6rem;
+		margin-bottom: 0.4rem;
+		border-bottom: 1px solid var(--ink);
+	}
+
+	.docs-nav a,
+	.toc a {
+		display: block;
+		position: relative;
+		padding: 0.4rem 0 0.4rem 0.85rem;
+		color: var(--graphite);
+		text-decoration: none;
+		line-height: 1.35;
+		transition: color 0.2s;
+	}
+
+	.docs-nav a::before,
+	.toc a::before {
+		content: "";
+		position: absolute;
+		left: 0;
+		top: 0.35rem;
+		bottom: 0.35rem;
+		width: 2px;
+		border-radius: 2px;
+		background: var(--accent);
+		transform: scaleY(0);
+		transition: transform 0.45s var(--settle);
+	}
+
+	.docs-nav a:hover,
+	.toc a:hover {
+		color: var(--ink);
+	}
+
+	.docs-nav a[aria-current="page"] {
+		color: var(--ink);
+		font-weight: 620;
+	}
+
+	.docs-nav a[aria-current="page"]::before,
+	.toc a.active::before {
+		transform: none;
+	}
+
+	.toc a {
+		font-size: 0.875rem;
+	}
+
+	.toc a.active {
+		color: var(--ink);
+	}
+
+	.docs-head h1 {
+		font-family: var(--display);
+		font-size: clamp(2.5rem, 1.6rem + 3.4vw, 4.25rem);
+		font-weight: 780;
+		letter-spacing: -0.05em;
+		line-height: 0.95;
+	}
+
+	.docs-head .lede {
+		margin-top: 1.1rem;
+		font-size: 1.1875rem;
+		color: var(--graphite);
+		max-width: 42rem;
+		text-wrap: pretty;
+	}
+
+	.docs-head {
+		padding-bottom: 2rem;
+		margin-bottom: 0.5rem;
+		border-bottom: 1px solid var(--ink);
+	}
+
+	.docs-foot {
+		margin-top: 4rem;
+	}
+
+	.sources {
+		font-size: 0.8125rem;
+		color: var(--graphite);
+		padding-bottom: 1.25rem;
+	}
+
+	.pager {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 1rem;
+		border-top: 1px solid var(--hair);
+		padding-top: 1.25rem;
+	}
+
+	.pager a {
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+		font-weight: 650;
+		font-size: 1.0625rem;
+		text-decoration: none;
+		letter-spacing: -0.01em;
+	}
+
+	.pager a span {
+		font-size: 0.8125rem;
+		font-weight: 450;
+		color: var(--graphite);
+	}
+
+	.pager .next {
+		grid-column: 2;
+		text-align: right;
+	}
+
+	@media (max-width: 75rem) {
+		.docs {
+			grid-template-columns: 12rem minmax(0, 1fr);
+		}
+
+		.toc {
+			display: none;
+		}
+	}
+
+	@media (max-width: 52rem) {
+		.docs {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.docs-nav {
+			position: static;
+			max-height: none;
+			margin-bottom: 2rem;
+		}
+
+		.docs-nav ol {
+			display: flex;
+			gap: 0.25rem 1rem;
+			overflow-x: auto;
+			margin-inline: calc(-1 * var(--gutter));
+			padding-inline: var(--gutter);
+			scrollbar-width: none;
+		}
+
+		.docs-nav li {
+			flex: none;
+		}
+
+		.docs-nav a {
+			padding: 0.4rem 0 0.5rem;
+		}
+
+		.docs-nav a::before {
+			left: 0;
+			right: 0;
+			top: auto;
+			bottom: 0;
+			width: auto;
+			height: 2px;
+			transform: scaleX(0);
+		}
+
+		.docs-nav a[aria-current="page"]::before {
+			transform: none;
+		}
+	}
+</style>
+
+<script>
+	import "../scripts/toc";
+</script>

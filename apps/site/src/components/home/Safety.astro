@@ -1,0 +1,114 @@
+---
+import { inline, listIn } from "../../lib/markdown";
+import { u } from "../../lib/site";
+import Icon from "../Icon.astro";
+
+type Glyph = "folder" | "globe" | "robot" | "container" | "git";
+const GLYPH: Record<string, Glyph> = {
+	Files: "folder",
+	HTTP: "globe",
+	Agents: "robot",
+	"Wrapped tools": "container",
+	Git: "git",
+};
+// README "Safety": "**Files:** reads are confined …"
+const items = listIn("README.md", "Safety")
+	.map((md) => {
+		const m = /^\*\*(.+?):\*\*\s*(.*)$/s.exec(md);
+		return { lead: m?.[1] ?? "", body: m?.[2] ?? md };
+	})
+	.filter((i) => GLYPH[i.lead])
+	.slice(0, 5);
+---
+
+<section class="sheet" id="safety" aria-labelledby="safety-title">
+	<div class="frame safety">
+		<div class="sheet-head single">
+			<h2 id="safety-title" class="rise">Safe on hostile input</h2>
+			<p class="rise">
+				openaudit treats every target as hostile. Tools that would run project code are opt-in, and nothing builds or installs what it scans.
+			</p>
+			<p class="rise more"><a href={u("/docs/safety/")}>The full safety model</a></p>
+		</div>
+		<ul class="guards">
+			{
+				items.map((i) => (
+					<li class="rise">
+						<Icon name={GLYPH[i.lead] ?? "folder"} class="g" />
+						<div>
+							<h3>{i.lead}</h3>
+							<p set:html={inline(i.body.startsWith("openaudit") ? i.body : i.body.charAt(0).toUpperCase() + i.body.slice(1))} />
+						</div>
+					</li>
+				))
+			}
+		</ul>
+	</div>
+</section>
+
+<style>
+	.safety {
+		display: grid;
+		grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+		gap: 2rem clamp(2rem, 5vw, 5rem);
+		align-items: start;
+	}
+
+	.sheet-head.single {
+		grid-template-columns: 1fr;
+		margin-bottom: 0;
+		position: sticky;
+		top: calc(var(--head) + 2rem);
+	}
+
+	.more {
+		font-weight: 600;
+		font-size: 0.9375rem;
+	}
+
+	.guards {
+		border-top: 1px solid var(--ink);
+	}
+
+	.guards li {
+		display: grid;
+		grid-template-columns: 2.25rem minmax(0, 1fr);
+		gap: 1rem;
+		padding: 1.15rem 0 1.25rem;
+		border-bottom: 1px solid var(--hair);
+	}
+
+	.guards :global(.g) {
+		width: 1.5rem;
+		height: 1.5rem;
+		margin-top: 0.15rem;
+		fill: none;
+		stroke: var(--accent);
+		stroke-width: 1.5;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+
+	.guards h3 {
+		font-size: 1.125rem;
+		font-weight: 680;
+		letter-spacing: -0.02em;
+	}
+
+	.guards p {
+		margin-top: 0.3rem;
+		color: var(--graphite);
+		font-size: 0.9375rem;
+		text-wrap: pretty;
+	}
+
+	@media (max-width: 60rem) {
+		.safety {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.sheet-head.single {
+			position: static;
+		}
+	}
+</style>

@@ -1,0 +1,399 @@
+---
+import { AREA_SHORT, matrix, matrixMax, TARGET_COMMAND } from "../../lib/home";
+import { inline, paragraphsIn, tableIn } from "../../lib/markdown";
+import { CATEGORIES, CATEGORY_LABEL } from "../../lib/site";
+
+const languages = tableIn("README.md", "Languages and ecosystems");
+const note = inline(paragraphsIn("README.md", "Languages and ecosystems")[0] ?? "");
+/** Dot radius on a 20-unit cell: area grows with the auditor count. */
+const radius = (n: number) => (n ? (2.6 + 6.4 * Math.sqrt(n / matrixMax)).toFixed(2) : "0");
+---
+
+<section class="sheet" id="coverage" aria-labelledby="coverage-title">
+	<div class="frame">
+		<div class="sheet-head">
+			<h2 id="coverage-title" class="rise">Point it at anything you ship</h2>
+			<p class="rise">
+				openaudit detects what the target is and what it contains, then runs the auditors that apply. Seven kinds of target and every major language, scored in the same ten areas.
+			</p>
+		</div>
+		<div class="cov" data-tabs>
+			<div class="tablist cov-tabs needs-js" role="tablist" aria-label="Coverage">
+				<button class="tab" type="button" role="tab" id="tab-cov-targets" aria-controls="cov-targets" aria-selected="true" tabindex="0">By target</button>
+				<button class="tab" type="button" role="tab" id="tab-cov-langs" aria-controls="cov-langs" aria-selected="false" tabindex="-1">By language</button>
+				<span class="tab-ink" aria-hidden="true"></span>
+			</div>
+			<div class="panels">
+				<section class="panel" id="cov-targets" role="tabpanel" aria-labelledby="tab-cov-targets">
+					<h3 class="panel-title">By target</h3>
+					<div class="matrix-wrap">
+						<table class="matrix">
+							<caption class="sr-only">Number of auditors for each target and area</caption>
+							<thead>
+								<tr>
+									<th scope="col" class="corner">Target</th>
+									{
+										CATEGORIES.map((c) => (
+											<th scope="col" class="area-col" title={CATEGORY_LABEL[c]}>
+												<span class="long">{CATEGORY_LABEL[c]}</span>
+												<abbr class="short" title={CATEGORY_LABEL[c]}>
+													{AREA_SHORT[c]}
+												</abbr>
+											</th>
+										))
+									}
+								</tr>
+							</thead>
+							<tbody>
+								{
+									matrix.map((r) => (
+										<tr>
+											<th scope="row">
+												<span class="tname">{r.label}</span>
+												<code class="tcmd">{TARGET_COMMAND[r.id]}</code>
+											</th>
+											{r.cells.map((n, i) => (
+												<td>
+													<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+														{n ? (
+															<circle class="dot" cx="10" cy="10" r={radius(n)}>
+																<title>{`${r.label}, ${CATEGORY_LABEL[CATEGORIES[i] ?? ""]}: ${n} auditors`}</title>
+															</circle>
+														) : (
+															<line class="none" x1="7" y1="10" x2="13" y2="10" />
+														)}
+													</svg>
+													<span class="sr-only">{n ? `${n} auditors` : "none"}</span>
+												</td>
+											))}
+										</tr>
+									))
+								}
+							</tbody>
+						</table>
+					</div>
+					<p class="footnote">Dot size is the number of auditors that cover the area for that target, counted from the registry when the site is built.</p>
+				</section>
+				<section class="panel" id="cov-langs" role="tabpanel" aria-labelledby="tab-cov-langs">
+					<h3 class="panel-title">By language</h3>
+					<div class="table langs">
+						<table>
+							<thead>
+								<tr>{languages.header.map((h) => <th scope="col">{h}</th>)}</tr>
+							</thead>
+							<tbody>
+								{
+									languages.rows.map(([lang = "", ...cells]) => (
+										<tr>
+											<th scope="row">{lang}</th>
+											{cells.map((c, i) =>
+												c.trim() ? (
+													<td data-label={languages.header[i + 1]} set:html={inline(c)} />
+												) : (
+													<td class="empty" data-label={languages.header[i + 1]}>
+														<span class="sr-only">None</span>
+													</td>
+												),
+											)}
+										</tr>
+									))
+								}
+							</tbody>
+						</table>
+					</div>
+					<p class="footnote" set:html={note} />
+				</section>
+			</div>
+		</div>
+	</div>
+</section>
+
+<style>
+	.cov-tabs {
+		position: relative;
+		display: flex;
+		gap: 0.25rem;
+		margin-bottom: 1.25rem;
+		border-bottom: 1px solid var(--hair);
+	}
+
+	.cov-tabs .tab {
+		font: inherit;
+		font-weight: 620;
+		font-size: 1rem;
+		color: var(--graphite);
+		background: none;
+		border: 0;
+		padding: 0.6rem 0.9rem;
+		min-height: 2.75rem;
+		cursor: pointer;
+		transition: color 0.2s;
+	}
+
+	.cov-tabs .tab:hover,
+	.cov-tabs .tab[aria-selected="true"] {
+		color: var(--ink);
+	}
+
+	.tab-ink {
+		position: absolute;
+		left: 0;
+		bottom: -1px;
+		width: 1px;
+		height: 2px;
+		background: var(--accent);
+		transform-origin: 0 0;
+		pointer-events: none;
+		transition: transform 0.6s var(--settle);
+	}
+
+	.cov:not(.ink-ready) .tab-ink {
+		transition: none;
+	}
+
+	.panel-title {
+		font-size: 1.25rem;
+		font-weight: 700;
+		letter-spacing: -0.02em;
+		margin-bottom: 1rem;
+	}
+
+	:global(.js) .cov .panel-title {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+	}
+
+	.panel + .panel {
+		margin-top: 3rem;
+	}
+
+	:global(.js) .cov .panel + .panel {
+		margin-top: 0;
+	}
+
+	.matrix-wrap {
+		border-top: 1px solid var(--ink);
+	}
+
+	.matrix {
+		width: 100%;
+		border-collapse: collapse;
+		table-layout: fixed;
+	}
+
+	.matrix th,
+	.matrix td {
+		border-bottom: 1px solid var(--hair-soft);
+		padding: 0.55rem 0.25rem;
+		text-align: center;
+		vertical-align: middle;
+	}
+
+	.matrix thead th {
+		vertical-align: bottom;
+		border-bottom-color: var(--hair);
+		font-size: 0.8125rem;
+		font-weight: 550;
+		color: var(--graphite);
+		padding-top: 1rem;
+	}
+
+	.matrix .corner,
+	.matrix tbody th {
+		width: 30%;
+		text-align: left;
+		padding-left: 0;
+	}
+
+	.long {
+		display: inline-block;
+		writing-mode: vertical-rl;
+		transform: rotate(180deg);
+		white-space: nowrap;
+		line-height: 1.1;
+	}
+
+	.short {
+		display: none;
+		text-decoration: none;
+	}
+
+	.tname {
+		display: block;
+		font-weight: 650;
+		font-size: 1rem;
+	}
+
+	.tcmd {
+		display: block;
+		margin-top: 0.15rem;
+		font-size: 0.75rem;
+		color: var(--graphite);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.matrix td svg {
+		width: 1.6rem;
+		height: 1.6rem;
+		margin: 0 auto;
+		overflow: visible;
+	}
+
+	.dot {
+		fill: var(--accent);
+		transform-box: fill-box;
+		transform-origin: center;
+		transition: transform 0.35s var(--settle);
+	}
+
+	.matrix tbody tr:hover .dot {
+		transform: scale(1.15);
+	}
+
+	.none {
+		stroke: var(--hair);
+		stroke-width: 1.5;
+		stroke-linecap: round;
+	}
+
+	.matrix tbody tr {
+		transition: background-color 0.2s;
+	}
+
+	.matrix tbody tr:hover {
+		background: color-mix(in srgb, var(--paper-2) 70%, transparent);
+	}
+
+	@media (prefers-reduced-motion: no-preference) {
+		@supports (animation-timeline: view()) {
+			.dot {
+				animation: pop linear both;
+				animation-timeline: view();
+				animation-range: entry 20% entry 100%;
+			}
+		}
+	}
+
+	@keyframes pop {
+		from {
+			transform: scale(0);
+		}
+	}
+
+	.footnote {
+		margin-top: 1rem;
+		font-size: 0.875rem;
+		color: var(--graphite);
+		max-width: 48rem;
+	}
+
+	.footnote :global(code) {
+		white-space: nowrap;
+	}
+
+	.langs th[scope="row"] {
+		font-weight: 650;
+		white-space: nowrap;
+	}
+
+	.langs td {
+		color: var(--graphite);
+		font-size: 0.875rem;
+		min-width: 12rem;
+	}
+
+	.langs td.empty::before {
+		content: "";
+		display: inline-block;
+		width: 0.7rem;
+		height: 1px;
+		background: var(--hair);
+		vertical-align: middle;
+	}
+
+	@media (max-width: 52rem) {
+		.matrix th,
+		.matrix td {
+			padding: 0.5rem 0.05rem;
+		}
+		.long {
+			display: none;
+		}
+
+		.short {
+			display: inline-block;
+			font-size: 0.6875rem;
+			writing-mode: vertical-rl;
+			transform: rotate(180deg);
+		}
+
+		.matrix .corner,
+		.matrix tbody th {
+			width: 34%;
+		}
+
+		.tcmd {
+			display: none;
+		}
+
+		.tname {
+			font-size: 0.875rem;
+		}
+
+		.matrix td svg {
+			width: 1.15rem;
+			height: 1.15rem;
+		}
+
+	}
+
+	@media (max-width: 40rem) {
+		.langs thead {
+			display: none;
+		}
+
+		.langs table,
+		.langs tbody,
+		.langs tr,
+		.langs th,
+		.langs td {
+			display: block;
+		}
+
+		.langs tr {
+			padding: 0.9rem 0;
+			border-bottom: 1px solid var(--hair-soft);
+		}
+
+		.langs th[scope="row"],
+		.langs td {
+			padding: 0;
+			border: 0;
+			min-width: 0;
+		}
+
+		.langs th[scope="row"] {
+			font-size: 1.0625rem;
+			margin-bottom: 0.35rem;
+		}
+
+		.langs td + td {
+			margin-top: 0.3rem;
+		}
+
+		.langs td::before {
+			content: attr(data-label) ": ";
+			color: var(--ink);
+			font-weight: 600;
+		}
+
+		.langs td.empty {
+			display: none;
+		}
+	}
+</style>

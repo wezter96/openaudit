@@ -1,0 +1,235 @@
+---
+/**
+ * One tab per way to run openaudit, as a strip of glyphs. Every snippet comes
+ * from the repository's own docs. Without script, the panels stack.
+ */
+import { integrations } from "../lib/integrations";
+import { u } from "../lib/site";
+import Icon from "./Icon.astro";
+---
+
+<div class="ints" data-tabs>
+	<div class="tablist needs-js" role="tablist" aria-label="Integrations">
+		{
+			integrations.map((it, i) => (
+				<button
+					class="tab"
+					type="button"
+					role="tab"
+					id={`tab-${it.id}`}
+					aria-controls={`panel-${it.id}`}
+					aria-selected={i === 0 ? "true" : "false"}
+					tabindex={i === 0 ? 0 : -1}
+				>
+					<Icon name={it.icon} class="glyph" />
+					<span class="tab-name">{it.name}</span>
+				</button>
+			))
+		}
+		<span class="tab-ink" aria-hidden="true"></span>
+	</div>
+	<div class="panels">
+		{
+			integrations.map((it) => (
+				<section class="panel" id={`panel-${it.id}`} role="tabpanel" aria-labelledby={`tab-${it.id}`}>
+					<div class="panel-copy">
+						<h3 class="panel-title">{it.name}</h3>
+						<code class="panel-hint">{it.hint}</code>
+						<p class="panel-lede" set:html={it.lede} />
+						{it.more && (
+							<p class="panel-more">
+								<a href={u(it.more.href)}>{it.more.label}</a>
+							</p>
+						)}
+					</div>
+					<div class="panel-code">
+						<Fragment set:html={it.html} />
+					</div>
+				</section>
+			))
+		}
+	</div>
+</div>
+
+<script>
+	import "../scripts/tabs";
+</script>
+
+<style>
+	.ints {
+		border-top: 1px solid var(--ink);
+	}
+
+	.tablist {
+		position: relative;
+		display: grid;
+		grid-template-columns: repeat(8, minmax(0, 1fr));
+		border-bottom: 1px solid var(--hair);
+	}
+
+	.tab {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.6rem;
+		min-height: 2.75rem;
+		padding: 1.25rem 0.5rem 1rem;
+		font: inherit;
+		font-size: 0.875rem;
+		font-weight: 600;
+		color: var(--graphite);
+		background: none;
+		border: 0;
+		cursor: pointer;
+		transition:
+			color 0.2s,
+			background-color 0.25s;
+	}
+
+	.tab + .tab {
+		border-left: 1px solid var(--hair-soft);
+	}
+
+	.tab:hover {
+		color: var(--ink);
+		background: color-mix(in srgb, var(--paper-2) 70%, transparent);
+	}
+
+	.tab[aria-selected="true"] {
+		color: var(--ink);
+	}
+
+	.tab :global(.glyph) {
+		width: 1.75rem;
+		height: 1.75rem;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.4;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+		transition: transform 0.5s var(--settle);
+	}
+
+	.tab[aria-selected="true"] :global(.glyph) {
+		color: var(--accent);
+		transform: translateY(-2px);
+	}
+
+	.tab-ink {
+		position: absolute;
+		left: 0;
+		bottom: -1px;
+		width: 1px;
+		height: 2px;
+		background: var(--accent);
+		transform-origin: 0 0;
+		pointer-events: none;
+		transition: transform 0.6s var(--settle);
+	}
+
+	.ints:not(.ink-ready) .tab-ink {
+		transition: none;
+	}
+
+	.panels {
+		position: relative;
+		padding-top: 2rem;
+	}
+
+	.panel {
+		display: grid;
+		grid-template-columns: minmax(0, 4fr) minmax(0, 7fr);
+		gap: 1.5rem clamp(2rem, 4vw, 4rem);
+		align-items: start;
+		min-width: 0;
+	}
+
+	.panel + .panel {
+		margin-top: 3rem;
+	}
+
+	:global(.js) .ints .panel + .panel {
+		margin-top: 0;
+	}
+
+	.panel-title {
+		font-family: var(--display);
+		font-size: 1.75rem;
+		font-weight: 760;
+		letter-spacing: -0.04em;
+	}
+
+	.panel-hint {
+		display: block;
+		margin-top: 0.35rem;
+		font-size: 0.8125rem;
+		color: var(--graphite);
+	}
+
+	.panel-lede {
+		margin-top: 0.9rem;
+		color: var(--graphite);
+		text-wrap: pretty;
+	}
+
+	.panel-more {
+		margin-top: 1rem;
+		font-weight: 600;
+		font-size: 0.9375rem;
+	}
+
+	.panel-code {
+		min-width: 0;
+	}
+
+	.panel-code :global(.code) {
+		margin: 0;
+	}
+
+	.panel-code :global(.code + .code) {
+		margin-top: 0.75rem;
+	}
+
+	@media (prefers-reduced-motion: no-preference) {
+		:global(.js) .panel.entering .panel-copy {
+			animation: panel-in 0.5s var(--soft);
+		}
+
+		:global(.js) .panel.entering .panel-code {
+			animation: panel-in 0.6s var(--soft) 60ms both;
+		}
+	}
+
+	@keyframes panel-in {
+		from {
+			opacity: 0;
+			transform: translateY(8px);
+		}
+	}
+
+	@media (max-width: 60rem) {
+		.tablist {
+			grid-template-columns: repeat(4, minmax(0, 1fr));
+		}
+
+		.tab:nth-child(5) {
+			border-left: 0;
+		}
+
+		.tab:nth-child(n + 5) {
+			border-top: 1px solid var(--hair-soft);
+		}
+
+		.tab-ink {
+			display: none;
+		}
+
+		.tab[aria-selected="true"] {
+			background: var(--paper-2);
+		}
+
+		.panel {
+			grid-template-columns: minmax(0, 1fr);
+		}
+	}
+</style>

@@ -1,0 +1,420 @@
+---
+import Icon from "../../components/Icon.astro";
+import Base from "../../layouts/Base.astro";
+import { auditors, CATEGORIES, CATEGORY_LABEL, counts, ENGINE_LABEL, ENGINES, TARGET_LABEL, TARGETS, u } from "../../lib/site";
+
+const sorted = [...auditors].sort((a, b) => a.id.localeCompare(b.id));
+const optIn = auditors.filter((a) => a.optIn).length;
+---
+
+<Base
+	title="Auditor catalogue"
+	description={`All ${counts.all} openaudit auditors: ${counts.builtin} built in, ${counts.external} that wrap an external tool and ${counts.agentic} agentic, filterable by target, area and engine.`}
+>
+	<header class="page-head frame">
+		<h1>Auditor catalogue</h1>
+		<p class="lede">
+			Every auditor in openaudit's registry, generated when the site is built: <span class="num">{counts.builtin}</span> built in, <span class="num">{counts.external}</span> that wrap an external tool, and <span class="num">{counts.agentic}</span> agentic. <span class="num">{optIn}</span> are opt-in and run only when you select them with <code>--only</code>.
+		</p>
+	</header>
+
+	<div class="frame">
+		<form class="filters needs-js" aria-label="Filter auditors" data-filters>
+			<div class="field grow">
+				<label for="f-q">Search</label>
+				<div class="search">
+					<Icon name="search" />
+					<input id="f-q" name="q" type="search" placeholder="id, title, tool or description" autocomplete="off" />
+				</div>
+			</div>
+			<div class="field">
+				<label for="f-target">Target</label>
+				<select id="f-target" name="target">
+					<option value="">All targets</option>
+					{TARGETS.map((t) => <option value={t}>{TARGET_LABEL[t]}</option>)}
+				</select>
+			</div>
+			<div class="field">
+				<label for="f-area">Area</label>
+				<select id="f-area" name="area">
+					<option value="">All areas</option>
+					{CATEGORIES.map((c) => <option value={c}>{CATEGORY_LABEL[c]}</option>)}
+				</select>
+			</div>
+			<div class="field">
+				<label for="f-engine">Engine</label>
+				<select id="f-engine" name="engine">
+					<option value="">All engines</option>
+					{ENGINES.map((e) => <option value={e}>{ENGINE_LABEL[e]}</option>)}
+				</select>
+			</div>
+			<label class="toggle">
+				<input type="checkbox" name="default" />
+				<span>Runs by default</span>
+			</label>
+		</form>
+		<div class="toolbar">
+			<p class="live" aria-live="polite" data-count><b class="num">{sorted.length}</b> auditors</p>
+			<button class="reset" type="button" hidden data-reset>Clear filters</button>
+		</div>
+
+		<ul class="list" data-list>
+			{
+				sorted.map((a) => (
+					<li
+						data-id={a.id}
+						data-targets={a.targets.join(" ")}
+						data-areas={a.categories.join(" ")}
+						data-engine={a.engine}
+						data-optin={a.optIn ? "1" : "0"}
+						data-text={`${a.id} ${a.title} ${a.tool ?? ""} ${a.description}`.toLowerCase()}
+					>
+						<a class="row" href={u(`/auditors/${a.id}/`)}>
+							<span class:list={["eng", `eng-${a.engine}`]} title={ENGINE_LABEL[a.engine]}>
+								<span class="sr-only">{ENGINE_LABEL[a.engine]}</span>
+							</span>
+							<span class="main">
+								<span class="t">{a.title}</span>
+								<code class="id">{a.id}</code>
+								<span class="d">{a.description}</span>
+							</span>
+							<span class="side">
+								<span class="badges">
+									{a.optIn && <span class="badge optin">Opt-in</span>}
+									{a.tool && <span class="badge tool">{a.tool}</span>}
+								</span>
+								<span class="tags">{a.targets.map((t) => TARGET_LABEL[t]).join(", ")}</span>
+							</span>
+						</a>
+					</li>
+				))
+			}
+		</ul>
+		<p class="empty" hidden data-empty>
+			No auditor matches these filters. <button type="button" data-reset>Clear filters</button>
+		</p>
+		<dl class="legend">
+			{
+				ENGINES.map((e) => (
+					<div>
+						<dt><span class:list={["eng", `eng-${e}`]} aria-hidden="true" /></dt>
+						<dd>{ENGINE_LABEL[e]}</dd>
+					</div>
+				))
+			}
+		</dl>
+	</div>
+</Base>
+
+<script>
+	import "../../scripts/catalogue";
+</script>
+
+<style>
+	.filters {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 1rem 1.25rem;
+		align-items: flex-end;
+		padding: 1.25rem 0;
+		border-top: 1px solid var(--ink);
+		border-bottom: 1px solid var(--hair);
+	}
+
+	:global(.js) .filters {
+		display: flex;
+	}
+
+	.field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+		min-width: 10rem;
+	}
+
+	.field.grow {
+		flex: 1 1 18rem;
+	}
+
+	.field label {
+		font-size: 0.8125rem;
+		color: var(--graphite);
+	}
+
+	.search {
+		position: relative;
+	}
+
+	.search :global(svg) {
+		position: absolute;
+		left: 0.7rem;
+		top: 50%;
+		width: 1rem;
+		height: 1rem;
+		transform: translateY(-50%);
+		fill: none;
+		stroke: var(--graphite);
+		stroke-width: 2;
+		stroke-linecap: round;
+		pointer-events: none;
+	}
+
+	input[type="search"],
+	select {
+		font: inherit;
+		font-size: 0.9375rem;
+		color: var(--ink);
+		background: var(--paper-2);
+		border: 1px solid var(--hair);
+		border-radius: 7px;
+		padding: 0.5rem 0.7rem;
+		min-height: 2.6rem;
+		width: 100%;
+		transition: border-color 0.2s, box-shadow 0.2s;
+	}
+
+	input[type="search"] {
+		padding-left: 2.2rem;
+	}
+
+	input[type="search"]:hover,
+	select:hover {
+		border-color: var(--graphite);
+	}
+
+	input[type="search"]:focus,
+	select:focus {
+		border-color: var(--accent);
+		outline: none;
+		box-shadow: 0 0 0 3px var(--accent-soft);
+	}
+
+	.toggle {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		min-height: 2.6rem;
+		font-size: 0.9375rem;
+		cursor: pointer;
+	}
+
+	.toggle input {
+		width: 1.05rem;
+		height: 1.05rem;
+		accent-color: var(--accent);
+	}
+
+	.toolbar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		padding: 0.8rem 0;
+		border-bottom: 1px solid var(--ink);
+	}
+
+	.live {
+		color: var(--graphite);
+		font-size: 0.875rem;
+	}
+
+	.live b {
+		color: var(--ink);
+		font-weight: 600;
+	}
+
+	.reset,
+	.empty button {
+		font: inherit;
+		font-size: 0.875rem;
+		color: var(--accent);
+		background: none;
+		border: 0;
+		padding: 0.25rem 0;
+		cursor: pointer;
+		text-decoration: underline;
+		text-underline-offset: 0.2em;
+	}
+
+	.list li {
+		border-bottom: 1px solid var(--hair-soft);
+	}
+
+	.list li.out {
+		display: none;
+	}
+
+	.row {
+		display: grid;
+		grid-template-columns: 1.5rem minmax(0, 1fr) minmax(10rem, 15rem);
+		gap: 0.25rem 1.25rem;
+		align-items: baseline;
+		padding: 1rem 0.25rem;
+		color: inherit;
+		text-decoration: none;
+		transition: background-color 0.2s;
+	}
+
+	.row:hover {
+		background: color-mix(in srgb, var(--paper-2) 70%, transparent);
+	}
+
+	.row:focus-visible {
+		outline-offset: -2px;
+	}
+
+	.main {
+		display: grid;
+		grid-template-columns: auto 1fr;
+		gap: 0.15rem 0.75rem;
+		align-items: baseline;
+		min-width: 0;
+	}
+
+	.t {
+		font-weight: 650;
+		font-size: 1.0625rem;
+		letter-spacing: -0.01em;
+		transition: color 0.2s;
+	}
+
+	.row:hover .t {
+		color: var(--accent);
+	}
+
+	.id {
+		font-size: 0.78rem;
+		color: var(--graphite);
+		overflow-wrap: anywhere;
+	}
+
+	.d {
+		grid-column: 1 / -1;
+		color: var(--graphite);
+		font-size: 0.9375rem;
+		max-width: 52rem;
+		text-wrap: pretty;
+	}
+
+	.side {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 0.35rem;
+		text-align: right;
+	}
+
+	.badges {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		gap: 0.3rem;
+	}
+
+	.badge {
+		padding: 0.05rem 0.45rem;
+		border-radius: 4px;
+		font-size: 0.75rem;
+		font-weight: 600;
+		white-space: nowrap;
+		border: 1px solid var(--hair);
+	}
+
+	.badge.optin {
+		border-color: var(--t-medium);
+		color: var(--t-medium);
+	}
+
+	.badge.tool {
+		font-family: var(--mono);
+		font-weight: 500;
+		color: var(--ink);
+		background: var(--paper-2);
+	}
+
+	.tags {
+		font-size: 0.8125rem;
+		color: var(--graphite);
+	}
+
+	/* engine glyphs: a filled square for built-in, a ring for a wrapped tool, a
+	   diamond for an agent */
+	.eng {
+		display: inline-block;
+		width: 0.7rem;
+		height: 0.7rem;
+		align-self: center;
+		margin-top: 0.1rem;
+	}
+
+	.row .eng {
+		align-self: baseline;
+	}
+
+	.eng-builtin {
+		background: var(--ink);
+		border-radius: 2px;
+	}
+
+	.eng-external {
+		border-radius: 50%;
+		box-shadow: inset 0 0 0 2px var(--ink);
+	}
+
+	.eng-agentic {
+		background: var(--accent);
+		transform: rotate(45deg) scale(0.86);
+		border-radius: 1px;
+	}
+
+	.legend {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem 1.75rem;
+		margin-top: 1.5rem;
+		font-size: 0.875rem;
+		color: var(--graphite);
+	}
+
+	.legend div {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.empty {
+		padding: 3rem 0;
+		text-align: center;
+		color: var(--graphite);
+		border-bottom: 1px solid var(--hair);
+	}
+
+	@media (max-width: 52rem) {
+		.field {
+			flex: 1 1 40%;
+			min-width: 8rem;
+		}
+
+		.row {
+			grid-template-columns: 1.25rem minmax(0, 1fr);
+		}
+
+		.side {
+			grid-column: 2;
+			flex-direction: row;
+			flex-wrap: wrap;
+			align-items: baseline;
+			justify-content: flex-start;
+			gap: 0.4rem 0.75rem;
+			text-align: left;
+		}
+
+		.badges {
+			justify-content: flex-start;
+		}
+
+		.main {
+			grid-template-columns: minmax(0, 1fr);
+		}
+	}
+</style>

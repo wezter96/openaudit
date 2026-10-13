@@ -1,0 +1,21 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "openaudit-site",
+	"main": "worker/index.ts",
+	"compatibility_date": "2026-10-01",
+	"assets": {
+		"directory": "./dist",
+		"binding": "ASSETS",
+		// Every request passes the Worker first, so www can be redirected.
+		"run_worker_first": true,
+		"html_handling": "auto-trailing-slash",
+		"not_found_handling": "404-page"
+	},
+	"routes": [
+		{ "pattern": "openaudit.se", "custom_domain": true },
+		{ "pattern": "www.openaudit.se", "custom_domain": true }
+	],
+	"workers_dev": false,
+	"preview_urls": false,
+	"observability": { "enabled": false }
+}

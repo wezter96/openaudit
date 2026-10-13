@@ -1,0 +1,23 @@
+---
+import Docs from "../../layouts/Docs.astro";
+import { inline, paragraphsIn, readRepo, render, renderSection, section } from "../../lib/markdown";
+import { u } from "../../lib/site";
+
+const CLI = "apps/cli/README.md";
+const AGENT = "packages/agent/README.md";
+const lede = paragraphsIn("README.md", "With AI agents")[0] ?? "";
+---
+
+<Docs
+	title="MCP and agents"
+	description="Connect Claude Code, Cursor, Codex or a remote agent to openaudit over MCP, run the ten judgment-heavy playbooks, or run them headless with --agentic."
+	lede={inline(lede)}
+	sources={["README.md", CLI, AGENT, "skills/openaudit/SKILL.md"]}
+>
+	<Fragment set:html={render(section(readRepo("README.md"), "With AI agents", { body: true }).replace(lede, ""), "README.md")} />
+	<Fragment set:html={renderSection(CLI, "MCP server")} />
+	<Fragment set:html={renderSection(AGENT, "Playbooks")} />
+	<Fragment set:html={renderSection(AGENT, "Two ways to run agentic audits")} />
+	<Fragment set:html={renderSection(AGENT, "Model, auth and cost")} />
+	<p class="note">What the agents send to the model, and the limits they run under, are on the <a href={u("/docs/safety/")}>Safety</a> page.</p>
+</Docs>

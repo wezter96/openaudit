@@ -1,0 +1,511 @@
+---
+import { areas } from "../../lib/home";
+import { u } from "../../lib/site";
+
+const label = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const SHOWN = 7;
+---
+
+<section class="sheet" id="areas" aria-labelledby="areas-title">
+	<div class="frame">
+		<div class="sheet-head">
+			<h2 id="areas-title" class="rise">Ten areas, each with its own grade</h2>
+			<p class="rise">
+				Every finding belongs to one area, and each area scores 0 to 100 from the severity of what was found. Pick an area to see what openaudit checks, where, and with which tools. The letters are openaudit's grades for its own repository.
+			</p>
+		</div>
+		<div class="areas" data-tabs>
+			<div class="tablist area-tabs needs-js" role="tablist" aria-label="Audit areas" aria-orientation="vertical">
+				{
+					areas.map((a, i) => (
+						<button
+							class="tab"
+							type="button"
+							role="tab"
+							id={`tab-area-${a.id}`}
+							aria-controls={`area-${a.id}`}
+							aria-selected={i === 0 ? "true" : "false"}
+							tabindex={i === 0 ? 0 : -1}
+						>
+							<span class:list={["tg", a.grade ? `gm-${a.grade}` : "none"]} aria-hidden="true">
+								{a.grade ?? "–"}
+							</span>
+							<span class="tn">{a.label}</span>
+							<span class="tc num" aria-hidden="true">
+								{a.count}
+							</span>
+						</button>
+					))
+				}
+				<span class="tab-ink" aria-hidden="true"></span>
+			</div>
+			<div class="panels">
+				{
+					areas.map((a) => (
+						<section class="panel area" id={`area-${a.id}`} role="tabpanel" aria-labelledby={`tab-area-${a.id}`}>
+							<div class="area-main">
+								<header class="area-head">
+									<h3>{a.label}</h3>
+									<p class="area-score">
+										{a.grade ? (
+											<>
+												<b class={`gm-${a.grade}`}>{a.grade}</b>
+												<span class="num">{a.score}/100</span> in openaudit's own audit
+											</>
+										) : (
+											`Not graded in openaudit's own audit: its auditors run on ${a.targets.join(", ").toLowerCase()} targets`
+										)}
+									</p>
+								</header>
+								<p class="checks" set:html={a.text} />
+								<div class="facts">
+									<div class="fact">
+										<h4>Applies to</h4>
+										<ul class="chips">
+											{a.targets.map((t) => (
+												<li>{t}</li>
+											))}
+										</ul>
+									</div>
+									{a.builtin.length > 0 && (
+										<div class="fact">
+											<h4>Built in</h4>
+											<ul class="names">
+												{a.builtin.slice(0, SHOWN).map((b) => (
+													<li>
+														<a href={u(`/auditors/${b.id}/`)}>{b.title}</a>
+													</li>
+												))}
+												{a.builtin.length > SHOWN && <li class="more">and {a.builtin.length - SHOWN} more</li>}
+											</ul>
+										</div>
+									)}
+								</div>
+							</div>
+							<div class="area-side">
+								{a.example && (
+									<figure class="finding">
+										<figcaption>Example finding</figcaption>
+										<div class="finding-row">
+											<span class={`sev sev-${a.example.severity}`}>{label(a.example.severity)}</span>
+											<span class="finding-main">
+												<strong>{a.example.title}</strong>
+												<code class="loc">{a.example.where}</code>
+												<code class="rid">{a.example.rule}</code>
+											</span>
+										</div>
+									</figure>
+								)}
+								{a.tools.length > 0 && (
+									<div class="fact">
+										<h4>Wrapped tools, used when installed</h4>
+										<ul class="chips tools">
+											{a.tools.map((t) => (
+												<li>{t}</li>
+											))}
+										</ul>
+									</div>
+								)}
+								{a.playbooks.length > 0 && (
+									<div class="fact">
+										<h4>Agent playbooks</h4>
+										<ul class="chips tools">
+											{a.playbooks.map((p) => (
+												<li>{p}</li>
+											))}
+										</ul>
+									</div>
+								)}
+								<a class="all" href={u(`/auditors/#area=${a.id}`)}>
+									All {a.count} {a.label.toLowerCase()} auditors
+								</a>
+							</div>
+						</section>
+					))
+				}
+			</div>
+		</div>
+	</div>
+</section>
+
+<script>
+	import "../../scripts/tabs";
+</script>
+
+<style>
+	.areas {
+		display: grid;
+		grid-template-columns: minmax(0, 17rem) minmax(0, 1fr);
+		gap: 2rem clamp(2rem, 4vw, 4rem);
+		align-items: start;
+		border-top: 1px solid var(--ink);
+		padding-top: 1.25rem;
+	}
+
+	.tablist {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+	}
+
+	.tab {
+		display: grid;
+		grid-template-columns: 2rem minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 0.75rem;
+		width: 100%;
+		min-height: 2.75rem;
+		text-align: left;
+		font: inherit;
+		color: var(--graphite);
+		background: none;
+		border: 0;
+		border-radius: 6px;
+		padding: 0.45rem 0.75rem 0.45rem 0.9rem;
+		cursor: pointer;
+		transition:
+			color 0.2s,
+			background-color 0.25s;
+	}
+
+	.tab:hover {
+		color: var(--ink);
+		background: color-mix(in srgb, var(--paper-3) 60%, transparent);
+	}
+
+	.tab[aria-selected="true"] {
+		color: var(--ink);
+		background: var(--paper-2);
+		box-shadow: 0 1px 0 var(--hair-soft);
+	}
+
+	.tg {
+		font-family: var(--display);
+		font-size: 1.35rem;
+		font-weight: 800;
+		letter-spacing: -0.05em;
+		line-height: 1;
+		text-align: center;
+	}
+
+	.tg.none {
+		color: var(--hair);
+	}
+
+	.tn {
+		font-weight: 620;
+		font-size: 1rem;
+		letter-spacing: -0.01em;
+	}
+
+	.tc {
+		font-size: 0.75rem;
+		color: var(--graphite);
+	}
+
+	.tab-ink {
+		position: absolute;
+		left: 0;
+		top: 0;
+		width: 2px;
+		height: 1px;
+		border-radius: 2px;
+		background: var(--accent);
+		transform-origin: 0 0;
+		pointer-events: none;
+		transition: transform 0.6s var(--settle);
+	}
+
+	.areas:not(.ink-ready) .tab-ink {
+		transition: none;
+	}
+
+	.panels {
+		position: relative;
+		min-width: 0;
+	}
+
+	.area {
+		display: grid;
+		grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+		gap: 2rem clamp(1.5rem, 3vw, 3rem);
+		align-items: start;
+	}
+
+	.area + .area {
+		margin-top: 3rem;
+		padding-top: 2rem;
+		border-top: 1px solid var(--hair);
+	}
+
+	:global(.js) .areas .area + .area {
+		margin-top: 0;
+		padding-top: 0;
+		border-top: 0;
+	}
+
+	.area-head h3 {
+		font-family: var(--display);
+		font-size: clamp(2rem, 1.5rem + 1.6vw, 3rem);
+		font-weight: 780;
+		letter-spacing: -0.045em;
+		line-height: 1;
+	}
+
+	.area-score {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 0.5rem;
+		margin-top: 0.6rem;
+		font-size: 0.875rem;
+		color: var(--graphite);
+	}
+
+	.area-score b {
+		font-family: var(--display);
+		font-size: 1.25rem;
+		font-weight: 800;
+		letter-spacing: -0.04em;
+	}
+
+	.area-score .num {
+		color: var(--ink);
+	}
+
+	.checks {
+		margin-top: 1.25rem;
+		font-size: 1.0625rem;
+		line-height: 1.6;
+		text-wrap: pretty;
+	}
+
+	.facts {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+		gap: 1.5rem 2rem;
+		margin-top: 1.75rem;
+	}
+
+	.fact h4 {
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: var(--graphite);
+		margin-bottom: 0.6rem;
+		padding-bottom: 0.45rem;
+		border-bottom: 1px solid var(--hair);
+	}
+
+	.names {
+		display: grid;
+		gap: 0.35rem;
+	}
+
+	.names li {
+		font-size: 0.9375rem;
+		line-height: 1.35;
+	}
+
+	.names a {
+		color: var(--ink);
+		text-decoration-color: var(--hair);
+	}
+
+	.names a:hover {
+		color: var(--accent);
+		text-decoration-color: currentColor;
+	}
+
+	.names .more {
+		color: var(--graphite);
+	}
+
+	.chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+	}
+
+	.chips li {
+		padding: 0.15rem 0.55rem;
+		border: 1px solid var(--hair);
+		border-radius: 5px;
+		font-size: 0.8125rem;
+		background: color-mix(in srgb, var(--paper-2) 70%, transparent);
+	}
+
+	.chips.tools li {
+		font-family: var(--mono);
+		font-size: 0.75rem;
+	}
+
+	.area-side {
+		display: flex;
+		flex-direction: column;
+		gap: 1.75rem;
+	}
+
+	/* the report's own finding row, opened */
+	.finding {
+		position: relative;
+		margin: 0;
+		padding: 1rem 1.1rem 1.1rem 1.25rem;
+		background: var(--paper-2);
+		border-radius: 8px;
+		box-shadow: var(--lift);
+	}
+
+	.finding::before {
+		content: "";
+		position: absolute;
+		left: 0;
+		top: 0.6rem;
+		bottom: 0.6rem;
+		width: 2px;
+		border-radius: 2px;
+		background: var(--accent);
+	}
+
+	.finding:has(.sev-critical)::before {
+		background: var(--c-critical);
+	}
+
+	.finding:has(.sev-high)::before {
+		background: var(--c-high);
+	}
+
+	.finding:has(.sev-medium)::before {
+		background: var(--c-medium);
+	}
+
+	.finding:has(.sev-low)::before {
+		background: var(--c-low);
+	}
+
+	.finding figcaption {
+		font-size: 0.75rem;
+		color: var(--graphite);
+		margin-bottom: 0.65rem;
+	}
+
+	.finding-row {
+		display: grid;
+		grid-template-columns: 5.5rem minmax(0, 1fr);
+		gap: 0.75rem;
+		align-items: baseline;
+	}
+
+	.finding-main {
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+		min-width: 0;
+	}
+
+	.finding-main strong {
+		font-weight: 650;
+		overflow-wrap: anywhere;
+	}
+
+	.loc,
+	.rid {
+		font-size: 0.75rem;
+		overflow-wrap: anywhere;
+	}
+
+	.loc {
+		color: var(--ink);
+	}
+
+	.rid {
+		color: var(--graphite);
+	}
+
+	.all {
+		align-self: flex-start;
+		font-weight: 600;
+		font-size: 0.9375rem;
+	}
+
+	/* a newly selected area settles in, its parts a beat apart */
+	@media (prefers-reduced-motion: no-preference) {
+		:global(.js) .area.entering .area-head,
+		:global(.js) .area.entering .checks,
+		:global(.js) .area.entering .fact,
+		:global(.js) .area.entering .finding,
+		:global(.js) .area.entering .all {
+			animation: settle 0.7s var(--soft) both;
+		}
+
+		:global(.js) .area.entering .checks {
+			animation-delay: 40ms;
+		}
+
+		:global(.js) .area.entering .finding {
+			animation: card 0.8s var(--settle) 80ms both;
+		}
+
+		:global(.js) .area.entering .area-side .fact {
+			animation-delay: 140ms;
+		}
+
+		:global(.js) .area.entering .all {
+			animation-delay: 180ms;
+		}
+	}
+
+	@keyframes settle {
+		from {
+			opacity: 0;
+			transform: translateY(10px);
+		}
+	}
+
+	@keyframes card {
+		from {
+			opacity: 0;
+			transform: translateY(14px) scale(0.97);
+		}
+	}
+
+	@media (max-width: 64rem) {
+		.area {
+			grid-template-columns: minmax(0, 1fr);
+		}
+	}
+
+	@media (max-width: 52rem) {
+		.areas {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.tablist {
+			flex-direction: row;
+			overflow-x: auto;
+			scrollbar-width: none;
+			gap: 0.25rem;
+			margin-inline: calc(-1 * var(--gutter));
+			padding-inline: var(--gutter);
+		}
+
+		.tab {
+			width: auto;
+			flex: none;
+			grid-template-columns: auto auto;
+			gap: 0.45rem;
+			padding: 0.45rem 0.75rem;
+		}
+
+		.tc {
+			display: none;
+		}
+
+		.tab-ink {
+			top: auto;
+			bottom: 0;
+			height: 2px;
+			width: 1px;
+		}
+	}
+</style>

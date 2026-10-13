@@ -1,0 +1,38 @@
+---
+/** Stroke icons drawn on a 24px grid, in the report's line weight. */
+const PATHS = {
+	copy: "M9 9h10v11H9zM5 15V4h10",
+	check: "m5 12.5 4.5 4.5L19 7.5",
+	github:
+		"M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21",
+	report: "M4 20V4h16v16zM8 16v-4M12 16V8M16 16v-6",
+	arrow: "M5 12h14m-6-6 6 6-6 6",
+	external: "M14 4h6v6m0-6-9 9M18 14v6H4V6h6",
+	moon: "M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z",
+	sun: "M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6 7 7m10 10 1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0z",
+	menu: "M4 7h16M4 12h16M4 17h16",
+	search: "m20 20-4.5-4.5M17 10.5a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0z",
+	terminal: "M3 5h18v14H3zM7 10l3 2-3 2M12 15h5",
+	workflow: "M5 4h5v5H5zM14 15h5v5h-5zM7.5 9v3a3 3 0 0 0 3 3h3.5",
+	container: "M3 8l9-5 9 5v8l-9 5-9-5zM3 8l9 5 9-5M12 13v8",
+	pipeline: "M3 12h4m4 0h2m4 0h4M7 9h4v6H7zM13 9h4v6h-4z",
+	commit: "M12 3v6m0 6v6M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
+	plug: "M9 3v5m6-5v5M7 8h10v3a5 5 0 0 1-10 0zM12 16v5",
+	sarif: "M6 3h9l4 4v14H6zM14 3v5h5M10 12l-2 2 2 2m4-4 2 2-2 2",
+	editor: "M3 4h18v16H3zM3 8h18M8 12l-2 2 2 2m4 0h5",
+	folder: "M3 6h6l2 2h10v11H3z",
+	globe: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c2.5 2.6 3.7 5.6 3.7 9s-1.2 6.4-3.7 9c-2.5-2.6-3.7-5.6-3.7-9S9.5 5.6 12 3z",
+	robot: "M5 8h14v11H5zM12 4v4M9 13h.01M15 13h.01M9 16h6",
+	git: "M6 3v12M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9c0 5-12 4-12 6",
+	key: "M14 10a4 4 0 1 1-8 0 4 4 0 0 1 8 0zM13 12l8 8m-3-3 2-2m-5-1 2-2",
+	eye: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
+} as const;
+
+interface Props {
+	readonly name: keyof typeof PATHS;
+	readonly class?: string;
+}
+const { name, class: cls } = Astro.props;
+---
+
+<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" class={cls}><path d={PATHS[name]}></path></svg>

@@ -1,0 +1,33 @@
+---
+import Docs from "../../layouts/Docs.astro";
+import { inline, introParagraphsIn, readRepo, render, renderSection } from "../../lib/markdown";
+import { DOCS, u } from "../../lib/site";
+
+const subline = (/\*\*One scored audit[^*]*\*\*\s*(.+)/.exec(readRepo("README.md"))?.[1] ?? "").trim();
+const install = introParagraphsIn("apps/cli/README.md")[1] ?? "";
+const intro = introParagraphsIn("README.md").find((p) => p.startsWith("openaudit runs")) ?? "";
+---
+
+<Docs
+	title="Getting started"
+	description="Install openaudit, run your first audit and read the report. openaudit needs Bun 1.4 or newer; scanners are optional."
+	lede={inline(subline)}
+	sources={["README.md", "apps/cli/README.md"]}
+>
+	<Fragment set:html={render(intro, "README.md")} />
+	<Fragment set:html={renderSection("README.md", "Quick start")} />
+	<h2 id="install">Install</h2>
+	<Fragment set:html={render(install, "apps/cli/README.md")} />
+	<Fragment set:html={renderSection("README.md", "How it works")} />
+	<h2 id="next">Next</h2>
+	<ul>
+		{
+			DOCS.slice(1).map((d) => (
+				<li>
+					<a href={u(`/docs/${d.slug}/`)}>{d.title}</a>
+				</li>
+			))
+		}
+		<li><a href={u("/auditors/")}>Auditor catalogue</a></li>
+	</ul>
+</Docs>

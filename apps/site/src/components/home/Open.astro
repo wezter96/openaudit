@@ -1,0 +1,104 @@
+---
+import { inline, paragraphsIn } from "../../lib/markdown";
+import { BLOB, OPENSVERIGE, REPO, u } from "../../lib/site";
+
+const community = inline(paragraphsIn("README.md", "Community")[0] ?? "");
+---
+
+<section class="sheet" id="open" aria-labelledby="open-title">
+	<div class="frame">
+		<div class="sheet-head">
+			<h2 id="open-title" class="rise">Free and open source</h2>
+			<p class="rise">No account, no licence key and no hosted service in the way.</p>
+		</div>
+		<ul class="terms">
+			<li class="rise">
+				<h3>MIT licensed</h3>
+				<p>Read the code, run it anywhere, change it. <a href={`${BLOB}/LICENSE`}>The licence</a></p>
+			</li>
+			<li class="rise">
+				<h3>Free tools only</h3>
+				<p>Every scanner openaudit wraps is free and open source, and keeps its own licence.</p>
+			</li>
+			<li class="rise">
+				<h3>Tokens are the only cost</h3>
+				<p>And only if you choose the AI features: AI triage and the headless agentic auditors are opt-in.</p>
+			</li>
+		</ul>
+		<div class="community rise">
+			<p class="community-line" set:html={community} />
+			<div class="community-links">
+				<a class="btn" href={OPENSVERIGE}>Visit OpenSverige</a>
+				<a class="btn" href={REPO}>Star it on GitHub</a>
+				<a class="btn" href={u("/docs/contributing/")}>Contribute</a>
+			</div>
+		</div>
+	</div>
+</section>
+
+<style>
+	.terms {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 0 clamp(1.5rem, 3vw, 3rem);
+	}
+
+	.terms li {
+		padding-top: 1rem;
+		border-top: 1px solid var(--ink);
+	}
+
+	.terms h3 {
+		font-family: var(--display);
+		font-size: clamp(1.375rem, 1.1rem + 0.8vw, 1.75rem);
+		font-weight: 760;
+		letter-spacing: -0.035em;
+	}
+
+	.terms p {
+		margin-top: 0.5rem;
+		color: var(--graphite);
+		text-wrap: pretty;
+	}
+
+	.community {
+		margin-top: clamp(3rem, 2rem + 4vw, 5rem);
+		padding-top: 2rem;
+		border-top: 1px solid var(--hair);
+	}
+
+	.community-line {
+		max-width: 28ch;
+		font-family: var(--display);
+		font-size: clamp(1.625rem, 1.1rem + 2vw, 2.75rem);
+		font-weight: 700;
+		letter-spacing: -0.04em;
+		line-height: 1.1;
+		text-wrap: balance;
+	}
+
+	.community-line :global(a) {
+		color: var(--ink);
+		text-decoration-color: var(--accent);
+		text-decoration-thickness: 3px;
+		text-underline-offset: 0.12em;
+	}
+
+	.community-line :global(a:hover) {
+		color: var(--accent);
+	}
+
+	.community-links {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.6rem;
+		margin-top: 1.75rem;
+	}
+
+	@media (max-width: 52rem) {
+		.terms {
+			grid-template-columns: minmax(0, 1fr);
+			gap: 1.5rem;
+		}
+	}
+</style>

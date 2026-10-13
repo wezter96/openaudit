@@ -1,0 +1,281 @@
+---
+import { u } from "../../lib/site";
+import Icon from "../Icon.astro";
+
+const callouts = [
+	{ title: "Overview", text: "An overall grade with one arc per area, severity counts and the status of every auditor that ran or was skipped." },
+	{ title: "A tab per area", text: "Each area has its own tab, with filters, search and findings grouped by rule." },
+	{ title: "OWASP and CWE", text: "Findings mapped to the OWASP Top 10 and the CWE Top 25." },
+	{ title: "Downloads", text: "The same audit as JSON, SARIF, Markdown or CSV, straight from the page." },
+];
+---
+
+<section class="sheet" id="report" aria-labelledby="report-title">
+	<div class="frame">
+		<div class="sheet-head">
+			<h2 id="report-title" class="rise">A report people actually read</h2>
+			<p class="rise">
+				One self-contained HTML file with no external requests. It opens offline, works with JavaScript off and prints cleanly, so it can be attached to a CI run or an email.
+			</p>
+		</div>
+		<div class="show" data-arrive>
+			<figure class="shot-wrap">
+				<a class="shot" href={u("/report/")}>
+					<img class="shot-light" src={u("/img/report-light.webp")} width="1600" height="1075" loading="lazy" decoding="async" alt="The openaudit HTML report: an overall grade dial with one arc per area, severity counts and a navigation rail listing every area" />
+					<img class="shot-dark" src={u("/img/report-dark.webp")} width="1600" height="1075" loading="lazy" decoding="async" alt="The openaudit HTML report in the dark theme" />
+					<span class="pin p1" aria-hidden="true">1</span>
+					<span class="pin p2" aria-hidden="true">2</span>
+					<span class="pin p3" aria-hidden="true">3</span>
+					<span class="pin p4" aria-hidden="true">4</span>
+					<span class="shot-cta"><Icon name="report" />Open the live report</span>
+				</a>
+				<figcaption>The report for openaudit's own repository, from an earlier run. The live one is rebuilt on every push.</figcaption>
+			</figure>
+			<ol class="callouts">
+				{
+					callouts.map((c, i) => (
+						<li class={`c${i + 1}`}>
+							<span class="cn num" aria-hidden="true">
+								{i + 1}
+							</span>
+							<h3>{c.title}</h3>
+							<p>{c.text}</p>
+						</li>
+					))
+				}
+			</ol>
+		</div>
+	</div>
+</section>
+
+<style>
+	.shot-wrap {
+		margin: 0;
+	}
+
+	.shot {
+		position: relative;
+		display: block;
+		border-radius: 10px;
+		border: 1px solid var(--hair);
+		box-shadow: var(--shot);
+		background: var(--paper-2);
+		transform-origin: 50% 0;
+	}
+
+	.shot img {
+		width: 100%;
+		height: auto;
+		border-radius: 10px;
+	}
+
+	.shot-dark {
+		display: none;
+	}
+
+	:global(:root[data-theme="dark"]) .shot-light {
+		display: none;
+	}
+
+	:global(:root[data-theme="dark"]) .shot-dark {
+		display: block;
+	}
+
+	@media (prefers-color-scheme: dark) {
+		:global(:root:not([data-theme="light"])) .shot-light {
+			display: none;
+		}
+
+		:global(:root:not([data-theme="light"])) .shot-dark {
+			display: block;
+		}
+	}
+
+	.shot-wrap figcaption {
+		margin-top: 0.9rem;
+		font-size: 0.8125rem;
+		color: var(--graphite);
+	}
+
+	/* numbered pins over the screenshot; a callout's hover lights its pin */
+	.pin {
+		position: absolute;
+		display: grid;
+		place-items: center;
+		width: 1.9rem;
+		height: 1.9rem;
+		margin: -0.95rem 0 0 -0.95rem;
+		border-radius: 50%;
+		background: var(--accent);
+		color: #fff;
+		font-family: var(--mono);
+		font-size: 0.8125rem;
+		font-weight: 600;
+		box-shadow:
+			0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent),
+			var(--lift);
+		transition: transform 0.45s var(--settle);
+	}
+
+	:global(:root[data-theme="dark"]) .pin {
+		color: #0b111b;
+	}
+
+	@media (prefers-color-scheme: dark) {
+		:global(:root:not([data-theme="light"])) .pin {
+			color: #0b111b;
+		}
+	}
+
+	.p1 {
+		left: 35%;
+		top: 43%;
+	}
+
+	.p2 {
+		left: 23.8%;
+		top: 41.5%;
+	}
+
+	.p3 {
+		left: 20%;
+		top: 92.5%;
+	}
+
+	.p4 {
+		left: 78.5%;
+		top: 4.8%;
+	}
+
+	.show:has(.c1:hover) .p1,
+	.show:has(.c2:hover) .p2,
+	.show:has(.c3:hover) .p3,
+	.show:has(.c4:hover) .p4 {
+		transform: scale(1.3);
+	}
+
+	.shot-cta {
+		position: absolute;
+		right: 1rem;
+		bottom: 1rem;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.6rem 1rem;
+		border-radius: 8px;
+		background: var(--ink);
+		color: var(--paper);
+		font-weight: 620;
+		font-size: 0.9375rem;
+		box-shadow: var(--lift);
+		transition: transform 0.5s var(--settle);
+	}
+
+	.shot:hover .shot-cta {
+		transform: translateY(-3px);
+	}
+
+	.shot-cta :global(svg) {
+		width: 1rem;
+		height: 1rem;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.9;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+
+	.callouts {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 0 clamp(1.25rem, 2.5vw, 2rem);
+		margin-top: clamp(2rem, 1.5rem + 2vw, 3rem);
+	}
+
+	.callouts li {
+		padding-top: 0.9rem;
+		border-top: 1px solid var(--ink);
+		cursor: default;
+	}
+
+	.cn {
+		font-size: 0.8125rem;
+		color: var(--accent);
+		font-weight: 600;
+	}
+
+	.callouts h3 {
+		margin-top: 0.3rem;
+		font-size: 1.125rem;
+		font-weight: 680;
+		letter-spacing: -0.02em;
+	}
+
+	.callouts p {
+		margin-top: 0.35rem;
+		font-size: 0.9375rem;
+		color: var(--graphite);
+		text-wrap: pretty;
+	}
+
+	@media (prefers-reduced-motion: no-preference) {
+		@supports (animation-timeline: view()) {
+			.shot {
+				animation: tilt linear both;
+				animation-timeline: view();
+				animation-range: entry 0% cover 40%;
+			}
+		}
+
+		:global(.js) .pin {
+			transition:
+				transform 0.6s var(--settle),
+				opacity 0.3s;
+		}
+
+		:global(.js) .p2 {
+			transition-delay: 0.1s;
+		}
+
+		:global(.js) .p3 {
+			transition-delay: 0.2s;
+		}
+
+		:global(.js) .p4 {
+			transition-delay: 0.3s;
+		}
+
+		:global(.js) .show:not(.in) .pin {
+			opacity: 0;
+			transform: scale(0.2);
+		}
+	}
+
+	@keyframes tilt {
+		from {
+			opacity: 0.4;
+			transform: perspective(1600px) rotateX(14deg) translateY(3rem) scale(0.95);
+		}
+	}
+
+	@media (max-width: 52rem) {
+		.callouts {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 1.5rem 1.25rem;
+		}
+
+		.pin {
+			width: 1.5rem;
+			height: 1.5rem;
+			margin: -0.75rem 0 0 -0.75rem;
+			font-size: 0.6875rem;
+		}
+
+		.shot-cta {
+			right: 0.6rem;
+			bottom: 0.6rem;
+			padding: 0.45rem 0.75rem;
+			font-size: 0.8125rem;
+		}
+	}
+</style>

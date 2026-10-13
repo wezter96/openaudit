@@ -1,0 +1,19 @@
+---
+import Docs from "../../layouts/Docs.astro";
+import { introParagraphsIn, readRepo, render } from "../../lib/markdown";
+
+const FILE = "CONTRIBUTING.md";
+const source = readRepo(FILE);
+const [lede = "", ...intro] = introParagraphsIn(FILE);
+const body = source.slice(source.indexOf("\n## ")).trim();
+---
+
+<Docs
+	title="Contributing"
+	description="Set up the openaudit monorepo, add an auditor or wrap a scanner safely, and open a pull request that passes the full check."
+	lede={render(lede, FILE).replace(/^<p>|<\/p>\s*$/g, "")}
+	sources={[FILE, "AGENTS.md", "CODE_OF_CONDUCT.md"]}
+>
+	<Fragment set:html={render(intro.join("\n\n"), FILE)} />
+	<Fragment set:html={render(body, FILE)} />
+</Docs>

@@ -1,0 +1,20 @@
+---
+import Docs from "../../layouts/Docs.astro";
+import { inline, paragraphsIn, readRepo, render, renderSection, section } from "../../lib/markdown";
+
+const AGENT = "packages/agent/README.md";
+const security = readRepo("SECURITY.md").replace(/^#[^\n]*\n/, "").trim();
+---
+
+<Docs
+	title="Safety"
+	description="openaudit treats every target as hostile: confined file reads, origin-scoped HTTP, opt-in for tools that run project code, and agents without a shell."
+	lede={inline(paragraphsIn("README.md", "Safety")[0] ?? "")}
+	sources={["README.md", AGENT, "SECURITY.md"]}
+>
+	<Fragment set:html={render(section(readRepo("README.md"), "Safety", { body: true }).replace(/^openaudit treats every target as hostile:\n/, ""), "README.md")} />
+	<Fragment set:html={renderSection(AGENT, "What is sent to the model")} />
+	<Fragment set:html={renderSection(AGENT, "Responsible use")} />
+	<h2 id="reporting-a-vulnerability">Reporting a vulnerability</h2>
+	<Fragment set:html={render(security, "SECURITY.md")} />
+</Docs>

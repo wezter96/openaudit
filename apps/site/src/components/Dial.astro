@@ -1,0 +1,206 @@
+---
+import { capPoint, clamp, type Segment, segments, ticks } from "../lib/dial";
+
+interface Props {
+	readonly score: number;
+	readonly grade: string;
+	readonly segments: ReadonlyArray<Segment>;
+	readonly label: string;
+	readonly id?: string;
+	readonly animate?: boolean;
+}
+
+const { score, grade, label, id = "dial", animate = false } = Astro.props;
+const c = 120;
+const segs = segments(Astro.props.segments, c);
+const cap = capPoint(c, 80, score);
+const v = clamp(score);
+---
+
+<div class="dial" id={id} data-dial={animate ? "" : undefined} role="img" aria-label={label}>
+	<svg viewBox="0 0 240 240" aria-hidden="true" focusable="false">
+		<g class="seg-labels">
+			{
+				segs.map((s, i) =>
+					s.showLabel ? (
+						<>
+							<path id={`${id}-l${i}`} d={s.labelPath} fill="none" />
+							<text class="seg-label">
+								<textPath href={`#${id}-l${i}`} startOffset="50%" text-anchor="middle">
+									{s.label}
+								</textPath>
+							</text>
+						</>
+					) : null,
+				)
+			}
+		</g>
+		<circle class="dial-plate" cx={c} cy={c} r="97"></circle>
+		<g class="segs">
+			{
+				segs.map((s) => (
+					<>
+						<path class="seg-track" d={s.d} />
+						{s.score !== null && (
+							<path
+								class={`seg a-${s.grade}`}
+								d={s.d}
+								pathLength="100"
+								stroke-dasharray={`${clamp(s.score)} 100`}
+								data-v={clamp(s.score)}
+							>
+								<title>{`${s.label}: ${clamp(s.score)}, grade ${s.grade}`}</title>
+							</path>
+						)}
+					</>
+				))
+			}
+		</g>
+		<g class="scale">
+			<path class="ticks" d={ticks(c, 93, 96.5, false)}></path>
+			<path class="ticks-major" d={ticks(c, 92, 97, true)}></path>
+		</g>
+		<circle class="ring-track" cx={c} cy={c} r="80"></circle>
+		<circle
+			class={`ring a-${grade}`}
+			cx={c}
+			cy={c}
+			r="80"
+			pathLength="100"
+			stroke-dasharray={`${v} 100`}
+			transform={`rotate(-90 ${c} ${c})`}
+			data-v={v}></circle>
+		<circle class={`cap a-${grade}`} cx={cap.x} cy={cap.y} r="4"></circle>
+	</svg>
+	<div class="dial-center" aria-hidden="true">
+		<span class={`dial-grade gm-${grade}`}>{grade}</span>
+		<span class="dial-score"><span data-count={v}>{v}</span><small>/100</small></span>
+	</div>
+</div>
+
+<style>
+	.dial {
+		position: relative;
+		aspect-ratio: 1;
+		width: 100%;
+	}
+
+	.dial svg {
+		width: 100%;
+		height: 100%;
+		overflow: visible;
+	}
+
+	.dial-plate {
+		fill: var(--paper-2);
+		stroke: var(--hair-soft);
+		transform-origin: 120px 120px;
+	}
+
+	.seg-track {
+		fill: none;
+		stroke: var(--c-none);
+		stroke-width: 6;
+	}
+
+	.seg {
+		fill: none;
+		stroke-width: 6;
+		transition: stroke-width 0.35s var(--settle), opacity 0.2s;
+	}
+
+	.dial:hover .seg {
+		opacity: 0.5;
+	}
+
+	.dial .seg:hover {
+		opacity: 1;
+		stroke-width: 10;
+	}
+
+	.seg-label {
+		font-family: var(--sans);
+		font-size: 7.2px;
+		font-weight: 550;
+		fill: var(--graphite);
+		letter-spacing: 0.01em;
+	}
+
+	.ticks {
+		fill: none;
+		stroke: var(--graphite);
+		stroke-width: 0.8;
+		opacity: 0.5;
+	}
+
+	.ticks-major {
+		fill: none;
+		stroke: var(--ink);
+		stroke-width: 1.3;
+		opacity: 0.6;
+	}
+
+	.scale {
+		transform-origin: 120px 120px;
+	}
+
+	.ring-track {
+		fill: none;
+		stroke: var(--c-none);
+		stroke-width: 15;
+	}
+
+	.ring {
+		fill: none;
+		stroke-width: 15;
+		stroke-linecap: round;
+	}
+
+	.cap {
+		fill: var(--paper-2);
+		stroke-width: 3;
+		transform-box: fill-box;
+		transform-origin: center;
+	}
+
+	.dial-center {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		pointer-events: none;
+	}
+
+	.dial-grade {
+		font-family: var(--display);
+		font-size: clamp(5rem, 2.5rem + 9vw, 10rem);
+		font-weight: 800;
+		line-height: 0.8;
+		letter-spacing: -0.08em;
+		margin-left: -0.08em;
+	}
+
+	.dial-score {
+		margin-top: 0.8rem;
+		font-family: var(--mono);
+		font-size: clamp(0.95rem, 0.8rem + 0.4vw, 1.15rem);
+		font-weight: 600;
+		font-variant-numeric: tabular-nums;
+		color: var(--ink);
+	}
+
+	.dial-score small {
+		font-size: 0.75em;
+		font-weight: 400;
+		color: var(--graphite);
+		margin-left: 0.1rem;
+	}
+
+	@media (max-width: 40rem) {
+		.seg-labels {
+			display: none;
+		}
+	}
+</style>

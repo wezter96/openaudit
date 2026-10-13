@@ -1,0 +1,57 @@
+name: Site
+
+# Builds the website (apps/site) for openaudit.se and deploys it to Cloudflare
+# Workers static assets. For now the site is published to GitHub Pages by
+# pages.yml, so this runs only by hand; see apps/site/README.md before
+# switching it to run on push.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site
+  cancel-in-progress: false
+
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+
+      - name: Audit this repository for /report/
+        # Published whatever the result; CI is where the gate lives.
+        run: bun apps/cli/src/bin.ts . --format html,json,sarif,markdown --out apps/site/public/report --fail-on none --quiet
+      - name: Regenerate the architecture page
+        run: bun docs/architecture.ts
+
+      - name: Type-check the site
+        working-directory: apps/site
+        run: bun run check-types
+      - name: Build the site
+        working-directory: apps/site
+        env:
+          SITE_URL: https://openaudit.se
+          BASE_PATH: /
+        run: bun run build
+
+      - name: Deploy to Cloudflare
+        working-directory: apps/site
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::notice title=Site not deployed::Add the CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID repository secrets to deploy openaudit.se (see apps/site/README.md)."
+            exit 0
+          fi
+          bunx wrangler deploy

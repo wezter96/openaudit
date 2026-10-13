@@ -1,0 +1,211 @@
+---
+import Command from "../../components/Command.astro";
+import Base from "../../layouts/Base.astro";
+import { type Auditor, auditors, CATEGORY_LABEL, ENGINE_LABEL, playbooks, TARGET_LABEL, u } from "../../lib/site";
+
+export const getStaticPaths = () => auditors.map((a) => ({ params: { id: a.id }, props: { auditor: a } }));
+
+interface Props {
+	readonly auditor: Auditor;
+}
+const { auditor: a } = Astro.props;
+const playbook = playbooks.find((p) => p.id === a.id);
+
+const TARGET_ARG: Record<string, string> = {
+	codebase: ".",
+	url: "https://example.com",
+	webapp: "https://example.com --browser",
+	container: "image:nginx:1.27",
+	iac: ".",
+	mobile: "./app-release.apk",
+	cloud: "cloud:aws",
+};
+const first = a.targets[0] ?? "codebase";
+const command = `bunx openaudit ${TARGET_ARG[first] ?? "."} --only ${a.id}${a.engine === "agentic" && !a.optIn ? " --agentic" : ""}`;
+const related = auditors
+	.filter((o) => o.id !== a.id && o.categories[0] === a.categories[0] && o.targets.some((t) => a.targets.includes(t)))
+	.slice(0, 8);
+const how = a.engine === "builtin"
+	? "Built into openaudit; nothing to install."
+	: a.engine === "external"
+		? `Wraps ${a.tool ?? "an external tool"}. When it isn't installed, the auditor is skipped with an install hint and the rest of the audit runs.`
+		: "Runs a playbook with the Claude Agent SDK. Needs ANTHROPIC_API_KEY or a Claude Code login; host agents can run the same playbook over MCP without a key.";
+---
+
+<Base title={`${a.title} | openaudit`.length <= 60 ? `${a.title} | openaudit` : a.title} bareTitle ogTitle={a.title} description={a.description}>
+	<div class="frame">
+		<nav class="crumbs" aria-label="Breadcrumb"><a href={u("/auditors/")}>Auditor catalogue</a></nav>
+		<header class="page-head head">
+			<code class="aid">{a.id}</code>
+			<h1>{a.title}</h1>
+			<p class="lede">{a.description}</p>
+		</header>
+		<div class="body">
+			<dl class="spec">
+				<div><dt>Engine</dt><dd>{ENGINE_LABEL[a.engine]}</dd></div>
+				{a.tool && <div><dt>Wraps</dt><dd><code>{a.tool}</code></dd></div>}
+				<div><dt>Targets</dt><dd>{a.targets.map((t) => TARGET_LABEL[t] ?? t).join(", ")}</dd></div>
+				<div>
+					<dt>Areas</dt>
+					<dd>
+						{
+							a.categories.map((c, i) => (
+								<>
+									<a href={u(`/auditors/#area=${c}`)}>{CATEGORY_LABEL[c] ?? c}</a>
+									{i < a.categories.length - 1 ? ", " : ""}
+								</>
+							))
+						}
+					</dd>
+				</div>
+				<div><dt>Runs</dt><dd>{a.optIn ? "Opt-in: only when selected with --only" : "By default, when the target applies"}</dd></div>
+				<div><dt>Network</dt><dd>{a.network ? "Contacts services beyond the target" : "Only the target itself"}</dd></div>
+			</dl>
+			<div class="use">
+				<h2>Run only this auditor</h2>
+				<Command command={command} />
+				<p class="muted">{how}</p>
+				{
+					playbook && (
+						<div class="pb">
+							<h2>Playbook</h2>
+							<p>{playbook.summary}</p>
+							<p class="muted">
+								Host agents fetch it with <code>get_playbook</code> over MCP. <a href={u("/docs/agents/#playbooks")}>How playbooks work</a>
+							</p>
+						</div>
+					)
+				}
+			</div>
+		</div>
+		{
+			related.length > 0 && (
+				<section class="related" aria-labelledby="related-title">
+					<h2 id="related-title">More {CATEGORY_LABEL[a.categories[0] ?? ""]?.toLowerCase()} auditors</h2>
+					<ul>
+						{related.map((r) => (
+							<li>
+								<a href={u(`/auditors/${r.id}/`)}>
+									<span class="t">{r.title}</span>
+									<code>{r.id}</code>
+								</a>
+							</li>
+						))}
+					</ul>
+				</section>
+			)
+		}
+	</div>
+</Base>
+
+<style>
+	.crumbs {
+		padding-top: 2rem;
+		font-size: 0.875rem;
+	}
+
+	.head {
+		padding-top: 1.25rem;
+		border-bottom: 1px solid var(--ink);
+		padding-bottom: 2rem;
+	}
+
+	.aid {
+		display: inline-block;
+		margin-bottom: 0.9rem;
+		font-size: 0.875rem;
+		color: var(--accent);
+	}
+
+	.head h1 {
+		max-width: 22ch;
+	}
+
+	.body {
+		display: grid;
+		grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+		gap: 2rem clamp(2rem, 5vw, 5rem);
+		padding-top: 2rem;
+	}
+
+	.spec div {
+		display: grid;
+		grid-template-columns: 6.5rem minmax(0, 1fr);
+		gap: 1rem;
+		padding: 0.75rem 0;
+		border-bottom: 1px solid var(--hair-soft);
+	}
+
+	.spec dt {
+		font-size: 0.875rem;
+		color: var(--graphite);
+	}
+
+	.use h2,
+	.related h2 {
+		font-size: 1.25rem;
+		font-weight: 700;
+		letter-spacing: -0.02em;
+		margin-bottom: 0.9rem;
+	}
+
+	.use .muted {
+		margin-top: 0.9rem;
+		max-width: 38rem;
+		font-size: 0.9375rem;
+	}
+
+	.pb {
+		margin-top: 2.5rem;
+		padding-top: 1.25rem;
+		border-top: 1px solid var(--hair);
+	}
+
+	.pb p {
+		max-width: 40rem;
+	}
+
+	.related {
+		margin-top: 4rem;
+		padding-top: 1.25rem;
+		border-top: 1px solid var(--ink);
+	}
+
+	.related ul {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
+		column-gap: 2rem;
+	}
+
+	.related li {
+		border-bottom: 1px solid var(--hair-soft);
+	}
+
+	.related a {
+		display: flex;
+		flex-direction: column;
+		padding: 0.7rem 0;
+		text-decoration: none;
+		color: inherit;
+	}
+
+	.related .t {
+		font-weight: 620;
+		transition: color 0.2s;
+	}
+
+	.related a:hover .t {
+		color: var(--accent);
+	}
+
+	.related code {
+		font-size: 0.78rem;
+		color: var(--graphite);
+	}
+
+	@media (max-width: 52rem) {
+		.body {
+			grid-template-columns: minmax(0, 1fr);
+		}
+	}
+</style>

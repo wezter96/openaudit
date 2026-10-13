@@ -1,0 +1,33 @@
+---
+import help from "../../generated/cli-help.json";
+import Docs from "../../layouts/Docs.astro";
+import { inline, introParagraphsIn, readRepo, render, renderSection, section, withoutSection } from "../../lib/markdown";
+
+const FILE = "apps/cli/README.md";
+const usage = withoutSection(section(readRepo(FILE), "Usage"), "Configuration");
+// "Requires [Bun](https://bun.sh) 1.4 or later. Install globally …"
+const lede = (introParagraphsIn(FILE)[1] ?? "").split(/(?<=\.)\s+/)[0] ?? "";
+const entries = Object.entries(help as Record<string, string>);
+---
+
+<Docs
+	title="CLI reference"
+	description="Every openaudit command and flag: targets, output formats, auditor selection, baselines, diff mode, exit codes and agent mode."
+	lede={inline(lede, FILE)}
+	sources={[FILE]}
+>
+	<Fragment set:html={render(usage, FILE)} />
+	<Fragment set:html={renderSection(FILE, "Agent mode (`--json`)")} />
+	<h2 id="help">Help output</h2>
+	<p>Printed by the CLI itself, so it always matches the version the site was built with.</p>
+	{
+		entries.map(([name, text]) => (
+			<details>
+				<summary>
+					<code>{name === "openaudit" ? "openaudit --help" : `openaudit ${name} --help`}</code>
+				</summary>
+				<pre>{text.trim()}</pre>
+			</details>
+		))
+	}
+</Docs>

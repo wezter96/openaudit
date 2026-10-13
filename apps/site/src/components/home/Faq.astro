@@ -1,0 +1,165 @@
+---
+import scoring from "../../generated/scoring.json";
+import { wrappedCount } from "../../lib/home";
+import { counts, u } from "../../lib/site";
+
+const w = scoring.weights as Record<string, number>;
+const ex = (sev: string) => scoring.examples.find((e) => e.severity === sev && e.n === 1)?.score;
+const bands = scoring.bands.filter((b) => b.min > 0);
+const k = w.critical ?? 40;
+
+const faqs = [
+	{
+		q: "Does it upload my code?",
+		a: "No. Audits run on your machine and file reads stay inside the project. Some auditors use the network: dependency checks look packages up on OSV.dev, and URL audits send low-volume GET and HEAD requests to the site you point them at. <code>--offline</code> turns off everything except the target. Code only leaves your machine if you turn on the opt-in agentic auditors, which send the files the agent reads to Anthropic; <code>--ai</code> sends finding metadata, never file contents.",
+	},
+	{
+		q: "Which tools do I need installed?",
+		a: `Only <a href="https://bun.sh">Bun</a> 1.4 or newer. The ${counts.builtin} built-in auditors need nothing else. Each of the ${wrappedCount} wrapped scanners is used when it is on your PATH, and a missing one is skipped with an install hint. <code>openaudit doctor</code> lists what is available, and the <a href="${u("/docs/ci/#docker")}">Docker image</a> ships with the free scanners preinstalled.`,
+	},
+	{
+		q: "Does it replace Snyk or SonarQube?",
+		a: "It covers much of the same ground, such as static analysis, vulnerable dependencies and code quality, using free and open-source scanners. It also puts websites, containers, infrastructure, cloud accounts and mobile builds in the same report. It runs where you run it rather than as a hosted service, and it can run alongside a commercial tool: both can upload SARIF to GitHub code scanning.",
+	},
+	{
+		q: "How is the score calculated?",
+		a: `Each finding adds a penalty: ${w.critical} for critical, ${w.high} for high, ${w.medium} for medium, ${w.low} for low and nothing for info. An area scores 100 × ${k} ÷ (${k} + penalty), so one critical finding gives ${ex("critical")} and one high gives ${ex("high")}. Grades start at ${bands.map((b) => `${b.min} for ${b.grade}`).join(", ")}. The overall score is the average of the areas that were examined. <a href="${u("/docs/report/#scoring")}">More on scoring</a>`,
+	},
+	{
+		q: "Can AI agents use it?",
+		a: `Yes, it is built for them. Add the MCP server and your agent can run audits, read findings with the surrounding source, work through the playbooks and confirm its fixes with <code>compare_reports</code>. <code>--json</code> gives scripts and agents one machine-readable report. <a href="${u("/docs/agents/")}">Agent setup</a>`,
+	},
+	{
+		q: "Is it free?",
+		a: "Yes. openaudit is MIT licensed and every scanner it wraps is free and open source. The only cost is tokens, and only if you choose to use the AI features.",
+	},
+];
+---
+
+<section class="sheet" id="faq" aria-labelledby="faq-title">
+	<div class="frame faq">
+		<div class="sheet-head single">
+			<h2 id="faq-title" class="rise">Questions</h2>
+		</div>
+		<div class="qs">
+			{
+				faqs.map((f) => (
+					<details class="rise">
+						<summary>
+							<span>{f.q}</span>
+							<svg class="plus" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+								<path d="M5 12h14M12 5v14" />
+							</svg>
+						</summary>
+						<p set:html={f.a} />
+					</details>
+				))
+			}
+		</div>
+	</div>
+</section>
+
+<style>
+	.faq {
+		display: grid;
+		grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+		gap: 2rem clamp(2rem, 5vw, 5rem);
+		align-items: start;
+	}
+
+	.sheet-head.single {
+		grid-template-columns: 1fr;
+		margin-bottom: 0;
+	}
+
+	.qs {
+		border-top: 1px solid var(--ink);
+	}
+
+	details {
+		border-bottom: 1px solid var(--hair);
+	}
+
+	summary {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		min-height: 3.5rem;
+		padding: 0.9rem 0;
+		font-size: 1.125rem;
+		font-weight: 650;
+		letter-spacing: -0.015em;
+		cursor: pointer;
+		list-style: none;
+		transition: color 0.2s;
+	}
+
+	summary::-webkit-details-marker {
+		display: none;
+	}
+
+	summary:hover {
+		color: var(--accent);
+	}
+
+	summary:focus-visible {
+		outline-offset: 2px;
+	}
+
+	.plus {
+		flex: none;
+		width: 1.15rem;
+		height: 1.15rem;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.8;
+		stroke-linecap: round;
+		transition: transform 0.5s var(--settle);
+	}
+
+	details[open] .plus {
+		transform: rotate(45deg);
+	}
+
+	/* where the browser can animate to auto height, answers unfold */
+	@media (prefers-reduced-motion: no-preference) {
+		@supports (interpolate-size: allow-keywords) {
+			.qs {
+				interpolate-size: allow-keywords;
+			}
+
+			details::details-content {
+				height: 0;
+				overflow: clip;
+				transition:
+					height 0.45s var(--soft),
+					content-visibility 0.45s allow-discrete;
+			}
+
+			details[open]::details-content {
+				height: auto;
+			}
+		}
+	}
+
+	details p {
+		padding: 0 2.5rem 1.25rem 0;
+		color: var(--graphite);
+		max-width: 44rem;
+		text-wrap: pretty;
+	}
+
+	details p :global(code) {
+		font-size: 0.85em;
+		padding: 0.05em 0.3em;
+		border-radius: 4px;
+		background: var(--paper-3);
+	}
+
+	@media (max-width: 60rem) {
+		.faq {
+			grid-template-columns: minmax(0, 1fr);
+		}
+	}
+</style>

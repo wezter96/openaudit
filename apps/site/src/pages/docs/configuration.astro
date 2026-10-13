@@ -1,0 +1,116 @@
+---
+import config from "../../generated/config.json";
+import Docs from "../../layouts/Docs.astro";
+import { codeIn, inline, paragraphsIn, readRepo, render, section } from "../../lib/markdown";
+
+const CLI = "apps/cli/README.md";
+const AGENT = "packages/agent/README.md";
+const HEADLESS = "1. Headless, inside openaudit (`openaudit --agentic`)";
+const lede = paragraphsIn("README.md", "Configuration")[0] ?? "";
+const trust = paragraphsIn("README.md", "Configuration")[1] ?? "";
+
+interface Prop {
+	readonly type?: string;
+	readonly enum?: ReadonlyArray<string>;
+	readonly items?: Prop;
+	readonly properties?: Record<string, Prop>;
+	readonly additionalProperties?: boolean | Prop;
+}
+const typeOf = (p: Prop): string =>
+	p.enum ? p.enum.map((v) => `"${v}"`).join(" | ") : p.type === "array" && p.items ? `${typeOf(p.items)}[]` : (p.type ?? "any");
+
+const defaults = config.defaults as Record<string, unknown>;
+const defaultOf = (path: string[]): string => {
+	let v: unknown = defaults;
+	for (const k of path) v = v && typeof v === "object" ? (v as Record<string, unknown>)[k] : undefined;
+	return v === undefined ? "" : JSON.stringify(v);
+};
+const rows: { key: string; type: string; def: string; trusted: boolean; note: string }[] = [];
+const walk = (props: Record<string, Prop>, path: string[]) => {
+	for (const [k, p] of Object.entries(props)) {
+		if (k === "$schema") continue;
+		const full = [...path, k];
+		const key = full.join(".");
+		if (p.type === "object" && p.properties) {
+			walk(p.properties, full);
+			continue;
+		}
+		rows.push({
+			key,
+			type: typeOf(p),
+			def: defaultOf(full),
+			trusted: config.trustedOnly.includes(key),
+			note: (config.comments as Record<string, string>)[k] ?? "",
+		});
+	}
+};
+walk(config.schema.properties as Record<string, Prop>, []);
+
+const settingsCode = codeIn(AGENT, HEADLESS)[0];
+const settingsText = paragraphsIn(AGENT, HEADLESS).find((p) => p.startsWith("The available keys")) ?? "";
+---
+
+<Docs
+	title="Configuration"
+	description="openaudit.config.json: suppressions, auditor selection and per-auditor settings, with the full key reference and what a config inside the audited target may change."
+	lede={inline(lede)}
+	sources={["README.md", CLI, "apps/cli/src/config.ts"]}
+>
+	<p set:html={inline(trust)} />
+	<h2 id="the-config-file">The config file</h2>
+	<Fragment set:html={render(section(readRepo(CLI), "Configuration", { body: true }), CLI)} />
+	<h2 id="reference">Reference</h2>
+	<p>
+		Generated from <code>openaudit schema config</code>. Keys marked <em>trusted only</em> are ignored with a warning when the config is found inside the audited target; pass the file with <code>--config &lt;path&gt;</code> to use them.
+	</p>
+	<div class="table">
+		<table>
+			<thead>
+				<tr><th scope="col">Key</th><th scope="col">Type</th><th scope="col">Default</th><th scope="col">Notes</th></tr>
+			</thead>
+			<tbody>
+				{
+					rows.map((r) => (
+						<tr>
+							<th scope="row"><code>{r.key}</code></th>
+							<td><code class="type">{r.type}</code></td>
+							<td>{r.def ? <code>{r.def}</code> : <span class="muted">none</span>}</td>
+							<td>
+								{r.trusted && <span class="badge">Trusted only</span>}
+								{r.note && <span set:html={inline(r.note)} />}
+							</td>
+						</tr>
+					))
+				}
+			</tbody>
+		</table>
+	</div>
+	<h2 id="per-auditor-settings">Per-auditor settings</h2>
+	<p>Settings for the agentic auditors go in <code>options.settings</code>, under <code>"agent"</code> for all of them or under one auditor's id.</p>
+	{settingsCode && <Fragment set:html={render(`\`\`\`${settingsCode.lang ?? ""}\n${settingsCode.text}\n\`\`\``, AGENT)} />}
+	<p set:html={inline(settingsText, AGENT)} />
+	<h2 id="schema">JSON Schema</h2>
+	<p>Point your editor at it for completion and validation: <code>openaudit schema config &gt; openaudit.schema.json</code>.</p>
+	<details>
+		<summary>Show the schema</summary>
+		<pre>{JSON.stringify(config.schema, null, 2)}</pre>
+	</details>
+</Docs>
+
+<style>
+	.badge {
+		display: inline-block;
+		margin-right: 0.5rem;
+		padding: 0 0.4rem;
+		border: 1px solid var(--t-medium);
+		border-radius: 4px;
+		color: var(--t-medium);
+		font-size: 0.75rem;
+		font-weight: 600;
+		white-space: nowrap;
+	}
+
+	.type {
+		white-space: normal;
+	}
+</style>

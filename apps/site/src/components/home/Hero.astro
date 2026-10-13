@@ -1,0 +1,275 @@
+---
+import { CATEGORY_LABEL, PITCH, REPO, self, u } from "../../lib/site";
+import Command from "../Command.astro";
+import Dial from "../Dial.astro";
+import Icon from "../Icon.astro";
+
+const words = PITCH.split(" ");
+const scored = self.categories ?? [];
+const segments = scored.map((c) => ({
+	label: CATEGORY_LABEL[c.category] ?? c.category,
+	score: c.score,
+	grade: c.grade,
+}));
+const run = self.finishedAt
+	? new Date(self.finishedAt).toLocaleDateString("en-GB", {
+			day: "numeric",
+			month: "short",
+			year: "numeric",
+			timeZone: "UTC",
+		})
+	: "";
+const ran = self.auditors ? Object.values(self.auditors).reduce((a, b) => a + b, 0) : 0;
+---
+
+<section class="hero frame" aria-labelledby="hero-title">
+	<h1 id="hero-title" class="hero-title">
+		{
+			words.map((w, i) => (
+				<>
+					<span class="w">
+						<span>{w}</span>
+					</span>
+					{i < words.length - 1 ? " " : ""}
+				</>
+			))
+		}
+	</h1>
+	<div class="hero-copy">
+		<p class="hero-sub late">
+			Code, sites, apps, APIs, containers, infrastructure, cloud and mobile builds, audited for security, accessibility, performance and seven more areas. From your terminal, your CI or your AI agent.
+		</p>
+		<div class="hero-cmd late">
+			<Command command="bunx openaudit ." />
+		</div>
+		<div class="hero-links late">
+			<a class="btn primary" href={u("/report/")}><Icon name="report" />See a live report</a>
+			<a class="btn" href={REPO}><Icon name="github" />GitHub</a>
+		</div>
+	</div>
+	{
+		self.available && self.score !== undefined && self.grade && (
+			<figure class="hero-dial">
+				<a href={u("/report/")} class="dial-link">
+					<Dial
+						score={self.score}
+						grade={self.grade}
+						segments={segments}
+						label={`openaudit audits itself: grade ${self.grade}, ${self.score} of 100. Open the report`}
+						id="hero-dial"
+						animate
+					/>
+				</a>
+				<figcaption class="late">
+					<p>
+						openaudit audits itself on every push: <b class="num">{self.score}/100</b>
+					</p>
+					<dl class="meta">
+						<div>
+							<dt>Areas</dt>
+							<dd>{scored.length}</dd>
+						</div>
+						<div>
+							<dt>Auditors</dt>
+							<dd>{ran}</dd>
+						</div>
+						{
+							self.durationMs !== undefined && (
+								<div>
+									<dt>Took</dt>
+									<dd>{(self.durationMs / 1000).toFixed(1)} s</dd>
+								</div>
+							)
+						}
+						{
+							run && (
+								<div>
+									<dt>Run</dt>
+									<dd>{run}</dd>
+								</div>
+							)
+						}
+					</dl>
+				</figcaption>
+			</figure>
+		)
+	}
+</section>
+
+<script>
+	import "../../scripts/hero";
+</script>
+
+<style>
+	.hero {
+		display: grid;
+		grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+		grid-template-areas: "title dial" "copy dial";
+		grid-template-rows: auto 1fr;
+		gap: 0 clamp(2rem, 5vw, 5rem);
+		align-items: center;
+		padding-top: clamp(2rem, 0.5rem + 4vw, 4.5rem);
+		padding-bottom: clamp(3rem, 2rem + 4vw, 5.5rem);
+	}
+
+	.hero-title {
+		grid-area: title;
+		align-self: end;
+		font-family: var(--display);
+		font-size: clamp(3.25rem, 1.4rem + 5.9vw, 6.25rem);
+		font-weight: 790;
+		letter-spacing: -0.058em;
+		line-height: 0.9;
+		max-width: 11ch;
+		text-wrap: balance;
+	}
+
+	/* each word rises out of its own mask; painted from the first frame, so the
+	   headline is never late for Largest Contentful Paint */
+	.w {
+		display: inline-block;
+		overflow: clip;
+		padding: 0 0.04em 0.14em;
+		margin: 0 -0.04em -0.14em;
+		vertical-align: top;
+	}
+
+	.w > span {
+		display: inline-block;
+	}
+
+	@media (prefers-reduced-motion: no-preference) {
+		.w > span {
+			animation: word 1s var(--settle) both;
+		}
+
+		.w:nth-child(2) > span {
+			animation-delay: 50ms;
+		}
+
+		.w:nth-child(3) > span {
+			animation-delay: 100ms;
+		}
+
+		.w:nth-child(4) > span {
+			animation-delay: 150ms;
+		}
+
+		.w:nth-child(5) > span {
+			animation-delay: 200ms;
+		}
+
+		.w:nth-child(6) > span {
+			animation-delay: 250ms;
+		}
+
+		.w:nth-child(n + 7) > span {
+			animation-delay: 300ms;
+		}
+	}
+
+	@keyframes word {
+		from {
+			transform: translateY(102%);
+		}
+	}
+
+	.hero-copy {
+		grid-area: copy;
+		align-self: start;
+	}
+
+	.hero-sub {
+		margin-top: clamp(1.25rem, 1rem + 1vw, 1.75rem);
+		max-width: 34rem;
+		font-size: clamp(1.125rem, 1rem + 0.45vw, 1.3125rem);
+		line-height: 1.5;
+		color: var(--graphite);
+		text-wrap: pretty;
+	}
+
+	.hero-cmd {
+		margin-top: 1.75rem;
+	}
+
+	.hero-links {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.6rem;
+		margin-top: 1.25rem;
+	}
+
+	.hero-dial {
+		grid-area: dial;
+		margin: 0;
+		justify-self: center;
+		width: 100%;
+		max-width: 31rem;
+	}
+
+	.dial-link {
+		display: block;
+		color: inherit;
+		text-decoration: none;
+		border-radius: 50%;
+		margin: 1.5rem;
+	}
+
+	.dial-link:focus-visible {
+		outline-offset: 8px;
+	}
+
+	.hero-dial figcaption {
+		margin-top: 0.75rem;
+		padding-top: 1rem;
+		border-top: 1px solid var(--hair);
+		font-size: 0.9375rem;
+		color: var(--graphite);
+	}
+
+	.hero-dial figcaption b {
+		color: var(--ink);
+		font-weight: 600;
+	}
+
+	.meta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem 2rem;
+		margin-top: 0.75rem;
+	}
+
+	.meta div {
+		display: flex;
+		flex-direction: column;
+		gap: 0.1rem;
+	}
+
+	.meta dt {
+		font-size: 0.75rem;
+	}
+
+	.meta dd {
+		font-family: var(--mono);
+		font-size: 0.8125rem;
+		color: var(--ink);
+		font-variant-numeric: tabular-nums;
+	}
+
+	@media (max-width: 60rem) {
+		.hero {
+			grid-template-columns: minmax(0, 1fr);
+			grid-template-areas: "title" "dial" "copy";
+			grid-template-rows: auto;
+		}
+
+		.hero-dial {
+			max-width: 24rem;
+			margin-top: 0.5rem;
+		}
+
+		.dial-link {
+			margin: 1.75rem 1.25rem 0.75rem;
+		}
+	}
+</style>
