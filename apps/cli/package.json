@@ -1,5 +1,5 @@
 {
-	"name": "openaudit",
+	"name": "@openaudit/cli",
 	"version": "0.1.0",
 	"description": "Audit codebases, URLs, running apps, containers, IaC and mobile builds for security, accessibility, performance, SEO and more. Agent-ready via MCP.",
 	"keywords": [

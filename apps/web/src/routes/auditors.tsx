@@ -118,8 +118,8 @@ function AuditorsPage() {
 					</p>
 					<p className="mt-1 text-ink-soft text-sm">
 						The API server did not respond ({auditors.error.message}). Run{" "}
-						<code className="font-mono">bunx openaudit list</code> to see the
-						same catalog locally.
+						<code className="font-mono">bunx @openaudit/cli list</code> to see
+						the same catalog locally.
 					</p>
 				</div>
 			) : (

@@ -30,14 +30,14 @@ openaudit runs 32 built-in auditors and wraps 45 established open-source scanner
 ## Quick start
 
 ```bash
-bunx openaudit .                            # a codebase
-bunx openaudit https://example.com          # a live site (add --browser for Playwright + axe-core)
-bunx openaudit ./app-release.apk            # a mobile build (.apk, .aab, .ipa)
-bunx openaudit image:nginx:1.27             # a container image
-bunx openaudit cloud:aws --only cloud       # a live cloud account (Prowler)
+bunx @openaudit/cli .                            # a codebase
+bunx @openaudit/cli https://example.com          # a live site (add --browser for Playwright + axe-core)
+bunx @openaudit/cli ./app-release.apk            # a mobile build (.apk, .aab, .ipa)
+bunx @openaudit/cli image:nginx:1.27             # a container image
+bunx @openaudit/cli cloud:aws --only cloud       # a live cloud account (Prowler)
 
-bunx openaudit . -f html -o report          # write the interactive report to report/
-bunx openaudit doctor                       # which optional scanners are installed
+bunx @openaudit/cli . -f html -o report          # write the interactive report to report/
+bunx @openaudit/cli doctor                       # which optional scanners are installed
 ```
 
 openaudit needs [Bun](https://bun.sh) 1.4 or newer. Scanners are optional: an auditor whose tool is missing is skipped with an install hint, and the rest of the audit runs normally. To run from source, see [Contributing](#contributing).
@@ -97,7 +97,7 @@ Every language also gets secret scanning (built-in, gitleaks, TruffleHog), dupli
 
 \* Opt-in, because it's slow, noisy, sends more traffic to the target, spends tokens, or runs project code. Select it with `--only <id>`, e.g. `--only code.clippy` or `--only agent.deepsec`.
 
-`bunx openaudit list` shows every auditor and playbook. The [architecture page](https://wezter96.github.io/openaudit/architecture.html) maps every auditor to the targets and areas it covers.
+`bunx @openaudit/cli list` shows every auditor and playbook. The [architecture page](https://wezter96.github.io/openaudit/architecture.html) maps every auditor to the targets and areas it covers.
 
 ## The report
 
@@ -112,7 +112,7 @@ Every run produces one report, in whichever formats you ask for: `-f terminal,js
 
 Some audits need judgment rather than patterns. openaudit is built so agents can drive it end to end:
 
-- **MCP server.** `claude mcp add openaudit -- bunx openaudit mcp` (or the equivalent `mcp.json` in Cursor or VS Code) gives an agent `run_audit`, `get_finding`, `compare_reports` and more, plus the playbook tools `list_playbooks`, `get_playbook` and `submit_findings`. Your agent does the review with its own tools, and its findings merge into the same scored report. No extra API key is needed.
+- **MCP server.** `claude mcp add openaudit -- bunx @openaudit/cli mcp` (or the equivalent `mcp.json` in Cursor or VS Code) gives an agent `run_audit`, `get_finding`, `compare_reports` and more, plus the playbook tools `list_playbooks`, `get_playbook` and `submit_findings`. Your agent does the review with its own tools, and its findings merge into the same scored report. No extra API key is needed.
 - **Headless agentic auditors.** `openaudit . --agentic` runs the playbooks through the Claude Agent SDK. The agent gets read-only tools, confined to the project and the target origin. It uses `ANTHROPIC_API_KEY` or an existing Claude Code login.
 - **AI triage.** `--ai` turns the findings into a prioritised fix plan. Only finding metadata is sent, never file contents.
 - **Agent mode CLI.** `--json` prints a single JSON report to stdout, and `openaudit schema` gives its JSON Schema.
@@ -140,11 +140,11 @@ steps:
 
 Inputs: `target`, `fail-on`, `diff` (defaults to the PR base; `none` audits everything), `only`, `exclude`, `config`, `upload-sarif`, `upload-report`. Outputs: `score`, `grade`, `report-dir`.
 
-Elsewhere, run the CLI: `bunx openaudit . --diff origin/main -f html,sarif -o openaudit-report --fail-on high`. `--fail-on <severity>` sets the exit code, and `--baseline previous.json` reports only findings that are new since an earlier run. This repository audits itself in [`ci.yml`](.github/workflows/ci.yml) and publishes the result with [`pages.yml`](.github/workflows/pages.yml).
+Elsewhere, run the CLI: `bunx @openaudit/cli . --diff origin/main -f html,sarif -o openaudit-report --fail-on high`. `--fail-on <severity>` sets the exit code, and `--baseline previous.json` reports only findings that are new since an earlier run. This repository audits itself in [`ci.yml`](.github/workflows/ci.yml) and publishes the result with [`pages.yml`](.github/workflows/pages.yml).
 
 ## Configuration
 
-`bunx openaudit init` writes an `openaudit.config.json` with suppressions (`ignore.rules`, `ignore.paths`, `ignore.fingerprints`), auditor selection and per-auditor settings. Every report discloses how many findings each config or baseline suppressed.
+`bunx @openaudit/cli init` writes an `openaudit.config.json` with suppressions (`ignore.rules`, `ignore.paths`, `ignore.fingerprints`), auditor selection and per-auditor settings. Every report discloses how many findings each config or baseline suppressed.
 
 A config found inside the audited target is written by whoever controls the target, so it can only narrow an audit. It cannot enable opt-in auditors, add credentials or switch off the `--fail-on` gate. Settings like that come only from flags or from a file passed with `--config <path>`. See [`apps/cli/README.md`](apps/cli/README.md#configuration).
 

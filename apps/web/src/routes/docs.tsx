@@ -170,7 +170,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - name: Audit
-        run: bunx openaudit . --format sarif,json --out audit --fail-on high
+        run: bunx @openaudit/cli . --format sarif,json --out audit --fail-on high
       - name: Upload to code scanning
         if: always()
         uses: github/codeql-action/upload-sarif@v4
@@ -260,7 +260,7 @@ function DocsPage() {
 					<li>
 						Audit the project in the current directory:
 						<CodeBlock
-							code="bunx openaudit ."
+							code="bunx @openaudit/cli ."
 							prompt
 							label="audit command"
 							className="my-2"
@@ -269,7 +269,7 @@ function DocsPage() {
 					<li>
 						See which optional tools are available to deepen the audit:
 						<CodeBlock
-							code="bunx openaudit doctor"
+							code="bunx @openaudit/cli doctor"
 							prompt
 							label="doctor command"
 							className="my-2"
@@ -278,7 +278,7 @@ function DocsPage() {
 					<li>
 						Audit a deployed site, with a real browser for rendered checks:
 						<CodeBlock
-							code="bunx openaudit https://staging.example.com --browser --max-pages 20"
+							code="bunx @openaudit/cli https://staging.example.com --browser --max-pages 20"
 							prompt
 							label="URL audit command"
 							className="my-2"
@@ -287,7 +287,7 @@ function DocsPage() {
 					<li>
 						Save a config so CI and teammates run the same audit:
 						<CodeBlock
-							code="bunx openaudit init"
+							code="bunx @openaudit/cli init"
 							prompt
 							label="init command"
 							className="my-2"
@@ -371,14 +371,15 @@ function DocsPage() {
 					time and fix them in the same session. Add it to Claude Code with:
 				</p>
 				<CodeBlock
-					code="claude mcp add openaudit -- bunx openaudit mcp"
+					code="claude mcp add openaudit -- bunx @openaudit/cli mcp"
 					prompt
 					label="MCP install command"
 					className="mb-4"
 				/>
 				<p>
-					Other clients take the same command (<code>bunx openaudit mcp</code>,
-					stdio transport) in their MCP settings.
+					Other clients take the same command (
+					<code>bunx @openaudit/cli mcp</code>, stdio transport) in their MCP
+					settings.
 				</p>
 				<h3>Tools</h3>
 				<DefTable
@@ -409,9 +410,9 @@ function DocsPage() {
 				<h3>Without MCP</h3>
 				<p>
 					Any agent that can run a shell can use{" "}
-					<code>bunx openaudit . --json</code>: the report is the only thing on
-					stdout, and <code>openaudit schema</code> gives the JSON Schema to
-					validate it.
+					<code>bunx @openaudit/cli . --json</code>: the report is the only
+					thing on stdout, and <code>openaudit schema</code> gives the JSON
+					Schema to validate it.
 				</p>
 
 				<h2 id="schema">Report schema</h2>
@@ -450,7 +451,7 @@ function DocsPage() {
 					Categories no auditor examined are left out rather than scored 100.
 				</p>
 				<CodeBlock
-					code="bunx openaudit schema > openaudit-report.schema.json"
+					code="bunx @openaudit/cli schema > openaudit-report.schema.json"
 					prompt
 					label="schema command"
 					className="mb-4"

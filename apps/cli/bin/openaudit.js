@@ -16,7 +16,7 @@ if (typeof Bun !== "undefined") {
 		console.error(
 			"openaudit needs the Bun runtime (https://bun.sh), which was not found on PATH.\n" +
 				"Install it with `curl -fsSL https://bun.sh/install | bash` (or `npm i -g bun`), then run again.\n" +
-				"Or skip the install: `bunx openaudit`.",
+				"Or skip the install: `bunx @openaudit/cli`.",
 		);
 		process.exit(127);
 	}

@@ -198,7 +198,7 @@ const EXAMPLES = [
 		description: "Fail only on findings that are new since the baseline",
 	},
 	{
-		command: "claude mcp add openaudit -- bunx openaudit mcp",
+		command: "claude mcp add openaudit -- bunx @openaudit/cli mcp",
 		description: "Use openaudit from Claude Code over MCP",
 	},
 ];

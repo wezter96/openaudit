@@ -150,13 +150,13 @@ export const matrix = TARGETS.map((t) => ({
 export const matrixMax = Math.max(...matrix.flatMap((r) => r.cells));
 
 export const TARGET_COMMAND: Record<string, string> = {
-	codebase: "bunx openaudit .",
-	url: "bunx openaudit https://example.com",
-	webapp: "bunx openaudit https://example.com --browser",
-	container: "bunx openaudit image:nginx:1.27",
-	iac: "bunx openaudit ./infra",
-	mobile: "bunx openaudit ./app-release.apk",
-	cloud: "bunx openaudit cloud:aws --only cloud",
+	codebase: "bunx @openaudit/cli .",
+	url: "bunx @openaudit/cli https://example.com",
+	webapp: "bunx @openaudit/cli https://example.com --browser",
+	container: "bunx @openaudit/cli image:nginx:1.27",
+	iac: "bunx @openaudit/cli ./infra",
+	mobile: "bunx @openaudit/cli ./app-release.apk",
+	cloud: "bunx @openaudit/cli cloud:aws --only cloud",
 };
 
 /** Short column labels for narrow screens. */

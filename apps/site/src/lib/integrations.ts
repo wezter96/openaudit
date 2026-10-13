@@ -48,7 +48,7 @@ export const integrations: ReadonlyArray<Integration> = [
 		id: "cli",
 		name: "CLI",
 		icon: "terminal",
-		hint: "bunx openaudit",
+		hint: "bunx @openaudit/cli",
 		lede: para("README.md", "Quick start"),
 		html: blocks("README.md", codeIn("README.md", "Quick start")),
 		more: { href: "/docs/cli/", label: "CLI reference" },

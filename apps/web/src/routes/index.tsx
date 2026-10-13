@@ -48,7 +48,7 @@ function HomeComponent() {
 						accessibility, performance, SEO, privacy and the supply chain.
 					</p>
 					<CodeBlock
-						code="bunx openaudit ."
+						code="bunx @openaudit/cli ."
 						prompt
 						label="install command"
 						className="mt-8 max-w-md"
@@ -148,7 +148,7 @@ function HomeComponent() {
 					<div>
 						<h3 className="mb-2 font-semibold">Add it to Claude Code</h3>
 						<CodeBlock
-							code="claude mcp add openaudit -- bunx openaudit mcp"
+							code="claude mcp add openaudit -- bunx @openaudit/cli mcp"
 							prompt
 							label="MCP install command"
 						/>
@@ -157,7 +157,7 @@ function HomeComponent() {
 						<h3 className="mb-2 font-semibold">Machine-readable output</h3>
 						<CodeBlock
 							code={
-								"bunx openaudit . --json > report.json\nbunx openaudit https://staging.example --format sarif --out audit.sarif"
+								"bunx @openaudit/cli . --json > report.json\nbunx openaudit https://staging.example --format sarif --out audit.sarif"
 							}
 							prompt
 							label="JSON and SARIF commands"
@@ -166,7 +166,7 @@ function HomeComponent() {
 					<div>
 						<h3 className="mb-2 font-semibold">Let the agent run playbooks</h3>
 						<CodeBlock
-							code="bunx openaudit . --agentic --only agent.authz"
+							code="bunx @openaudit/cli . --agentic --only agent.authz"
 							prompt
 							label="agentic audit command"
 						/>

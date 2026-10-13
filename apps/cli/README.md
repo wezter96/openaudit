@@ -3,11 +3,11 @@
 Audit codebases, live URLs, running web apps, container images, infrastructure as code and mobile builds for **security, accessibility, performance, SEO, privacy, best practices and supply chain** in one command. It is built for both humans and AI agents: there is a JSON mode for scripts, SARIF for code scanning, and an MCP server so Claude Code, Cursor, Codex and other agents can run audits, carry out judgment-heavy playbooks and check their own fixes.
 
 ```sh
-bunx openaudit                      # audit the current directory
-bunx openaudit https://example.com  # audit a live site
+bunx @openaudit/cli                      # audit the current directory
+bunx @openaudit/cli https://example.com  # audit a live site
 ```
 
-Requires [Bun](https://bun.sh) 1.4 or later. Install globally with `bun add -g openaudit`, or run it on demand with `bunx openaudit`. `npx openaudit` also works when Bun is on PATH; without Bun it prints how to install it. External scanners (gitleaks, TruffleHog, Semgrep, Trivy, zizmor, pa11y and the others listed by `openaudit list`) are optional. When one is missing, the auditor that wraps it is skipped and tells you how to install it. Run `openaudit doctor` to see what is available.
+Requires [Bun](https://bun.sh) 1.4 or later. Install globally with `bun add -g @openaudit/cli`, or run it on demand with `bunx @openaudit/cli`. `npx @openaudit/cli` also works when Bun is on PATH; without Bun it prints how to install it. External scanners (gitleaks, TruffleHog, Semgrep, Trivy, zizmor, pa11y and the others listed by `openaudit list`) are optional. When one is missing, the auditor that wraps it is skipped and tells you how to install it. Run `openaudit doctor` to see what is available.
 
 ## Usage
 
@@ -97,7 +97,7 @@ The MCP server lets an agent run audits, read findings with the surrounding sour
 **Claude Code**
 
 ```sh
-claude mcp add openaudit -- bunx openaudit mcp
+claude mcp add openaudit -- bunx @openaudit/cli mcp
 ```
 
 **Cursor** (`.cursor/mcp.json`) or **VS Code** (`.vscode/mcp.json`, which uses `"servers"` instead of `"mcpServers"`):
@@ -189,7 +189,7 @@ To run the CLI directly instead:
 ```yaml
 - uses: oven-sh/setup-bun@v2
 - name: openaudit
-  run: bunx openaudit . --format sarif,markdown --out openaudit --fail-on high
+  run: bunx @openaudit/cli . --format sarif,markdown --out openaudit --fail-on high
 - name: Upload SARIF
   if: always()
   uses: github/codeql-action/upload-sarif@v4

@@ -7,7 +7,7 @@ description: Audit a project with openaudit — security, accessibility, perform
 
 openaudit produces a scored report of findings. Each finding has a `ruleId`, `severity`, `category`, `location`, `remediation` and a stable `fingerprint`. Deterministic auditors catch patterns; **playbooks** cover what needs judgment, and you execute them.
 
-Prefer the MCP tools (`run_audit`, `get_playbook`, `submit_findings`, `compare_reports`, …) when the `openaudit` server is connected. Otherwise use the CLI in agent mode: `bunx openaudit <target> --json` prints one JSON report to stdout. `bunx openaudit list --json` and `bunx openaudit doctor --json` show auditors and available tooling.
+Prefer the MCP tools (`run_audit`, `get_playbook`, `submit_findings`, `compare_reports`, …) when the `openaudit` server is connected. Otherwise use the CLI in agent mode: `bunx @openaudit/cli <target> --json` prints one JSON report to stdout. `bunx @openaudit/cli list --json` and `bunx @openaudit/cli doctor --json` show auditors and available tooling.
 
 Targets: a directory, a file, `.apk`/`.aab`/`.ipa`, `http(s)://…` (add `--browser` / `browser: true` for a real-browser pass), or `image:<ref>`. Only audit systems the user owns or is authorised to test.
 

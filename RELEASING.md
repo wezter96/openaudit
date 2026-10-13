@@ -26,11 +26,11 @@ npm publish --access public
 
 Provenance is only generated from CI, so this first version has none; every tag-driven release after it does.
 
-Try it from a clean directory: `bunx openaudit --version`.
+Try it from a clean directory: `bunx @openaudit/cli --version`.
 
 ## Set up trusted publishing (once, after the first publish)
 
-1. Open https://www.npmjs.com/package/openaudit/access (Settings, Trusted Publisher).
+1. Open https://www.npmjs.com/package/@openaudit/cli/access (Settings, Trusted Publisher).
 2. Choose GitHub Actions and enter: organization or user `wezter96`, repository `openaudit`, workflow filename `release.yml`. Leave the environment empty.
 3. Optionally set "Require two-factor authentication and disallow tokens" under publishing access, so only the workflow can publish.
 

@@ -1,6 +1,6 @@
 name: Release
 
-# Publishes the `openaudit` package (apps/cli) to npm when a v* tag is pushed,
+# Publishes the `@openaudit/cli` package (apps/cli) to npm when a v* tag is pushed,
 # then creates a GitHub Release. See RELEASING.md for the one-time setup.
 
 on:

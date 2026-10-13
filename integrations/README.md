@@ -90,7 +90,7 @@ The hooks audit the whole working tree with `--offline --fail-on high`, so stage
 ## MCP (Claude Code, Cursor, Codex)
 
 ```bash
-claude mcp add openaudit -- bunx openaudit mcp
+claude mcp add openaudit -- bunx @openaudit/cli mcp
 ```
 
 Setup for Cursor, VS Code and Codex, and the tools the server exposes, are in [`apps/cli/README.md`](../apps/cli/README.md#mcp-server).

@@ -9,7 +9,7 @@
 - id: openaudit
   name: openaudit
   description: Audit the repository for secrets, vulnerable patterns and misconfigurations (needs Bun).
-  entry: bunx openaudit
+  entry: bunx @openaudit/cli
   language: system
   args: [".", "--offline", "--fail-on", "high", "--quiet"]
   pass_filenames: false
