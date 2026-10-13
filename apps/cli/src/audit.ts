@@ -174,6 +174,7 @@ const audit = async (
 		config,
 		path: configPath,
 		ignored,
+		trusted,
 	} = await loadConfig({
 		explicit: flags.config,
 		noConfig: flags.noConfig,
@@ -211,9 +212,14 @@ const audit = async (
 			"Several formats need --out <dir>; stdout takes a single format.",
 		);
 
+	// A config inside the target may only narrow the default set; `--only`
+	// and `--config <path>` can also enable opt-in auditors.
 	const only = flags.only.length
 		? splitList(flags.only)
-		: [...(config.only ?? [])];
+		: trusted
+			? [...(config.only ?? [])]
+			: [];
+	const narrow = trusted ? [] : [...(config.only ?? [])];
 	const exclude = [...(config.exclude ?? []), ...splitList(flags.exclude)];
 	const categories = flags.category.length
 		? parseCategories(splitList(flags.category))
@@ -260,7 +266,7 @@ const audit = async (
 					headers: { ...opts.headers, ...parseHeaders(flags.header) },
 					settings: opts.settings,
 				},
-				selection: { only, exclude, categories },
+				selection: { only, narrow, exclude, categories },
 				// Suppressions are applied afterwards so they can be counted and disclosed.
 				concurrency,
 				onEvent: progress?.onEvent,

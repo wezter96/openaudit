@@ -194,6 +194,19 @@ describe("untrusted target config", () => {
 		await rm(root, { recursive: true, force: true });
 	});
 
+	test("only narrows: it cannot enable opt-in or agentic auditors", async () => {
+		const root = await project({
+			only: ["code.hygiene", "code.knip", "code.codeql", "agent"],
+		});
+		const res = await cli(["--json"], root);
+		expect(res.code).toBe(0);
+		const ran = JSON.parse(res.stdout).results.map(
+			(r: { auditor: string }) => r.auditor,
+		);
+		expect(ran).toEqual(["code.hygiene"]);
+		await rm(root, { recursive: true, force: true });
+	});
+
 	test("discloses suppressions and --no-config bypasses them", async () => {
 		const root = await project({
 			only: ["code.hygiene"],

@@ -28,6 +28,12 @@ export interface Selection {
 	readonly only?: ReadonlyArray<string>;
 	readonly exclude?: ReadonlyArray<string>;
 	readonly categories?: ReadonlyArray<Category>;
+	/**
+	 * Like `only`, but can only narrow the default set: it never enables an
+	 * opt-in (`defaultEnabled: false`) or agentic auditor. Used for selections
+	 * from untrusted sources such as a config file inside the target.
+	 */
+	readonly narrow?: ReadonlyArray<string>;
 }
 
 export interface Suppressions {
@@ -72,9 +78,17 @@ export const selectAuditors = (
 			!a.categories.some((c) => selection.categories?.includes(c))
 		)
 			return false;
+		if (
+			selection.narrow?.length &&
+			!selection.narrow.some((p) => matchesPattern(a.id, p))
+		)
+			return false;
 		if (selection.only?.length)
 			return selection.only.some((p) => matchesPattern(a.id, p));
-		if (a.engine === "agentic") return options.agentic === true;
+		// Opt-in agentic auditors (e.g. ones that spend money per run) need
+		// `--agentic` and an explicit selection.
+		if (a.engine === "agentic")
+			return options.agentic === true && a.defaultEnabled !== false;
 		return a.defaultEnabled !== false;
 	});
 

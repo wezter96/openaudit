@@ -60,6 +60,7 @@ describe("selectAuditors", () => {
 		fake("code.b", { defaultEnabled: false }),
 		fake("agent.c", { engine: "agentic" }),
 		fake("web.d", { targets: ["url"] }),
+		fake("agent.e", { engine: "agentic", defaultEnabled: false }),
 	];
 	test("filters by target kind and defaults", () => {
 		expect(selectAuditors(auditors, ["codebase"]).map((a) => a.id)).toEqual([
@@ -79,6 +80,29 @@ describe("selectAuditors", () => {
 				(a) => a.id,
 			),
 		).toEqual(["code.a", "code.b"]);
+	});
+	test("opt-in agentic auditors need an explicit selection", () => {
+		expect(
+			selectAuditors(auditors, ["codebase"], { only: ["agent.e"] }).map(
+				(a) => a.id,
+			),
+		).toEqual(["agent.e"]);
+	});
+	test("narrow never enables opt-in or agentic auditors", () => {
+		const ids = (agentic: boolean) =>
+			selectAuditors(
+				auditors,
+				["codebase"],
+				{ narrow: ["code", "agent"] },
+				{ agentic },
+			).map((a) => a.id);
+		expect(ids(false)).toEqual(["code.a"]);
+		expect(ids(true)).toEqual(["code.a", "agent.c"]);
+		expect(
+			selectAuditors(auditors, ["codebase"], {
+				narrow: ["code.b"],
+			}).map((a) => a.id),
+		).toEqual([]);
 	});
 });
 
