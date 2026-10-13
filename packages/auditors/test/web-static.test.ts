@@ -8,7 +8,7 @@ import { performanceAuditor } from "../src/web/performance";
 import { privacy } from "../src/web/privacy";
 import { seo } from "../src/web/seo";
 import { ruleIds, runAuditor } from "./helpers";
-import { badSite, goodSite, type Site } from "./web-server";
+import { badSite, goodSite, type Site, serve } from "./web-server";
 
 let bad: Site;
 let good: Site;
@@ -151,6 +151,36 @@ describe("web auditors on a misconfigured site", () => {
 			(f) => f.ruleId === "web.privacy/tracker",
 		);
 		expect(tracker?.title).toBe("Google Analytics detected");
+	});
+
+	test("web.privacy uses the shared tracker list", async () => {
+		const html = `<!doctype html><html lang="en"><head><title>t</title>
+<script src="https://static.hotjar.com/c/hotjar-1.js"></script>
+<script src="https://cdn.fpjs.io/v3/loader.js"></script>
+<script src="https://static.criteo.net/js/ld/ld.js"></script>
+<script src="https://browser.sentry-cdn.com/8.0.0/bundle.min.js"></script>
+<script>Sentry.init({ dsn: "https://k@o1.ingest.sentry.io/1" });</script>
+</head><body><a href="/privacy">Privacy</a></body></html>`;
+		const site = serve(
+			{
+				"/": () =>
+					new Response(html, { headers: { "content-type": "text/html" } }),
+			},
+			() => new Response("not found", { status: 404 }),
+		);
+		try {
+			const report = await runAuditor(privacy, site.url);
+			const trackers = report.results
+				.flatMap((r) => r.findings)
+				.filter((f) => f.ruleId === "web.privacy/tracker");
+			expect(trackers.map((f) => [f.title, f.severity]).sort()).toEqual([
+				["Criteo detected", "medium"],
+				["FingerprintJS detected", "medium"],
+				["Hotjar detected", "medium"],
+			]);
+		} finally {
+			site.stop();
+		}
 	});
 
 	test("respects maxPages and only sends GET/HEAD", async () => {

@@ -1,11 +1,18 @@
 import type { Auditor } from "@openaudit/core";
 
+import { cloudAuditors } from "./cloud";
 import { codebaseAuditors } from "./codebase";
 import { infraAuditors } from "./infra";
 import { mobileAuditors } from "./mobile";
 import { webAuditors } from "./web";
 
-export { codebaseAuditors, infraAuditors, mobileAuditors, webAuditors };
+export {
+	cloudAuditors,
+	codebaseAuditors,
+	infraAuditors,
+	mobileAuditors,
+	webAuditors,
+};
 
 /** Every built-in and external-tool auditor. Agentic auditors live in @openaudit/agent. */
 export const builtinAuditors: ReadonlyArray<Auditor> = [
@@ -13,4 +20,5 @@ export const builtinAuditors: ReadonlyArray<Auditor> = [
 	...webAuditors,
 	...infraAuditors,
 	...mobileAuditors,
+	...cloudAuditors,
 ];

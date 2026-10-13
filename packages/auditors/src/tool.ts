@@ -47,9 +47,14 @@ export const cweTags = (values: ReadonlyArray<string>) =>
 		return m ? [`cwe-${m[1]}`] : [];
 	});
 
+/**
+ * `owasp-a01` tags always mean the OWASP Top 10 2021. Other editions reuse the
+ * same ids for different risks (A01:2017 is Injection), so they are dropped;
+ * the CWE tags still map them.
+ */
 export const owaspTags = (values: ReadonlyArray<string>) =>
 	values.flatMap((v) => {
-		const m = /^(A\d{2}):/i.exec(v);
+		const m = /^(A\d{2}):2021\b/i.exec(v);
 		return m?.[1] ? [`owasp-${m[1].toLowerCase()}`] : [];
 	});
 

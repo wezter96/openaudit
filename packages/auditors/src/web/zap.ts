@@ -17,7 +17,7 @@ import { truncate } from "./util";
 
 /** Pinned stable ZAP image; bump deliberately. */
 export const ZAP_IMAGE = "ghcr.io/zaproxy/zaproxy:2.17.0";
-const DOCKER_HOST = "host.docker.internal";
+export const DOCKER_HOST = "host.docker.internal";
 
 interface ZapInstance {
 	readonly uri?: string;
@@ -88,6 +88,8 @@ const text = (html = "") =>
 export const parseZapReport = (
 	report: ZapReport,
 	rewrite?: { readonly from: string; readonly to: string },
+	/** Rule id prefix; the active scan reports under its own auditor id. */
+	auditorId = "web.zap-baseline",
 ): FindingInput[] => {
 	const back = (u?: string) =>
 		u && rewrite ? u.split(rewrite.from).join(rewrite.to) : u;
@@ -129,7 +131,7 @@ export const parseZapReport = (
 					.filter(Boolean)
 					.join(" · ");
 				findings.push({
-					ruleId: `web.zap-baseline/${alert.pluginid}-${kebab(name)}`,
+					ruleId: `${auditorId}/${alert.pluginid}-${kebab(name)}`,
 					title: name,
 					severity,
 					category: "security",
@@ -150,7 +152,7 @@ export const parseZapReport = (
 };
 
 /** `http://localhost:3000/x` → `http://host.docker.internal:3000/x` for the container. */
-const forContainer = (url: string): string => {
+export const forContainer = (url: string): string => {
 	const u = new URL(url);
 	u.hostname = DOCKER_HOST;
 	return u.toString();

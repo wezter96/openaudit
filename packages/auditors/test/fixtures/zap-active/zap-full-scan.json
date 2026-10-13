@@ -1,0 +1,217 @@
+{
+	"@programName": "ZAP",
+	"@version": "2.17.0",
+	"@generated": "Tue, 13 Oct 2026 17:20:41",
+	"created": "2026-10-13T17:20:41.103Z",
+	"site": [
+		{
+			"@name": "http://host.docker.internal:8765",
+			"@host": "host.docker.internal",
+			"@port": "8765",
+			"@ssl": "false",
+			"alerts": [
+				{
+					"pluginid": "40018",
+					"alertRef": "40018",
+					"alert": "SQL Injection",
+					"name": "SQL Injection",
+					"riskcode": "3",
+					"confidence": "2",
+					"riskdesc": "High (Medium)",
+					"desc": "<p>SQL injection may be possible.</p>",
+					"instances": [
+						{
+							"id": "31",
+							"uri": "http://host.docker.internal:8765/search?q=ZAP%27+AND+%271%27%3D%271%27+--+",
+							"nodeName": "http:\\/\\/host.docker.internal:8765\\/search?q=ZAP%27+AND+%271%27%3D%271%27+--+",
+							"method": "GET",
+							"param": "q",
+							"attack": "ZAP' AND '1'='1' -- ",
+							"evidence": "",
+							"otherinfo": "The page results were successfully manipulated using the boolean conditions [ZAP' AND '1'='1' -- ] and [ZAP' OR '1'='1' -- ]"
+						},
+						{
+							"id": "32",
+							"uri": "http://host.docker.internal:8765/search?q=ZAP%27+AND+%271%27%3D%271%27+--+",
+							"nodeName": "http:\\/\\/host.docker.internal:8765\\/search?q=ZAP%27+AND+%271%27%3D%271%27+--+",
+							"method": "GET",
+							"param": "q",
+							"attack": "ZAP' AND '1'='1' -- ",
+							"evidence": "",
+							"otherinfo": "duplicate of the previous request"
+						},
+						{
+							"id": "33",
+							"uri": "http://host.docker.internal:8765/login",
+							"nodeName": "http:\\/\\/host.docker.internal:8765\\/login",
+							"method": "POST",
+							"param": "user",
+							"attack": "ZAP' OR '1'='1' -- ",
+							"evidence": "",
+							"otherinfo": "The page results were successfully manipulated using boolean conditions"
+						}
+					],
+					"count": "3",
+					"systemic": false,
+					"solution": "<p>Do not trust client side input, even if there is client side validation in place.</p><p>In general, type check all data on the server side.</p><p>If the application uses JDBC, use PreparedStatement or CallableStatement, with parameters passed by '?'</p>",
+					"otherinfo": "",
+					"reference": "<p>https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html</p>",
+					"cweid": "89",
+					"wascid": "19",
+					"sourceid": "40018"
+				},
+				{
+					"pluginid": "40012",
+					"alertRef": "40012",
+					"alert": "Cross Site Scripting (Reflected)",
+					"name": "Cross Site Scripting (Reflected)",
+					"riskcode": "3",
+					"confidence": "2",
+					"riskdesc": "High (Medium)",
+					"desc": "<p>Cross-site Scripting (XSS) is an attack technique that involves echoing attacker-supplied code into a user's browser instance.</p>",
+					"instances": [
+						{
+							"id": "34",
+							"uri": "http://host.docker.internal:8765/greet?name=%3C%2Fp%3E%3Cscript%3Ealert%281%29%3B%3C%2Fscript%3E%3Cp%3E",
+							"nodeName": "http:\\/\\/host.docker.internal:8765\\/greet?name=%3C%2Fp%3E%3Cscript%3Ealert%281%29%3B%3C%2Fscript%3E%3Cp%3E",
+							"method": "GET",
+							"param": "name",
+							"attack": "</p><script>alert(1);</script><p>",
+							"evidence": "</p><script>alert(1);</script><p>",
+							"otherinfo": ""
+						}
+					],
+					"count": "1",
+					"systemic": false,
+					"solution": "<p>Phase: Architecture and Design</p><p>Use a vetted library or framework that does not allow this weakness to occur or provides constructs that make this weakness easier to avoid.</p>",
+					"otherinfo": "",
+					"reference": "<p>https://owasp.org/www-community/attacks/xss/</p><p>https://cwe.mitre.org/data/definitions/79.html</p>",
+					"cweid": "79",
+					"wascid": "8",
+					"sourceid": "40012"
+				},
+				{
+					"pluginid": "6",
+					"alertRef": "6",
+					"alert": "Path Traversal",
+					"name": "Path Traversal",
+					"riskcode": "3",
+					"confidence": "2",
+					"riskdesc": "High (Medium)",
+					"desc": "<p>The Path Traversal attack technique allows an attacker access to files, directories, and commands that potentially reside outside the web document root directory.</p>",
+					"instances": [
+						{
+							"id": "35",
+							"uri": "http://host.docker.internal:8765/download?file=..%2F..%2F..%2F..%2F..%2F..%2F..%2F..%2F..%2F..%2F..%2Fetc%2Fpasswd",
+							"nodeName": "http:\\/\\/host.docker.internal:8765\\/download?file=..%2F..%2F..%2F..%2F..%2F..%2F..%2F..%2F..%2F..%2F..%2Fetc%2Fpasswd",
+							"method": "GET",
+							"param": "file",
+							"attack": "../../../../../../../../../../etc/passwd",
+							"evidence": "root:x:0:0",
+							"otherinfo": ""
+						}
+					],
+					"count": "1",
+					"systemic": false,
+					"solution": "<p>Assume all input is malicious. Use an \"accept known good\" input validation strategy.</p>",
+					"otherinfo": "",
+					"reference": "<p>https://owasp.org/www-community/attacks/Path_Traversal</p><p>https://cwe.mitre.org/data/definitions/22.html</p>",
+					"cweid": "22",
+					"wascid": "33",
+					"sourceid": "6"
+				},
+				{
+					"pluginid": "90022",
+					"alertRef": "90022-2",
+					"alert": "Application Error Disclosure",
+					"name": "Application Error Disclosure",
+					"riskcode": "2",
+					"confidence": "2",
+					"riskdesc": "Medium (Medium)",
+					"desc": "<p>This page contains an error/warning message that may disclose sensitive information like the location of the file that produced the unhandled exception.</p>",
+					"instances": [
+						{
+							"id": "36",
+							"uri": "http://host.docker.internal:8765/search?q=%27",
+							"nodeName": "http:\\/\\/host.docker.internal:8765\\/search?q=%27",
+							"method": "GET",
+							"param": "",
+							"attack": "",
+							"evidence": "HTTP/1.1 500 Internal Server Error",
+							"otherinfo": ""
+						}
+					],
+					"count": "1",
+					"systemic": false,
+					"solution": "<p>Review the source code of this page. Implement custom error pages.</p>",
+					"otherinfo": "",
+					"reference": "<p></p>",
+					"cweid": "550",
+					"wascid": "13",
+					"sourceid": "90022"
+				},
+				{
+					"pluginid": "10202",
+					"alertRef": "10202",
+					"alert": "Absence of Anti-CSRF Tokens",
+					"name": "Absence of Anti-CSRF Tokens",
+					"riskcode": "2",
+					"confidence": "1",
+					"riskdesc": "Medium (Low)",
+					"desc": "<p>No Anti-CSRF tokens were found in a HTML submission form.</p>",
+					"instances": [
+						{
+							"id": "37",
+							"uri": "http://host.docker.internal:8765/",
+							"nodeName": "http:\\/\\/host.docker.internal:8765\\/",
+							"method": "GET",
+							"param": "",
+							"attack": "",
+							"evidence": "<form action=\"/subscribe\" method=\"post\">",
+							"otherinfo": ""
+						}
+					],
+					"count": "1",
+					"systemic": false,
+					"solution": "<p>Phase: Architecture and Design</p><p>Generate a unique nonce for each form.</p>",
+					"otherinfo": "",
+					"reference": "<p>https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html</p>",
+					"cweid": "352",
+					"wascid": "9",
+					"sourceid": "10202"
+				},
+				{
+					"pluginid": "40014",
+					"alertRef": "40014",
+					"alert": "Cross Site Scripting (Persistent)",
+					"name": "Cross Site Scripting (Persistent)",
+					"riskcode": "3",
+					"confidence": "0",
+					"riskdesc": "High (False Positive)",
+					"desc": "<p>Marked as a false positive by the reviewer.</p>",
+					"instances": [
+						{
+							"id": "38",
+							"uri": "http://host.docker.internal:8765/guestbook",
+							"nodeName": "http:\\/\\/host.docker.internal:8765\\/guestbook",
+							"method": "POST",
+							"param": "msg",
+							"attack": "<script>alert(1)</script>",
+							"evidence": "",
+							"otherinfo": ""
+						}
+					],
+					"count": "1",
+					"systemic": false,
+					"solution": "<p>Encode output.</p>",
+					"otherinfo": "",
+					"reference": "<p></p>",
+					"cweid": "79",
+					"wascid": "8",
+					"sourceid": "40014"
+				}
+			]
+		}
+	],
+	"sequences": []
+}

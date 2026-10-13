@@ -14,6 +14,7 @@ import { Effect, Layer } from "effect";
 
 import {
 	checkPackageJson,
+	cvss2BaseScore,
 	cvss3BaseScore,
 	type Dependency,
 	dependencies,
@@ -384,4 +385,19 @@ describe("code.dependencies auditor", () => {
 		},
 		60_000,
 	);
+});
+
+describe("CVSS v2", () => {
+	test("scores v2 vectors and uses them when nothing better exists", () => {
+		expect(cvss2BaseScore("AV:N/AC:L/Au:N/C:C/I:C/A:C")).toBe(10);
+		expect(cvss2BaseScore("AV:N/AC:L/Au:N/C:P/I:P/A:P")).toBe(7.5);
+		expect(cvss2BaseScore("AV:N/AC:M/Au:N/C:N/I:P/A:N")).toBe(4.3);
+		expect(cvss2BaseScore("nonsense")).toBeUndefined();
+		expect(
+			osvSeverity({
+				id: "X",
+				severity: [{ type: "CVSS_V2", score: "AV:N/AC:L/Au:N/C:C/I:C/A:C" }],
+			} as OsvVuln),
+		).toBe("critical");
+	});
 });

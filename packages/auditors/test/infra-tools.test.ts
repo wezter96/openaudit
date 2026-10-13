@@ -129,38 +129,73 @@ describe("infra tool parsers", () => {
 		expect(parseKubeLinterReport({ Reports: null }, "/repo")).toEqual([]);
 	});
 
-	test("kics (reconstructed from documented schema)", () => {
+	test("kics (recorded from kics 2.2.0)", () => {
 		const findings = parseKicsReport(sample("kics.json"), "/repo");
-		expect(summary(findings)).toEqual([
-			"iac.kics/kubernetes-privilege-escalation-allowed high k8s/app.yaml:15",
-			"iac.kics/dockerfile-missing-user-instruction high Dockerfile:1",
-			"iac.kics/terraform-s3-bucket-acl-allows-read-to-any-authenticated-user high main.tf:8",
-			"iac.kics/kubernetes-container-running-as-root medium k8s/app.yaml:15",
-			"iac.kics/dockerfile-healthcheck-instruction-missing info Dockerfile:1",
+		expect(findings).toHaveLength(89);
+		expect(new Set(findings.map((f) => f.location?.file))).toEqual(
+			new Set(["tf/main.tf", "k8s/app.yaml", "docker/Dockerfile"]),
+		);
+		const rds = findings.find((f) =>
+			f.ruleId.endsWith("rds-db-instance-publicly-accessible"),
+		);
+		expect(rds?.ruleId).toBe(
+			"iac.kics/terraform-rds-db-instance-publicly-accessible",
+		);
+		expect(rds?.severity).toBe("critical");
+		expect(rds?.category).toBe("security");
+		expect(rds?.location).toEqual({ file: "tf/main.tf", line: 35 });
+		expect(rds?.evidence).toBe("aws_db_instance[db].publicly_accessible");
+		expect(rds?.tags).toContain("cwe-668");
+		// `remediation` is a before/after JSON string for replacement fixes.
+		expect(rds?.remediation).toBe("Change true to false.");
+		expect(rds?.references).toEqual([
+			"https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/db_instance#publicly_accessible",
 		]);
-		expect(findings[0]?.tags).toContain("cwe-269");
-		expect(findings[0]?.references).toEqual([
-			"https://kubernetes.io/docs/tasks/configure-pod-container/security-context/",
-		]);
-		expect(findings[1]?.category).toBe("best-practices");
+		const noUser = findings.find((f) =>
+			f.ruleId.endsWith("dockerfile-missing-user-instruction"),
+		);
+		expect(noUser?.severity).toBe("high");
+		expect(noUser?.category).toBe("best-practices");
+		expect(noUser?.location).toEqual({ file: "docker/Dockerfile", line: 2 });
+		expect(
+			findings.find((f) => f.ruleId.endsWith("dockerfile-add-instead-of-copy"))
+				?.category,
+		).toBe("supply-chain");
 	});
 
-	test("kubescape (reconstructed from documented schema)", () => {
+	test("kubescape (recorded from kubescape 4.0.15)", () => {
 		const findings = parseKubescapeReport(sample("kubescape.json"), "/repo");
-		expect(
-			findings.map((f) => [f.ruleId, f.severity, f.category, f.location?.file]),
-		).toEqual([
-			["iac.kubescape/c-0057", "high", "security", "app.yaml"],
-			["iac.kubescape/c-0013", "medium", "security", "app.yaml"],
-			["iac.kubescape/c-0004", "high", "reliability", "app.yaml"],
-		]);
-		expect(findings[0]?.evidence).toBe(
-			"spec.template.spec.containers[0].securityContext.privileged",
+		// The manifest lives in deploy/sub: Kubescape reports the directory as
+		// `source.path` and only the basename as `source.relativePath`.
+		expect(findings).toHaveLength(28);
+		expect(new Set(findings.map((f) => f.location?.file))).toEqual(
+			new Set(["deploy/sub/app.yaml"]),
 		);
-		expect(findings[1]?.remediation).toContain("runAsNonRoot");
-		expect(findings[0]?.references).toEqual([
+		const privileged = findings.find((f) => f.ruleId.endsWith("c-0057"));
+		expect(privileged?.severity).toBe("high");
+		expect(privileged?.category).toBe("security");
+		expect(privileged?.message).toBe(
+			"Privileged container failed for Deployment/web.",
+		);
+		expect(privileged?.references).toEqual([
 			"https://hub.armosec.io/docs/c-0057",
 		]);
+		expect(privileged?.remediation).toContain(
+			"Suggested: remove spec.template.spec.containers[0]",
+		);
+		const memory = findings.find((f) => f.ruleId.endsWith("c-0004"));
+		expect(memory?.category).toBe("reliability");
+		expect(memory?.remediation).toContain(
+			'resources.limits.memory to "YOUR_VALUE"',
+		);
+		expect(findings.find((f) => f.ruleId.endsWith("c-0013"))?.severity).toBe(
+			"medium",
+		);
+		expect(findings.find((f) => f.ruleId.endsWith("c-0076"))?.severity).toBe(
+			"low",
+		);
+		// Passed and skipped controls never become findings.
+		expect(findings.every((f) => f.title.startsWith("C-"))).toBe(true);
 	});
 
 	test("dockle (README sample)", () => {
@@ -194,6 +229,24 @@ describe("infra tool parsers", () => {
 			"img",
 		);
 		expect(noisy).toEqual([]);
+	});
+
+	test("dockle (recorded from dockle 0.4.15 against local images)", () => {
+		const alpine = parseDockleReport(sample("dockle-alpine.json"), "alpine");
+		expect(summary(alpine)).toEqual([
+			"container.dockle/cis-di-0001 medium alpine:-",
+			"container.dockle/cis-di-0005 low alpine:-",
+			"container.dockle/cis-di-0006 low alpine:-",
+		]);
+		expect(alpine[2]?.category).toBe("reliability");
+		const bun = parseDockleReport(sample("dockle-bun.json"), "oven/bun");
+		// CIS-DI-0008 reports one alert per setuid/setgid file.
+		const setuid = bun.filter((f) => f.ruleId.endsWith("cis-di-0008"));
+		expect(setuid).toHaveLength(11);
+		expect(setuid[0]?.evidence).toBe(
+			"setgid file: grwxr-xr-x usr/sbin/unix_chkpwd",
+		);
+		expect(bun).toHaveLength(14);
 	});
 
 	test("parsers tolerate unexpected shapes", () => {
@@ -377,11 +430,14 @@ describe("infra tool auditors", () => {
 		const report = await runWithExec(kics, TF, present, async (cmd) => {
 			outDir = cmd[cmd.indexOf("-o") + 1] ?? "";
 			expect(cmd).toContain("--disable-secrets");
+			// Not a KICS 2.x flag: it makes the scan fail with "unknown flag".
+			expect(cmd).not.toContain("--disable-full-descriptions");
 			expect(outDir.startsWith(TF)).toBe(false);
 			await writeFile(join(outDir, "results.json"), sampleText("kics.json"));
 			return { code: 50, stdout: "", stderr: "" };
 		});
-		expect(report.results[0]?.findings).toHaveLength(5);
+		// 89 raw results; the engine collapses duplicate fingerprints.
+		expect(report.results[0]?.findings).toHaveLength(84);
 		expect(await Bun.file(join(outDir, "results.json")).exists()).toBe(false);
 	});
 
@@ -392,7 +448,7 @@ describe("infra tool auditors", () => {
 			await writeFile(out, sampleText("kubescape.json"));
 			return { code: 0, stdout: "", stderr: "" };
 		});
-		expect(report.results[0]?.findings).toHaveLength(3);
+		expect(report.results[0]?.findings.length).toBeGreaterThan(20);
 	});
 
 	test("dockle scans image targets only", async () => {

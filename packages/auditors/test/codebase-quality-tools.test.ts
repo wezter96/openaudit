@@ -287,15 +287,15 @@ describe("code.knip auditor", () => {
 	});
 });
 
-describe("scancode parser", () => {
+describe("scancode parser (fixture recorded from ScanCode 32.5.0)", () => {
 	test("flags copyleft files and conflicts with the LICENSE file's licence", () => {
 		const findings = parseScancodeReport(sample("scancode"), "/repo");
 		expect(summary(findings)).toEqual([
-			"code.scancode/strong-copyleft medium src/iproute.c:6",
-			"code.scancode/license-conflict medium src/iproute.c:6",
-			"code.scancode/weak-copyleft low src/lgpl-helper.c:1",
-			"code.scancode/strong-copyleft medium src/server/agpl-app.js:1",
-			"code.scancode/license-conflict medium src/server/agpl-app.js:1",
+			"code.scancode/strong-copyleft medium src/iproute.c:4",
+			"code.scancode/license-conflict medium src/iproute.c:4",
+			"code.scancode/weak-copyleft low src/lgpl-helper.c:2",
+			"code.scancode/strong-copyleft medium src/server/agpl-app.js:3",
+			"code.scancode/license-conflict medium src/server/agpl-app.js:3",
 			"code.scancode/no-license-detected info -:-",
 		]);
 	});
@@ -323,15 +323,15 @@ describe("scancode parser", () => {
 		expect(
 			summary(findings).filter((s) => s.includes("license-conflict")),
 		).toEqual([
-			"code.scancode/license-conflict medium src/iproute.c:6",
-			"code.scancode/license-conflict medium src/server/agpl-app.js:1",
+			"code.scancode/license-conflict medium src/iproute.c:4",
+			"code.scancode/license-conflict medium src/server/agpl-app.js:3",
 		]);
 		expect(findings[1]?.message).toContain("Apache-2.0");
 	});
 
 	test("evidence carries the SPDX expression and lines, never licence text", () => {
 		const findings = parseScancodeReport(sample("scancode"), "/repo");
-		expect(findings[0]?.evidence).toBe("GPL-2.0-or-later at lines 6-9");
+		expect(findings[0]?.evidence).toBe("GPL-2.0-or-later at lines 4-12");
 		expect(findings[0]?.references).toContain(
 			"https://spdx.org/licenses/GPL-2.0-or-later.html",
 		);
@@ -343,8 +343,8 @@ describe("scancode parser", () => {
 		const none = findings.find(
 			(f) => f.ruleId === "code.scancode/no-license-detected",
 		);
-		expect(none?.title).toBe("2 files have no detected licence");
-		expect(none?.evidence).toBe("src/nolicense.ts, src/nolicense2.ts");
+		expect(none?.title).toBe("1 file has no detected licence");
+		expect(none?.evidence).toBe("src/plain.ts");
 	});
 
 	test("tolerates empty and unexpected shapes", () => {
@@ -406,6 +406,13 @@ describe("code.scancode auditor", () => {
 		expect(cmd).toContain("--strip-root");
 		expect(cmd).toContain("--license");
 		expect(cmd).toContain("--copyright");
+		expect(cmd).toContain("--quiet");
+		// Bare names exclude node_modules/.git contents at every depth;
+		// `node_modules/*` does not (verified against ScanCode 32.5.0).
+		expect(cmd.filter((_, i) => cmd[i - 1] === "--ignore")).toEqual([
+			"node_modules",
+			".git",
+		]);
 		expect(cmd[cmd.indexOf("--json") + 1]).not.toContain("codebase");
 		expect(report.results[0]?.status).toBe("failed");
 		expect(report.results[0]?.findings.length).toBe(6);

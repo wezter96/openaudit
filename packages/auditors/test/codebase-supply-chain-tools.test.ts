@@ -172,7 +172,17 @@ describe("cargo-audit", () => {
 		expect(summary(findings)).toEqual([
 			"code.cargo-audit/vulnerable-dependency medium/high Cargo.lock:-",
 			"code.cargo-audit/unmaintained-dependency low/high Cargo.lock:-",
+			"code.cargo-audit/unsound-dependency medium/high Cargo.lock:-",
+			"code.cargo-audit/yanked-dependency low/high Cargo.lock:-",
 		]);
+		// A yanked warning has `"advisory": null`, so there is no id to cite.
+		const yanked = findings.find((f) => f.ruleId.endsWith("yanked-dependency"));
+		expect(yanked?.title).toBe("bytes@1.2.0: was yanked from crates.io");
+		expect(yanked?.references).toEqual([]);
+		expect(
+			findings.find((f) => f.ruleId.endsWith("unmaintained-dependency"))
+				?.evidence,
+		).toBe("atty@0.2.14 RUSTSEC-2024-0375");
 		expect(findings[0]?.title).toBe(
 			"time@0.1.45: Potential segfault in the time crate",
 		);
@@ -309,19 +319,32 @@ describe("syft licences", () => {
 });
 
 describe("scorecard", () => {
-	test("scores 0-9 become findings, -1 and 10 are skipped", () => {
+	test("recorded scorecard v5.6.0 run: scores 0-9 become findings, 10 is skipped", () => {
 		const findings = parseScorecardReport(sample("scorecard"));
 		expect(findings.map((f) => `${f.ruleId} ${f.severity}`)).toEqual([
-			"code.scorecard/pinned-dependencies medium",
-			"code.scorecard/token-permissions high",
-			"code.scorecard/security-policy info",
-			"code.scorecard/fuzzing medium",
-			"code.scorecard/license info",
+			"code.scorecard/branch-protection medium",
+			"code.scorecard/cii-best-practices info",
+			"code.scorecard/code-review high",
+			"code.scorecard/pinned-dependencies info",
+			"code.scorecard/token-permissions low",
+			"code.scorecard/vulnerabilities high",
 		]);
-		expect(findings[0]?.references).toEqual([
-			"https://github.com/ossf/scorecard/blob/v5.1.1/docs/checks.md#pinned-dependencies",
-		]);
-		expect(findings[0]?.evidence).toContain("not pinned by hash");
+		const pinned = findings.find((f) =>
+			f.ruleId.endsWith("pinned-dependencies"),
+		);
+		expect(pinned?.references?.[0]).toContain(
+			"/docs/checks.md#pinned-dependencies",
+		);
+		expect(pinned?.message).toStartWith("github.com/ossf/scorecard: ");
+		// Only the "Warn:" detail lines are evidence, not the passing "Info:" ones.
+		expect(pinned?.evidence).toContain("not pinned by hash");
+		expect(pinned?.evidence).not.toContain("Info:");
+		const vulns = findings.find((f) => f.ruleId.endsWith("vulnerabilities"));
+		expect(vulns?.title).toBe("OpenSSF Scorecard Vulnerabilities: 3/10");
+		// Checks without detail lines still produce a finding without evidence.
+		expect(
+			findings.find((f) => f.ruleId.endsWith("code-review"))?.evidence,
+		).toBeUndefined();
 	});
 
 	test("severity scales risk by score", () => {
@@ -566,7 +589,7 @@ describe("auditor runs", () => {
 		);
 		expect(calls[0]?.cmd.slice(1, 4)).toEqual(["audit", "--json", "-f"]);
 		expect(calls[0]?.cmd[4]).toEndWith("supply/cargo/Cargo.lock");
-		expect(report.results[0]?.findings.length).toBe(2);
+		expect(report.results[0]?.findings.length).toBe(4);
 		expect(report.results[0]?.findings[0]?.location?.file).toBe("Cargo.lock");
 	});
 
@@ -762,11 +785,12 @@ describe("auditor runs", () => {
 						"--repo=github.com/example/widgets",
 						"--format",
 						"json",
+						"--show-details",
 					]);
 					expect(calls[0]?.options?.env?.GITHUB_AUTH_TOKEN).toBe(
 						"ghp_exampletoken",
 					);
-					expect(report.results[0]?.findings.length).toBe(5);
+					expect(report.results[0]?.findings.length).toBe(6);
 					expect(scorecard.defaultEnabled).toBe(true);
 				});
 			} finally {

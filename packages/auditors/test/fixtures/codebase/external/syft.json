@@ -328,11 +328,11 @@
  ],
  "source": {
   "id": "8e71a0d28fe55e3abf94001cbf9446dcb56478fc84469b24c4fcf0d9353fc66b",
-  "name": "/private/tmp/claude-501/-Users-anton-Documents-repos/5b923970-f632-42e8-a6d0-a9a72e9a96e6/scratchpad/sc/syft",
+  "name": "/repo",
   "version": "",
   "type": "directory",
   "metadata": {
-   "path": "/private/tmp/claude-501/-Users-anton-Documents-repos/5b923970-f632-42e8-a6d0-a9a72e9a96e6/scratchpad/sc/syft"
+   "path": "/repo"
   }
  },
  "distro": {},
@@ -529,7 +529,7 @@
     },
     "golang": {
      "capture-symbols": "none",
-     "local-mod-cache-dir": "/Users/anton/go/pkg/mod",
+     "local-mod-cache-dir": "/home/user/go/pkg/mod",
      "local-vendor-dir": "",
      "main-module-version": {
       "from-build-settings": true,
@@ -549,7 +549,7 @@
      "include-indexed-archives": true,
      "include-unindexed-archives": false,
      "maven-base-url": "https://repo1.maven.org/maven2",
-     "maven-localrepository-dir": "/Users/anton/.m2/repository",
+     "maven-localrepository-dir": "/home/user/.m2/repository",
      "max-parent-recursive-depth": 0,
      "resolve-transitive-dependencies": false,
      "use-maven-localrepository": false,

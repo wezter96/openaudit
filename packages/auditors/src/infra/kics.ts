@@ -47,6 +47,23 @@ const categoryOf = (kicsCategory: string | undefined): Category => {
 	}
 };
 
+/**
+ * KICS `remediation` is either plain replacement text or, for
+ * `replacement` fixes, a JSON string like `{"before":"true","after":"false"}`.
+ */
+const remediationText = (raw: string | undefined): string | undefined => {
+	if (!raw) return undefined;
+	if (raw.startsWith("{"))
+		try {
+			const fix: unknown = JSON.parse(raw);
+			if (isRecord(fix) && fix.before !== undefined && fix.after !== undefined)
+				return `Change ${scrubLine(String(fix.before))} to ${scrubLine(String(fix.after))}.`;
+		} catch {
+			// Not JSON after all; use the raw text.
+		}
+	return raw;
+};
+
 /** Parses KICS `results.json`. Relative `file_name`s are relative to `root`. */
 export const parseKicsReport = (
 	json: unknown,
@@ -73,7 +90,7 @@ export const parseKicsReport = (
 			const expected = str(rawFile.expected_value);
 			const actual = str(rawFile.actual_value);
 			const searchKey = str(rawFile.search_key);
-			const remediation = str(rawFile.remediation);
+			const remediation = remediationText(str(rawFile.remediation));
 			return [
 				{
 					ruleId: `iac.kics/${kebab(platform)}-${kebab(name)}`,
@@ -110,7 +127,7 @@ export const kics = defineAuditor({
 	id: "iac.kics",
 	title: "KICS",
 	description:
-		"Runs KICS over Terraform, Dockerfiles, Kubernetes, CloudFormation, Ansible, Bicep and Compose files. Secrets scanning is disabled (use the secret scanners) and full-description downloads are off, so KICS makes no network requests. Results go to a temporary directory, never the target.",
+		"Runs KICS over Terraform, Dockerfiles, Kubernetes, CloudFormation, Ansible, Bicep and Compose files. Secrets scanning is disabled (use the secret scanners); KICS 2.x scans entirely offline. Results go to a temporary directory, never the target.",
 	categories: ["security", "best-practices", "reliability"],
 	targets: ["iac"],
 	engine: "external",
@@ -154,7 +171,6 @@ export const kics = defineAuditor({
 					"--silent",
 					"--no-color",
 					"--disable-secrets",
-					"--disable-full-descriptions",
 					"--ignore-on-exit",
 					"results",
 				],

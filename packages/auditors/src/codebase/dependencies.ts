@@ -469,7 +469,38 @@ const LABELS: Record<string, Severity> = {
 	LOW: "low",
 };
 
-/** Severity from CVSS v3 vectors, numeric scores, or database-specific labels. */
+const CVSS2_WEIGHTS: Record<string, Record<string, number>> = {
+	AV: { L: 0.395, A: 0.646, N: 1 },
+	AC: { H: 0.35, M: 0.61, L: 0.71 },
+	Au: { M: 0.45, S: 0.56, N: 0.704 },
+	C: { N: 0, P: 0.275, C: 0.66 },
+	I: { N: 0, P: 0.275, C: 0.66 },
+	A: { N: 0, P: 0.275, C: 0.66 },
+};
+
+/** CVSS v2 base score from a vector like `AV:N/AC:L/Au:N/C:P/I:P/A:P`. */
+export const cvss2BaseScore = (vector: string): number | undefined => {
+	const m: Record<string, string> = {};
+	for (const part of vector.replace(/[()]/g, "").split("/")) {
+		const [k, v] = part.split(":");
+		if (k && v) m[k] = v;
+	}
+	const w = (k: string) => (m[k] ? CVSS2_WEIGHTS[k]?.[m[k]] : undefined);
+	const [av, ac, au, c, i, a] = ["AV", "AC", "Au", "C", "I", "A"].map(w);
+	if ([av, ac, au, c, i, a].some((x) => x === undefined)) return undefined;
+	const impact =
+		10.41 *
+		(1 - (1 - (c as number)) * (1 - (i as number)) * (1 - (a as number)));
+	const exploitability = 20 * (av as number) * (ac as number) * (au as number);
+	const f = impact === 0 ? 0 : 1.176;
+	return Math.round((0.6 * impact + 0.4 * exploitability - 1.5) * f * 10) / 10;
+};
+
+/**
+ * Severity from a CVSS v3 vector, a numeric score, the database's own label
+ * (GitHub's label already reflects CVSS v4), then a CVSS v2 vector. CVSS v4
+ * vectors are not scored here: their score needs MacroVector lookup tables.
+ */
 export const osvSeverity = (vuln: OsvVuln): Severity => {
 	for (const s of vuln.severity ?? []) {
 		if (/^CVSS_V3/.test(s.type)) {
@@ -490,6 +521,11 @@ export const osvSeverity = (vuln: OsvVuln): Severity => {
 		const sev =
 			typeof label === "string" ? LABELS[label.toUpperCase()] : undefined;
 		if (sev) return sev;
+	}
+	for (const s of vuln.severity ?? []) {
+		if (s.type !== "CVSS_V2") continue;
+		const score = cvss2BaseScore(s.score);
+		if (score !== undefined) return severityFromScore(score);
 	}
 	return "medium";
 };

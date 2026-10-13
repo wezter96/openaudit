@@ -465,7 +465,7 @@ export const parseScancodeReport = (
 		const total = files.length;
 		findings.push({
 			ruleId: "code.scancode/no-license-detected",
-			title: `${unlicensed.length} files have no detected licence`,
+			title: `${unlicensed.length} ${unlicensed.length === 1 ? "file has" : "files have"} no detected licence`,
 			severity: "info",
 			category: "compliance",
 			message: `ScanCode found no licence in ${unlicensed.length} of ${total} scanned entries. They are covered only by the project licence, if any.`,
@@ -533,10 +533,11 @@ export const scancode = defineAuditor({
 						"--quiet",
 						"-n",
 						"4",
+						// ScanCode 32 still scans files under `node_modules/*`; a bare name skips them at every depth.
 						"--ignore",
-						"node_modules/*",
+						"node_modules",
 						"--ignore",
-						".git/*",
+						".git",
 						ws.root,
 					],
 					ws.root,

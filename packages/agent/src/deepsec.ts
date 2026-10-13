@@ -14,6 +14,7 @@ import {
 	AuditorError,
 	defineAuditor,
 	type FindingInput,
+	GIT_HARDENING_ENV,
 	requireTool,
 	requireWorkspace,
 	type Severity,
@@ -51,16 +52,7 @@ import { scrubSecrets } from "./auditors";
  * through the environment.
  */
 
-/** Overrides target `.git/config` keys that make git run commands. */
-export const GIT_HARDENING_ENV: Record<string, string> = {
-	GIT_CONFIG_NOSYSTEM: "1",
-	GIT_CONFIG_COUNT: "2",
-	GIT_CONFIG_KEY_0: "core.fsmonitor",
-	GIT_CONFIG_VALUE_0: "false",
-	GIT_CONFIG_KEY_1: "core.hooksPath",
-	GIT_CONFIG_VALUE_1: "/dev/null",
-	GIT_TERMINAL_PROMPT: "0",
-};
+export { GIT_HARDENING_ENV };
 
 export const DEEPSEC_VERSION = "2.3.10";
 const PROJECT_ID = "openaudit";

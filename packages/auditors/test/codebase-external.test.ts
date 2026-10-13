@@ -63,7 +63,8 @@ describe("external tool parsers", () => {
 		expect(findings[0]?.evidence).toBeUndefined(); // "requires login" is not evidence
 		expect(findings[0]?.tags).toEqual(["cwe-601", "owasp-a01"]);
 		expect(findings[0]?.confidence).toBe("high");
-		expect(findings[1]?.tags).toEqual(["cwe-78", "owasp-a01", "owasp-a03"]);
+		// A01:2017 (Injection) is not the 2021 A01 (Broken Access Control).
+		expect(findings[1]?.tags).toEqual(["cwe-78", "owasp-a03"]);
 		expect(findings[1]?.remediation).toBe("Suggested fix: False");
 	});
 

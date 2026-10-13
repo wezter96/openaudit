@@ -63,6 +63,7 @@ const NO_INDEX = 0xffffffff;
 const TYPE_REFERENCE = 0x01;
 const TYPE_STRING = 0x03;
 const TYPE_FLOAT = 0x04;
+const TYPE_DIMENSION = 0x05;
 const TYPE_INT_DEC = 0x10;
 const TYPE_INT_HEX = 0x11;
 const TYPE_INT_BOOLEAN = 0x12;
@@ -121,12 +122,61 @@ const readStringPool = (
 	return out;
 };
 
+const DIMENSION_UNITS = ["px", "dp", "sp", "pt", "in", "mm"] as const;
+/** Multipliers for the 4 radix encodings of a complex value's mantissa. */
+const RADIX_MULTIPLIERS = [2 ** -8, 2 ** -15, 2 ** -23, 2 ** -31] as const;
+
+/**
+ * Decodes a TYPE_DIMENSION complex value (`data` of a typed AXML value) into
+ * text such as `48dp` or `14.5sp`. Returns undefined for unknown units.
+ */
+export const decodeDimension = (data: number): string | undefined => {
+	const unit = DIMENSION_UNITS[data & 0xf];
+	if (!unit) return undefined;
+	const mantissa = (data & 0xffffff00) | 0;
+	const value = mantissa * (RADIX_MULTIPLIERS[(data >> 4) & 0x3] ?? 0);
+	return `${Number(value.toFixed(2))}${unit}`;
+};
+
+/** A parsed dimension such as `48dp` (also accepts `-1`/`wrap_content` as undefined). */
+export interface Dimension {
+	readonly value: number;
+	readonly unit: (typeof DIMENSION_UNITS)[number];
+}
+
+export const parseDimension = (
+	text: string | undefined,
+): Dimension | undefined => {
+	const m = /^(-?\d+(?:\.\d+)?)(px|dp|dip|sp|pt|in|mm)$/.exec(
+		text?.trim() ?? "",
+	);
+	if (!m?.[1] || !m[2]) return undefined;
+	return {
+		value: Number(m[1]),
+		unit: (m[2] === "dip" ? "dp" : m[2]) as Dimension["unit"],
+	};
+};
+
+/** Options for decoders; the defaults match the manifest-oriented behaviour. */
+export interface AxmlOptions {
+	/**
+	 * Render TYPE_DIMENSION values as `48dp`. Off by default, where they fall
+	 * back to the raw string (or the unsigned complex value).
+	 */
+	readonly dimensions?: boolean;
+}
+
 const typedValue = (
 	type: number,
 	data: number,
 	raw: string | undefined,
 	strings: ReadonlyArray<string>,
+	dimensions = false,
 ): string => {
+	if (dimensions && type === TYPE_DIMENSION) {
+		const dim = decodeDimension(data);
+		if (dim) return dim;
+	}
 	switch (type) {
 		case TYPE_STRING:
 			return strings[data] ?? raw ?? "";
@@ -153,7 +203,10 @@ export const isAxml = (bytes: Uint8Array): boolean =>
 	bytes.length >= 8 && bytes[0] === RES_XML_TYPE && bytes[1] === 0x00;
 
 /** Decodes Android binary XML. Returns undefined for malformed input. */
-export const decodeAxml = (bytes: Uint8Array): XmlElement | undefined => {
+export const decodeAxml = (
+	bytes: Uint8Array,
+	options: AxmlOptions = {},
+): XmlElement | undefined => {
 	if (!isAxml(bytes)) return undefined;
 	try {
 		const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -202,7 +255,13 @@ export const decodeAxml = (bytes: Uint8Array): XmlElement | undefined => {
 						ATTR_IDS[resourceIds[nameIdx] ?? -1] ||
 						`attr${nameIdx}`;
 					const raw = rawIdx === NO_INDEX ? undefined : strings[rawIdx];
-					attrs[attrName] = typedValue(valueType, data, raw, strings);
+					attrs[attrName] = typedValue(
+						valueType,
+						data,
+						raw,
+						strings,
+						options.dimensions,
+					);
 				}
 				const el: XmlElement = {
 					name,
@@ -432,8 +491,11 @@ export const parseXmlText = (text: string): XmlElement | undefined => {
 };
 
 /** Decodes AXML, protobuf XML or text XML, whichever the bytes contain. */
-export const parseAndroidXml = (bytes: Uint8Array): XmlElement | undefined => {
-	if (isAxml(bytes)) return decodeAxml(bytes);
+export const parseAndroidXml = (
+	bytes: Uint8Array,
+	options: AxmlOptions = {},
+): XmlElement | undefined => {
+	if (isAxml(bytes)) return decodeAxml(bytes, options);
 	const head = new TextDecoder().decode(bytes.subarray(0, 64)).trimStart();
 	if (head.startsWith("<") || head.startsWith("﻿<"))
 		return parseXmlText(new TextDecoder().decode(bytes));

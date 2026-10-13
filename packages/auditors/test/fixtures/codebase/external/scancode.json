@@ -1,433 +1,513 @@
 {
-  "headers": [
+ "headers": [
+  {
+   "tool_name": "scancode-toolkit",
+   "tool_version": "32.5.0",
+   "options": {
+    "input": [
+     "/repo"
+    ],
+    "--copyright": true,
+    "--ignore": [
+     "node_modules",
+     ".git"
+    ],
+    "--json": "sc-final.json",
+    "--license": true,
+    "--only-findings": false,
+    "--processes": "4",
+    "--quiet": true,
+    "--strip-root": true
+   },
+   "notice": "Generated with ScanCode and provided on an \"AS IS\" BASIS, WITHOUT WARRANTIES\nOR CONDITIONS OF ANY KIND, either express or implied. No content created from\nScanCode should be considered or used as legal advice. Consult an Attorney\nfor any legal advice.\nScanCode is a free software code scanning tool from nexB Inc. and others.\nVisit https://github.com/nexB/scancode-toolkit/ for support and download.",
+   "start_timestamp": "2026-10-13T203220.593047",
+   "end_timestamp": "2026-10-13T203225.427873",
+   "output_format_version": "4.1.0",
+   "duration": 4.834903955459595,
+   "message": null,
+   "errors": [],
+   "warnings": [],
+   "extra_data": {
+    "system_environment": {
+     "operating_system": "mac",
+     "cpu_architecture": "64",
+     "platform": "macOS-26.4-arm64-arm-64bit",
+     "platform_version": "Darwin Kernel Version 25.4.0: Thu Mar 19 19:33:25 PDT 2026; root:xnu-12377.101.15~1/RELEASE_ARM64_T6041",
+     "python_version": "3.12.13 (main, Jun 23 2026, 15:44:24) [Clang 22.1.3 ]"
+    },
+    "spdx_license_list_version": "3.27",
+    "files_count": 6
+   }
+  }
+ ],
+ "license_detections": [
+  {
+   "identifier": "agpl_3_0_plus-4a9a7491-124a-b704-9e4e-182cdf22aa2f",
+   "license_expression": "agpl-3.0-plus",
+   "license_expression_spdx": "AGPL-3.0-or-later",
+   "detection_count": 1,
+   "reference_matches": [
     {
-      "tool_name": "scancode",
-      "tool_version": "32.5.0",
-      "options": {
-        "--license": true,
-        "--copyright": true,
-        "--strip-root": true,
-        "--json": "<output file>",
-        "--quiet": true,
-        "-n": "4",
-        "--ignore": [
-          "node_modules/*",
-          ".git/*"
-        ]
+     "license_expression": "agpl-3.0-plus",
+     "license_expression_spdx": "AGPL-3.0-or-later",
+     "from_file": "repo/src/server/agpl-app.js",
+     "start_line": 3,
+     "end_line": 11,
+     "matcher": "3-seq",
+     "score": 94.11,
+     "matched_length": 77,
+     "match_coverage": 95.06,
+     "rule_relevance": 99,
+     "rule_identifier": "agpl-3.0-plus_232.RULE",
+     "rule_url": "https://github.com/nexB/scancode-toolkit/tree/develop/src/licensedcode/data/rules/agpl-3.0-plus_232.RULE"
+    }
+   ]
+  },
+  {
+   "identifier": "gpl_2_0_plus-08390468-9cb4-196b-cfa9-3333c81c4c0d",
+   "license_expression": "gpl-2.0-plus",
+   "license_expression_spdx": "GPL-2.0-or-later",
+   "detection_count": 1,
+   "reference_matches": [
+    {
+     "license_expression": "gpl-2.0-plus",
+     "license_expression_spdx": "GPL-2.0-or-later",
+     "from_file": "repo/src/iproute.c",
+     "start_line": 4,
+     "end_line": 12,
+     "matcher": "2-aho",
+     "score": 100.0,
+     "matched_length": 79,
+     "match_coverage": 100.0,
+     "rule_relevance": 100,
+     "rule_identifier": "gpl-2.0-plus_90.RULE",
+     "rule_url": "https://github.com/nexB/scancode-toolkit/tree/develop/src/licensedcode/data/rules/gpl-2.0-plus_90.RULE"
+    }
+   ]
+  },
+  {
+   "identifier": "lgpl_2_1_plus-3b5f0e12-e5c2-78c5-f441-4ca7bdfbc474",
+   "license_expression": "lgpl-2.1-plus",
+   "license_expression_spdx": "LGPL-2.1-or-later",
+   "detection_count": 1,
+   "reference_matches": [
+    {
+     "license_expression": "lgpl-2.1-plus",
+     "license_expression_spdx": "LGPL-2.1-or-later",
+     "from_file": "repo/src/lgpl-helper.c",
+     "start_line": 2,
+     "end_line": 10,
+     "matcher": "2-aho",
+     "score": 100.0,
+     "matched_length": 82,
+     "match_coverage": 100.0,
+     "rule_relevance": 100,
+     "rule_identifier": "lgpl-2.1-plus_34.RULE",
+     "rule_url": "https://github.com/nexB/scancode-toolkit/tree/develop/src/licensedcode/data/rules/lgpl-2.1-plus_34.RULE"
+    }
+   ]
+  },
+  {
+   "identifier": "mit-3fce6ea2-8abd-6c6b-3ede-a37af7c6efee",
+   "license_expression": "mit",
+   "license_expression_spdx": "MIT",
+   "detection_count": 1,
+   "reference_matches": [
+    {
+     "license_expression": "mit",
+     "license_expression_spdx": "MIT",
+     "from_file": "repo/package.json",
+     "start_line": 1,
+     "end_line": 1,
+     "matcher": "2-aho",
+     "score": 100.0,
+     "matched_length": 2,
+     "match_coverage": 100.0,
+     "rule_relevance": 100,
+     "rule_identifier": "mit_30.RULE",
+     "rule_url": "https://github.com/nexB/scancode-toolkit/tree/develop/src/licensedcode/data/rules/mit_30.RULE"
+    }
+   ]
+  },
+  {
+   "identifier": "mit-ac40beba-5702-f54d-755f-333441314bb0",
+   "license_expression": "mit",
+   "license_expression_spdx": "MIT",
+   "detection_count": 1,
+   "reference_matches": [
+    {
+     "license_expression": "mit",
+     "license_expression_spdx": "MIT",
+     "from_file": "repo/LICENSE",
+     "start_line": 1,
+     "end_line": 1,
+     "matcher": "2-aho",
+     "score": 100.0,
+     "matched_length": 2,
+     "match_coverage": 100.0,
+     "rule_relevance": 100,
+     "rule_identifier": "mit_14.RULE",
+     "rule_url": "https://github.com/nexB/scancode-toolkit/tree/develop/src/licensedcode/data/rules/mit_14.RULE"
+    },
+    {
+     "license_expression": "mit",
+     "license_expression_spdx": "MIT",
+     "from_file": "repo/LICENSE",
+     "start_line": 5,
+     "end_line": 21,
+     "matcher": "2-aho",
+     "score": 100.0,
+     "matched_length": 161,
+     "match_coverage": 100.0,
+     "rule_relevance": 100,
+     "rule_identifier": "mit.LICENSE",
+     "rule_url": "https://github.com/nexB/scancode-toolkit/tree/develop/src/licensedcode/data/licenses/mit.LICENSE"
+    }
+   ]
+  }
+ ],
+ "files": [
+  {
+   "path": "LICENSE",
+   "type": "file",
+   "detected_license_expression": "mit",
+   "detected_license_expression_spdx": "MIT",
+   "license_detections": [
+    {
+     "license_expression": "mit",
+     "license_expression_spdx": "MIT",
+     "matches": [
+      {
+       "license_expression": "mit",
+       "license_expression_spdx": "MIT",
+       "from_file": "repo/LICENSE",
+       "start_line": 1,
+       "end_line": 1,
+       "matcher": "2-aho",
+       "score": 100.0,
+       "matched_length": 2,
+       "match_coverage": 100.0,
+       "rule_relevance": 100,
+       "rule_identifier": "mit_14.RULE",
+       "rule_url": "https://github.com/nexB/scancode-toolkit/tree/develop/src/licensedcode/data/rules/mit_14.RULE"
       },
-      "notice": "Generated with ScanCode and provided on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND.",
-      "start_timestamp": "2026-10-13T08:00:00.000000",
-      "end_timestamp": "2026-10-13T08:00:02.000000",
-      "output_format_version": "4.0.0",
-      "duration": 1.7,
-      "errors": [],
-      "warnings": [],
-      "extra_data": {
-        "files_count": 8,
-        "directories_count": 1,
-        "excluded_count": 0
+      {
+       "license_expression": "mit",
+       "license_expression_spdx": "MIT",
+       "from_file": "repo/LICENSE",
+       "start_line": 5,
+       "end_line": 21,
+       "matcher": "2-aho",
+       "score": 100.0,
+       "matched_length": 161,
+       "match_coverage": 100.0,
+       "rule_relevance": 100,
+       "rule_identifier": "mit.LICENSE",
+       "rule_url": "https://github.com/nexB/scancode-toolkit/tree/develop/src/licensedcode/data/licenses/mit.LICENSE"
       }
+     ],
+     "identifier": "mit-ac40beba-5702-f54d-755f-333441314bb0"
     }
-  ],
-  "files": [
+   ],
+   "license_clues": [],
+   "percentage_of_license_text": 97.6,
+   "copyrights": [
     {
-      "path": "src",
-      "type": "directory",
-      "name": "src",
-      "base_name": "src",
-      "extension": "",
-      "size": 0,
-      "sha1": null,
-      "md5": null,
-      "mime_type": null,
-      "file_type": null,
-      "programming_language": null,
-      "is_binary": null,
-      "is_text": false,
-      "is_source": false,
-      "is_script": false,
-      "files_count": 0,
-      "dirs_count": 0,
-      "size_count": 0,
-      "scan_errors": [],
-      "license_detections": [],
-      "license_clues": [],
-      "detected_license_expression": null,
-      "detected_license_expression_spdx": null,
-      "percentage_of_license_text": 0.0,
-      "copyrights": [],
-      "holders": [],
-      "authors": []
-    },
-    {
-      "path": "src/iproute.c",
-      "type": "file",
-      "name": "iproute.c",
-      "base_name": "iproute",
-      "extension": ".c",
-      "size": 469,
-      "sha1": "f0f352c14a8d0b0510cbbeae056542ae7f252151",
-      "md5": null,
-      "mime_type": "text/plain",
-      "file_type": "ASCII text",
-      "programming_language": "C",
-      "is_binary": false,
-      "is_text": true,
-      "is_source": true,
-      "is_script": false,
-      "files_count": 0,
-      "dirs_count": 0,
-      "size_count": 0,
-      "scan_errors": [],
-      "license_detections": [
-        {
-          "license_expression": "gpl-2.0-plus",
-          "license_expression_spdx": "GPL-2.0-or-later",
-          "identifier": "gpl-2.0-plus-scancode",
-          "matches": [
-            {
-              "license_expression": "gpl-2.0-plus",
-              "license_expression_spdx": "GPL-2.0-or-later",
-              "from_file": null,
-              "start_line": 6,
-              "end_line": 9,
-              "matcher": "2-aho",
-              "score": 100.0,
-              "matched_length": 100,
-              "match_coverage": 100.0,
-              "rule_relevance": 100,
-              "rule_identifier": "gpl-2.0-plus_12.RULE",
-              "rule_url": "https://scancode-licensedb.aboutcode.org/gpl-2"
-            }
-          ]
-        }
-      ],
-      "license_clues": [],
-      "detected_license_expression": "gpl-2.0-plus",
-      "detected_license_expression_spdx": "GPL-2.0-or-later",
-      "percentage_of_license_text": 100.0,
-      "copyrights": [
-        {
-          "copyright": "Copyright (c) 2010 Patrick McHardy",
-          "start_line": 2,
-          "end_line": 2
-        }
-      ],
-      "holders": [],
-      "authors": []
-    },
-    {
-      "path": "src/lgpl-helper.c",
-      "type": "file",
-      "name": "lgpl-helper.c",
-      "base_name": "lgpl-helper",
-      "extension": ".c",
-      "size": 812,
-      "sha1": null,
-      "md5": null,
-      "mime_type": "text/plain",
-      "file_type": "ASCII text",
-      "programming_language": "C",
-      "is_binary": false,
-      "is_text": true,
-      "is_source": true,
-      "is_script": false,
-      "files_count": 0,
-      "dirs_count": 0,
-      "size_count": 0,
-      "scan_errors": [],
-      "license_detections": [
-        {
-          "license_expression": "lgpl-2.1-plus",
-          "license_expression_spdx": "LGPL-2.1-or-later",
-          "identifier": "lgpl-2.1-plus-scancode",
-          "matches": [
-            {
-              "license_expression": "lgpl-2.1-plus",
-              "license_expression_spdx": "LGPL-2.1-or-later",
-              "from_file": null,
-              "start_line": 1,
-              "end_line": 4,
-              "matcher": "2-aho",
-              "score": 100.0,
-              "matched_length": 100,
-              "match_coverage": 100.0,
-              "rule_relevance": 100,
-              "rule_identifier": "lgpl-2.1-plus_3.RULE",
-              "rule_url": "https://scancode-licensedb.aboutcode.org/lgpl-2"
-            }
-          ]
-        }
-      ],
-      "license_clues": [],
-      "detected_license_expression": "lgpl-2.1-plus",
-      "detected_license_expression_spdx": "LGPL-2.1-or-later",
-      "percentage_of_license_text": 100.0,
-      "copyrights": [],
-      "holders": [],
-      "authors": []
-    },
-    {
-      "path": "src/server/agpl-app.js",
-      "type": "file",
-      "name": "agpl-app.js",
-      "base_name": "agpl-app",
-      "extension": ".js",
-      "size": 1034,
-      "sha1": null,
-      "md5": null,
-      "mime_type": "text/plain",
-      "file_type": "ASCII text",
-      "programming_language": "JavaScript",
-      "is_binary": false,
-      "is_text": true,
-      "is_source": true,
-      "is_script": false,
-      "files_count": 0,
-      "dirs_count": 0,
-      "size_count": 0,
-      "scan_errors": [],
-      "license_detections": [
-        {
-          "license_expression": "agpl-3.0",
-          "license_expression_spdx": "AGPL-3.0-only",
-          "identifier": "agpl-3.0-scancode",
-          "matches": [
-            {
-              "license_expression": "agpl-3.0",
-              "license_expression_spdx": "AGPL-3.0-only",
-              "from_file": null,
-              "start_line": 1,
-              "end_line": 3,
-              "matcher": "2-aho",
-              "score": 100.0,
-              "matched_length": 100,
-              "match_coverage": 100.0,
-              "rule_relevance": 100,
-              "rule_identifier": "agpl-3.0_7.RULE",
-              "rule_url": "https://scancode-licensedb.aboutcode.org/agpl-3"
-            }
-          ]
-        }
-      ],
-      "license_clues": [],
-      "detected_license_expression": "agpl-3.0",
-      "detected_license_expression_spdx": "AGPL-3.0-only",
-      "percentage_of_license_text": 100.0,
-      "copyrights": [],
-      "holders": [],
-      "authors": []
-    },
-    {
-      "path": "src/dual.js",
-      "type": "file",
-      "name": "dual.js",
-      "base_name": "dual",
-      "extension": ".js",
-      "size": 301,
-      "sha1": null,
-      "md5": null,
-      "mime_type": "text/plain",
-      "file_type": "ASCII text",
-      "programming_language": "JavaScript",
-      "is_binary": false,
-      "is_text": true,
-      "is_source": true,
-      "is_script": false,
-      "files_count": 0,
-      "dirs_count": 0,
-      "size_count": 0,
-      "scan_errors": [],
-      "license_detections": [
-        {
-          "license_expression": "gpl-2.0 OR mit",
-          "license_expression_spdx": "GPL-2.0-only OR MIT",
-          "identifier": "gpl-2.0 OR mit-scancode",
-          "matches": [
-            {
-              "license_expression": "gpl-2.0 OR mit",
-              "license_expression_spdx": "GPL-2.0-only OR MIT",
-              "from_file": null,
-              "start_line": 1,
-              "end_line": 2,
-              "matcher": "2-aho",
-              "score": 100.0,
-              "matched_length": 100,
-              "match_coverage": 100.0,
-              "rule_relevance": 100,
-              "rule_identifier": "gpl-2.0_or_mit_1.RULE",
-              "rule_url": "https://scancode-licensedb.aboutcode.org/gpl-2"
-            }
-          ]
-        }
-      ],
-      "license_clues": [],
-      "detected_license_expression": "gpl-2.0 OR mit",
-      "detected_license_expression_spdx": "GPL-2.0-only OR MIT",
-      "percentage_of_license_text": 100.0,
-      "copyrights": [],
-      "holders": [],
-      "authors": []
-    },
-    {
-      "path": "src/index.ts",
-      "type": "file",
-      "name": "index.ts",
-      "base_name": "index",
-      "extension": ".ts",
-      "size": 188,
-      "sha1": null,
-      "md5": null,
-      "mime_type": "text/plain",
-      "file_type": "ASCII text",
-      "programming_language": "TypeScript",
-      "is_binary": false,
-      "is_text": true,
-      "is_source": true,
-      "is_script": false,
-      "files_count": 0,
-      "dirs_count": 0,
-      "size_count": 0,
-      "scan_errors": [],
-      "license_detections": [
-        {
-          "license_expression": "mit",
-          "license_expression_spdx": "MIT",
-          "identifier": "mit-scancode",
-          "matches": [
-            {
-              "license_expression": "mit",
-              "license_expression_spdx": "MIT",
-              "from_file": null,
-              "start_line": 1,
-              "end_line": 1,
-              "matcher": "2-aho",
-              "score": 100.0,
-              "matched_length": 100,
-              "match_coverage": 100.0,
-              "rule_relevance": 100,
-              "rule_identifier": "mit_spdx_tag_1.RULE",
-              "rule_url": "https://scancode-licensedb.aboutcode.org/mit_spdx_tag_1"
-            }
-          ]
-        }
-      ],
-      "license_clues": [],
-      "detected_license_expression": "mit",
-      "detected_license_expression_spdx": "MIT",
-      "percentage_of_license_text": 100.0,
-      "copyrights": [],
-      "holders": [],
-      "authors": []
-    },
-    {
-      "path": "src/nolicense.ts",
-      "type": "file",
-      "name": "nolicense.ts",
-      "base_name": "nolicense",
-      "extension": ".ts",
-      "size": 64,
-      "sha1": null,
-      "md5": null,
-      "mime_type": "text/plain",
-      "file_type": "ASCII text",
-      "programming_language": "TypeScript",
-      "is_binary": false,
-      "is_text": true,
-      "is_source": true,
-      "is_script": false,
-      "files_count": 0,
-      "dirs_count": 0,
-      "size_count": 0,
-      "scan_errors": [],
-      "license_detections": [],
-      "license_clues": [],
-      "detected_license_expression": null,
-      "detected_license_expression_spdx": null,
-      "percentage_of_license_text": 0.0,
-      "copyrights": [],
-      "holders": [],
-      "authors": []
-    },
-    {
-      "path": "src/nolicense2.ts",
-      "type": "file",
-      "name": "nolicense2.ts",
-      "base_name": "nolicense2",
-      "extension": ".ts",
-      "size": 96,
-      "sha1": null,
-      "md5": null,
-      "mime_type": "text/plain",
-      "file_type": "ASCII text",
-      "programming_language": "TypeScript",
-      "is_binary": false,
-      "is_text": true,
-      "is_source": true,
-      "is_script": false,
-      "files_count": 0,
-      "dirs_count": 0,
-      "size_count": 0,
-      "scan_errors": [],
-      "license_detections": [],
-      "license_clues": [],
-      "detected_license_expression": null,
-      "detected_license_expression_spdx": null,
-      "percentage_of_license_text": 0.0,
-      "copyrights": [],
-      "holders": [],
-      "authors": []
-    },
-    {
-      "path": "LICENSE",
-      "type": "file",
-      "name": "LICENSE",
-      "base_name": "LICENSE",
-      "extension": "",
-      "size": 1071,
-      "sha1": null,
-      "md5": null,
-      "mime_type": "text/plain",
-      "file_type": "ASCII text",
-      "programming_language": null,
-      "is_binary": false,
-      "is_text": true,
-      "is_source": false,
-      "is_script": false,
-      "files_count": 0,
-      "dirs_count": 0,
-      "size_count": 0,
-      "scan_errors": [],
-      "license_detections": [
-        {
-          "license_expression": "mit",
-          "license_expression_spdx": "MIT",
-          "identifier": "mit-scancode",
-          "matches": [
-            {
-              "license_expression": "mit",
-              "license_expression_spdx": "MIT",
-              "from_file": null,
-              "start_line": 1,
-              "end_line": 21,
-              "matcher": "2-aho",
-              "score": 100.0,
-              "matched_length": 100,
-              "match_coverage": 100.0,
-              "rule_relevance": 100,
-              "rule_identifier": "mit_1.RULE",
-              "rule_url": "https://scancode-licensedb.aboutcode.org/mit_1"
-            }
-          ]
-        }
-      ],
-      "license_clues": [],
-      "detected_license_expression": "mit",
-      "detected_license_expression_spdx": "MIT",
-      "percentage_of_license_text": 100.0,
-      "copyrights": [],
-      "holders": [],
-      "authors": []
+     "copyright": "Copyright (c) 2026 Example",
+     "start_line": 3,
+     "end_line": 3
     }
-  ]
+   ],
+   "holders": [
+    {
+     "holder": "Example",
+     "start_line": 3,
+     "end_line": 3
+    }
+   ],
+   "authors": [],
+   "scan_errors": []
+  },
+  {
+   "path": "package.json",
+   "type": "file",
+   "detected_license_expression": "mit",
+   "detected_license_expression_spdx": "MIT",
+   "license_detections": [
+    {
+     "license_expression": "mit",
+     "license_expression_spdx": "MIT",
+     "matches": [
+      {
+       "license_expression": "mit",
+       "license_expression_spdx": "MIT",
+       "from_file": "repo/package.json",
+       "start_line": 1,
+       "end_line": 1,
+       "matcher": "2-aho",
+       "score": 100.0,
+       "matched_length": 2,
+       "match_coverage": 100.0,
+       "rule_relevance": 100,
+       "rule_identifier": "mit_30.RULE",
+       "rule_url": "https://github.com/nexB/scancode-toolkit/tree/develop/src/licensedcode/data/rules/mit_30.RULE"
+      }
+     ],
+     "identifier": "mit-3fce6ea2-8abd-6c6b-3ede-a37af7c6efee"
+    }
+   ],
+   "license_clues": [],
+   "percentage_of_license_text": 50.0,
+   "copyrights": [],
+   "holders": [],
+   "authors": [],
+   "scan_errors": []
+  },
+  {
+   "path": "vendor",
+   "type": "directory",
+   "detected_license_expression": null,
+   "detected_license_expression_spdx": null,
+   "license_detections": [],
+   "license_clues": [],
+   "percentage_of_license_text": 0,
+   "copyrights": [],
+   "holders": [],
+   "authors": [],
+   "scan_errors": []
+  },
+  {
+   "path": "node_modules",
+   "type": "directory",
+   "detected_license_expression": null,
+   "detected_license_expression_spdx": null,
+   "license_detections": [],
+   "license_clues": [],
+   "percentage_of_license_text": 0,
+   "copyrights": [],
+   "holders": [],
+   "authors": [],
+   "scan_errors": []
+  },
+  {
+   "path": "node_modules/x",
+   "type": "directory",
+   "detected_license_expression": null,
+   "detected_license_expression_spdx": null,
+   "license_detections": [],
+   "license_clues": [],
+   "percentage_of_license_text": 0,
+   "copyrights": [],
+   "holders": [],
+   "authors": [],
+   "scan_errors": []
+  },
+  {
+   "path": "src",
+   "type": "directory",
+   "detected_license_expression": null,
+   "detected_license_expression_spdx": null,
+   "license_detections": [],
+   "license_clues": [],
+   "percentage_of_license_text": 0,
+   "copyrights": [],
+   "holders": [],
+   "authors": [],
+   "scan_errors": []
+  },
+  {
+   "path": "src/iproute.c",
+   "type": "file",
+   "detected_license_expression": "gpl-2.0-plus",
+   "detected_license_expression_spdx": "GPL-2.0-or-later",
+   "license_detections": [
+    {
+     "license_expression": "gpl-2.0-plus",
+     "license_expression_spdx": "GPL-2.0-or-later",
+     "matches": [
+      {
+       "license_expression": "gpl-2.0-plus",
+       "license_expression_spdx": "GPL-2.0-or-later",
+       "from_file": "repo/src/iproute.c",
+       "start_line": 4,
+       "end_line": 12,
+       "matcher": "2-aho",
+       "score": 100.0,
+       "matched_length": 79,
+       "match_coverage": 100.0,
+       "rule_relevance": 100,
+       "rule_identifier": "gpl-2.0-plus_90.RULE",
+       "rule_url": "https://github.com/nexB/scancode-toolkit/tree/develop/src/licensedcode/data/rules/gpl-2.0-plus_90.RULE"
+      }
+     ],
+     "identifier": "gpl_2_0_plus-08390468-9cb4-196b-cfa9-3333c81c4c0d"
+    }
+   ],
+   "license_clues": [],
+   "percentage_of_license_text": 88.76,
+   "copyrights": [
+    {
+     "copyright": "Copyright (c) 2004 Example",
+     "start_line": 2,
+     "end_line": 2
+    }
+   ],
+   "holders": [
+    {
+     "holder": "Example Author",
+     "start_line": 2,
+     "end_line": 2
+    }
+   ],
+   "authors": [],
+   "scan_errors": []
+  },
+  {
+   "path": "src/lgpl-helper.c",
+   "type": "file",
+   "detected_license_expression": "lgpl-2.1-plus",
+   "detected_license_expression_spdx": "LGPL-2.1-or-later",
+   "license_detections": [
+    {
+     "license_expression": "lgpl-2.1-plus",
+     "license_expression_spdx": "LGPL-2.1-or-later",
+     "matches": [
+      {
+       "license_expression": "lgpl-2.1-plus",
+       "license_expression_spdx": "LGPL-2.1-or-later",
+       "from_file": "repo/src/lgpl-helper.c",
+       "start_line": 2,
+       "end_line": 10,
+       "matcher": "2-aho",
+       "score": 100.0,
+       "matched_length": 82,
+       "match_coverage": 100.0,
+       "rule_relevance": 100,
+       "rule_identifier": "lgpl-2.1-plus_34.RULE",
+       "rule_url": "https://github.com/nexB/scancode-toolkit/tree/develop/src/licensedcode/data/rules/lgpl-2.1-plus_34.RULE"
+      }
+     ],
+     "identifier": "lgpl_2_1_plus-3b5f0e12-e5c2-78c5-f441-4ca7bdfbc474"
+    }
+   ],
+   "license_clues": [],
+   "percentage_of_license_text": 94.25,
+   "copyrights": [],
+   "holders": [],
+   "authors": [],
+   "scan_errors": []
+  },
+  {
+   "path": "src/plain.ts",
+   "type": "file",
+   "detected_license_expression": null,
+   "detected_license_expression_spdx": null,
+   "license_detections": [],
+   "license_clues": [],
+   "percentage_of_license_text": 0,
+   "copyrights": [],
+   "holders": [],
+   "authors": [],
+   "scan_errors": []
+  },
+  {
+   "path": "src/server",
+   "type": "directory",
+   "detected_license_expression": null,
+   "detected_license_expression_spdx": null,
+   "license_detections": [],
+   "license_clues": [],
+   "percentage_of_license_text": 0,
+   "copyrights": [],
+   "holders": [],
+   "authors": [],
+   "scan_errors": []
+  },
+  {
+   "path": "src/server/agpl-app.js",
+   "type": "file",
+   "detected_license_expression": "agpl-3.0-plus",
+   "detected_license_expression_spdx": "AGPL-3.0-or-later",
+   "license_detections": [
+    {
+     "license_expression": "agpl-3.0-plus",
+     "license_expression_spdx": "AGPL-3.0-or-later",
+     "matches": [
+      {
+       "license_expression": "agpl-3.0-plus",
+       "license_expression_spdx": "AGPL-3.0-or-later",
+       "from_file": "repo/src/server/agpl-app.js",
+       "start_line": 3,
+       "end_line": 11,
+       "matcher": "3-seq",
+       "score": 94.11,
+       "matched_length": 77,
+       "match_coverage": 95.06,
+       "rule_relevance": 99,
+       "rule_identifier": "agpl-3.0-plus_232.RULE",
+       "rule_url": "https://github.com/nexB/scancode-toolkit/tree/develop/src/licensedcode/data/rules/agpl-3.0-plus_232.RULE"
+      }
+     ],
+     "identifier": "agpl_3_0_plus-4a9a7491-124a-b704-9e4e-182cdf22aa2f"
+    }
+   ],
+   "license_clues": [],
+   "percentage_of_license_text": 87.5,
+   "copyrights": [
+    {
+     "copyright": "Copyright (c) 2020 Example",
+     "start_line": 1,
+     "end_line": 1
+    }
+   ],
+   "holders": [
+    {
+     "holder": "Example Author",
+     "start_line": 1,
+     "end_line": 1
+    }
+   ],
+   "authors": [],
+   "scan_errors": []
+  },
+  {
+   "path": "sub",
+   "type": "directory",
+   "detected_license_expression": null,
+   "detected_license_expression_spdx": null,
+   "license_detections": [],
+   "license_clues": [],
+   "percentage_of_license_text": 0,
+   "copyrights": [],
+   "holders": [],
+   "authors": [],
+   "scan_errors": []
+  },
+  {
+   "path": "sub/node_modules",
+   "type": "directory",
+   "detected_license_expression": null,
+   "detected_license_expression_spdx": null,
+   "license_detections": [],
+   "license_clues": [],
+   "percentage_of_license_text": 0,
+   "copyrights": [],
+   "holders": [],
+   "authors": [],
+   "scan_errors": []
+  },
+  {
+   "path": "sub/node_modules/y",
+   "type": "directory",
+   "detected_license_expression": null,
+   "detected_license_expression_spdx": null,
+   "license_detections": [],
+   "license_clues": [],
+   "percentage_of_license_text": 0,
+   "copyrights": [],
+   "holders": [],
+   "authors": [],
+   "scan_errors": []
+  }
+ ]
 }

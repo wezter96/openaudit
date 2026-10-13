@@ -1,0 +1,6 @@
+ok:
+  description: fine
+  content:
+    application/json:
+      schema:
+        $ref: "./nested/schema.yaml"

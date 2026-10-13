@@ -1,7 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import {
 	type Auditor,
 	Exec,
@@ -16,13 +14,10 @@ import { Effect, Layer } from "effect";
 import {
 	bandit,
 	brakeman,
-	codeql,
-	detectCodeqlLanguages,
 	gosec,
 	parseBanditReport,
 	parseBrakemanReport,
 	parseGosecReport,
-	parseSarif,
 	parseTrufflehogReport,
 	trufflehog,
 } from "../src/codebase/sast-tools";
@@ -172,125 +167,6 @@ describe("brakeman parser", () => {
 	});
 });
 
-describe("SARIF parser", () => {
-	test("CodeQL output", () => {
-		const findings = parseSarif(json("codeql.sarif"), "/repo", "code.codeql");
-		expect(summary(findings)).toEqual([
-			"code.codeql/js-xss medium src/client.js:12",
-			"code.codeql/js-insecure-randomness high src/util/token.js:4",
-			"code.codeql/js-unused-local-variable low src/util/token.js:2",
-		]);
-		const xss = findings[0];
-		expect(xss?.tags).toEqual(["cwe-79", "cwe-116"]);
-		expect(xss?.message).toBe(
-			"Cross-site scripting vulnerability due to a user-provided value.",
-		);
-		expect(xss?.remediation).toStartWith(
-			"To guard against cross-site scripting",
-		);
-		expect(xss?.references).toContain(
-			"https://codeql.github.com/codeql-query-help/javascript/js-xss/",
-		);
-		expect(xss?.references).toContain(
-			"https://cheatsheetseries.owasp.org/cheatsheets/DOM_based_XSS_Prevention_Cheat_Sheet.html",
-		);
-		expect(xss?.confidence).toBe("high");
-		expect(xss?.location?.column).toBe(5);
-		expect(findings[1]?.tags).toEqual(["cwe-338", "cwe-327", "cwe-16"]);
-		expect(findings[1]?.confidence).toBe("medium");
-		expect(findings[2]?.category).toBe("maintainability");
-	});
-
-	test("severity bands, extension rules and level fallback", () => {
-		const sarif = {
-			runs: [
-				{
-					tool: {
-						driver: { name: "CodeQL", rules: [] },
-						extensions: [
-							{
-								name: "codeql/python-queries",
-								rules: [
-									{
-										id: "py/sql-injection",
-										shortDescription: {
-											text: "SQL query built from user-controlled sources",
-										},
-										properties: {
-											tags: ["security", "external/cwe/cwe-089"],
-											"security-severity": "9.8",
-											precision: "high",
-										},
-									},
-									{
-										id: "py/other",
-										properties: { tags: ["security"] },
-									},
-								],
-							},
-						],
-					},
-					results: [
-						{
-							ruleId: "py/sql-injection",
-							rule: {
-								id: "py/sql-injection",
-								index: 0,
-								toolComponent: { index: 0 },
-							},
-							message: { text: "bad" },
-							locations: [
-								{
-									physicalLocation: {
-										artifactLocation: { uri: "file:///repo/app/db.py" },
-										region: { startLine: 3 },
-									},
-								},
-							],
-						},
-						{ ruleId: "py/other", level: "error", message: { text: "x" } },
-					],
-				},
-			],
-		};
-		const findings = parseSarif(sarif, "/repo", "code.codeql");
-		expect(summary(findings)).toEqual([
-			"code.codeql/py-sql-injection critical app/db.py:3",
-			"code.codeql/py-other high undefined:-",
-		]);
-		expect(findings[0]?.tags).toEqual(["cwe-89"]);
-	});
-
-	test("tolerates unexpected shapes", () => {
-		for (const input of [null, {}, { runs: [null, { results: "x" }] }]) {
-			expect(parseSarif(input, "/repo", "code.codeql")).toEqual([]);
-		}
-		for (const parse of [
-			parseBanditReport,
-			parseGosecReport,
-			parseBrakemanReport,
-		]) {
-			expect(parse(null, "/repo")).toEqual([]);
-			expect(parse({ results: 1, Issues: {}, warnings: [3] }, "/repo")).toEqual(
-				[],
-			);
-		}
-		expect(parseTrufflehogReport("", "/repo")).toEqual([]);
-	});
-});
-
-describe("codeql language detection", () => {
-	test("only buildless languages are supported", () => {
-		const r = detectCodeqlLanguages(["a.ts", "b.py", "c.go", "d.cpp", "e.rb"]);
-		expect(r.supported.map((l) => l.id)).toEqual([
-			"javascript-typescript",
-			"python",
-			"ruby",
-		]);
-		expect(r.unsupported.sort()).toEqual(["cpp", "go"]);
-	});
-});
-
 /* --------------------------------- auditors -------------------------------- */
 
 const runWith = (
@@ -328,17 +204,15 @@ const unreachable = () => Promise.reject(new Error("unreachable"));
 
 describe("sast auditors", () => {
 	test("metadata", () => {
-		for (const a of [trufflehog, bandit, gosec, brakeman, codeql]) {
+		for (const a of [trufflehog, bandit, gosec, brakeman]) {
 			expect(a.engine).toBe("external");
 			expect(a.targets).toEqual(["codebase"]);
 		}
-		expect(codeql.defaultEnabled).toBe(false);
-		expect(codeql.network).toBe(true);
 		expect(trufflehog.description).toContain("verify");
 	});
 
 	test("missing tool is a skip with an install hint", async () => {
-		for (const a of [trufflehog, bandit, gosec, brakeman, codeql]) {
+		for (const a of [trufflehog, bandit, gosec, brakeman]) {
 			const report = await runWith(a, sast, () => undefined, unreachable);
 			expect(report.results[0]?.status).toBe("skipped");
 			expect(report.results[0]?.message).toContain("not found on PATH");
@@ -347,7 +221,7 @@ describe("sast auditors", () => {
 	});
 
 	test("irrelevant targets skip before the tool is required", async () => {
-		for (const a of [bandit, gosec, brakeman, codeql]) {
+		for (const a of [bandit, gosec, brakeman]) {
 			const report = await runWith(a, none, () => undefined, unreachable);
 			expect(report.results[0]?.status).toBe("skipped");
 			expect(report.results[0]?.message).not.toContain("PATH");
@@ -410,39 +284,6 @@ describe("sast auditors", () => {
 		expect(config).toBe("---\n{}\n");
 		expect(cmd).toContain("--no-exit-on-warn");
 		expect(report.results[0]?.findings).toHaveLength(5);
-	});
-
-	test("codeql builds without building and cleans up", async () => {
-		const before = readdirSync(tmpdir()).filter((f) =>
-			f.startsWith("openaudit-codeql-"),
-		);
-		const cmds: string[][] = [];
-		const report = await runWith(codeql, sast, present, async (cmd) => {
-			cmds.push([...cmd]);
-			if (cmd[2] === "analyze") {
-				const out = cmd[cmd.indexOf("--output") + 1] ?? "";
-				await writeFile(out, text("codeql.sarif"));
-			}
-			return { code: 0, stdout: "", stderr: "" };
-		});
-		const create = cmds[0] ?? [];
-		expect(create.slice(1, 3)).toEqual(["database", "create"]);
-		expect(create).toContain("--build-mode=none");
-		expect(create).toContain("--db-cluster");
-		const langs = create.find((a) => a.startsWith("--language="));
-		expect(langs).toBe("--language=javascript-typescript,python,ruby");
-		expect(langs).not.toContain("go");
-		const analyze = cmds.filter((c) => c[2] === "analyze");
-		expect(analyze).toHaveLength(3);
-		expect(analyze[0]).toContain(
-			"codeql/javascript-queries:codeql-suites/javascript-security-extended.qls",
-		);
-		// The same SARIF is served for all three languages; the engine dedupes.
-		expect(report.results[0]?.findings).toHaveLength(3);
-		const after = readdirSync(tmpdir()).filter((f) =>
-			f.startsWith("openaudit-codeql-"),
-		);
-		expect(after).toEqual(before);
 	});
 
 	test("tool failure is an error", async () => {

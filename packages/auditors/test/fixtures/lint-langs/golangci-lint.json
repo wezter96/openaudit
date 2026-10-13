@@ -1,0 +1,40 @@
+{
+  "Issues": [
+    {
+      "FromLinter": "errcheck",
+      "Text": "Error return value of `f` is not checked",
+      "Severity": "",
+      "SourceLines": ["\tf()"],
+      "Pos": { "Filename": "main.go", "Offset": 220, "Line": 20, "Column": 3 }
+    },
+    {
+      "FromLinter": "gosec",
+      "Text": "G401: Use of weak cryptographic primitive (confidence: HIGH, severity: MEDIUM)",
+      "Severity": "",
+      "SourceLines": ["\th := md5.New()"],
+      "Pos": { "Filename": "pkg/hash/hash.go", "Offset": 91, "Line": 12, "Column": 7 }
+    },
+    {
+      "FromLinter": "staticcheck",
+      "Text": "SA4000: identical expressions on the left and right side of the '||' operator",
+      "Severity": "",
+      "SourceLines": ["\tif x == 1 || x == 1 {"],
+      "Pos": { "Filename": "main.go", "Offset": 262, "Line": 21, "Column": 5 }
+    },
+    {
+      "FromLinter": "revive",
+      "Text": "exported: exported function Run should have comment or be unexported",
+      "Severity": "warning",
+      "SourceLines": ["func Run() {}"],
+      "Pos": { "Filename": "pkg/run.go", "Offset": 30, "Line": 3, "Column": 1 }
+    },
+    {
+      "FromLinter": "gocritic",
+      "Text": "ifElseChain: rewrite if-else to switch statement",
+      "Severity": "error",
+      "SourceLines": [],
+      "Pos": { "Filename": "/elsewhere/vendor/x.go", "Offset": 1, "Line": 1, "Column": 1 }
+    }
+  ],
+  "Report": { "Linters": [{ "Name": "errcheck", "Enabled": true }] }
+}

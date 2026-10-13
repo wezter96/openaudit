@@ -1,0 +1,335 @@
+[
+	{
+		"code": "oas3-api-servers",
+		"path": [],
+		"message": "OpenAPI \"servers\" must be present and non-empty array.",
+		"severity": 1,
+		"range": {
+			"start": {
+				"line": 0,
+				"character": 0
+			},
+			"end": {
+				"line": 8,
+				"character": 48
+			}
+		},
+		"source": "/repo/bad.yaml"
+	},
+	{
+		"code": "info-contact",
+		"path": [
+			"info"
+		],
+		"message": "Info object must have \"contact\" object.",
+		"severity": 1,
+		"range": {
+			"start": {
+				"line": 1,
+				"character": 5
+			},
+			"end": {
+				"line": 2,
+				"character": 12
+			}
+		},
+		"source": "/repo/bad.yaml"
+	},
+	{
+		"code": "info-description",
+		"path": [
+			"info"
+		],
+		"message": "Info \"description\" must be present and non-empty string.",
+		"severity": 1,
+		"range": {
+			"start": {
+				"line": 1,
+				"character": 5
+			},
+			"end": {
+				"line": 2,
+				"character": 12
+			}
+		},
+		"source": "/repo/bad.yaml"
+	},
+	{
+		"code": "oas3-schema",
+		"path": [
+			"info"
+		],
+		"message": "\"info\" property must have required property \"version\".",
+		"severity": 0,
+		"range": {
+			"start": {
+				"line": 1,
+				"character": 5
+			},
+			"end": {
+				"line": 2,
+				"character": 12
+			}
+		},
+		"source": "/repo/bad.yaml"
+	},
+	{
+		"code": "operation-description",
+		"path": [
+			"paths",
+			"/x",
+			"get"
+		],
+		"message": "Operation \"description\" must be present and non-empty string.",
+		"severity": 1,
+		"range": {
+			"start": {
+				"line": 5,
+				"character": 8
+			},
+			"end": {
+				"line": 8,
+				"character": 48
+			}
+		},
+		"source": "/repo/bad.yaml"
+	},
+	{
+		"code": "operation-operationId",
+		"path": [
+			"paths",
+			"/x",
+			"get"
+		],
+		"message": "Operation must have \"operationId\".",
+		"severity": 1,
+		"range": {
+			"start": {
+				"line": 5,
+				"character": 8
+			},
+			"end": {
+				"line": 8,
+				"character": 48
+			}
+		},
+		"source": "/repo/bad.yaml"
+	},
+	{
+		"code": "operation-tags",
+		"path": [
+			"paths",
+			"/x",
+			"get"
+		],
+		"message": "Operation must have non-empty \"tags\" array.",
+		"severity": 1,
+		"range": {
+			"start": {
+				"line": 5,
+				"character": 8
+			},
+			"end": {
+				"line": 8,
+				"character": 48
+			}
+		},
+		"source": "/repo/bad.yaml"
+	},
+	{
+		"code": "invalid-ref",
+		"path": [
+			"paths",
+			"/x",
+			"get",
+			"responses",
+			"200",
+			"$ref"
+		],
+		"message": "'#/components/responses/Missing' does not exist",
+		"severity": 0,
+		"range": {
+			"start": {
+				"line": 8,
+				"character": 16
+			},
+			"end": {
+				"line": 8,
+				"character": 48
+			}
+		},
+		"source": "/repo/bad.yaml"
+	},
+	{
+		"code": "asyncapi-servers",
+		"path": [],
+		"message": "AsyncAPI object must have non-empty \"servers\" object.",
+		"severity": 1,
+		"range": {
+			"start": {
+				"line": 0,
+				"character": 0
+			},
+			"end": {
+				"line": 2,
+				"character": 12
+			}
+		},
+		"source": "/repo/clean.yaml"
+	},
+	{
+		"code": "asyncapi-tags",
+		"path": [],
+		"message": "AsyncAPI object must have non-empty \"tags\" array.",
+		"severity": 1,
+		"range": {
+			"start": {
+				"line": 0,
+				"character": 0
+			},
+			"end": {
+				"line": 2,
+				"character": 12
+			}
+		},
+		"source": "/repo/clean.yaml"
+	},
+	{
+		"code": "asyncapi-latest-version",
+		"path": [
+			"asyncapi"
+		],
+		"message": "The latest version is not used. You should update to the \"3.1.0\" version.",
+		"severity": 2,
+		"range": {
+			"start": {
+				"line": 0,
+				"character": 10
+			},
+			"end": {
+				"line": 0,
+				"character": 15
+			}
+		},
+		"source": "/repo/clean.yaml"
+	},
+	{
+		"code": "asyncapi-info-license",
+		"path": [
+			"info"
+		],
+		"message": "Info object must have \"license\" object.",
+		"severity": 1,
+		"range": {
+			"start": {
+				"line": 1,
+				"character": 5
+			},
+			"end": {
+				"line": 1,
+				"character": 64
+			}
+		},
+		"source": "/repo/clean.yaml"
+	},
+	{
+		"code": "asyncapi-info-contact-properties",
+		"path": [
+			"info",
+			"contact"
+		],
+		"message": "Contact object must have \"name\", \"url\" and \"email\".",
+		"severity": 1,
+		"range": {
+			"start": {
+				"line": 1,
+				"character": 55
+			},
+			"end": {
+				"line": 1,
+				"character": 64
+			}
+		},
+		"source": "/repo/clean.yaml"
+	},
+	{
+		"code": "info-contact",
+		"path": [
+			"info"
+		],
+		"message": "Info object must have \"contact\" object.",
+		"severity": 1,
+		"range": {
+			"start": {
+				"line": 1,
+				"character": 5
+			},
+			"end": {
+				"line": 3,
+				"character": 16
+			}
+		},
+		"source": "/repo/openapi.yaml"
+	},
+	{
+		"code": "info-description",
+		"path": [
+			"info"
+		],
+		"message": "Info \"description\" must be present and non-empty string.",
+		"severity": 1,
+		"range": {
+			"start": {
+				"line": 1,
+				"character": 5
+			},
+			"end": {
+				"line": 3,
+				"character": 16
+			}
+		},
+		"source": "/repo/openapi.yaml"
+	},
+	{
+		"code": "operation-description",
+		"path": [
+			"paths",
+			"/pets",
+			"get"
+		],
+		"message": "Operation \"description\" must be present and non-empty string.",
+		"severity": 1,
+		"range": {
+			"start": {
+				"line": 8,
+				"character": 8
+			},
+			"end": {
+				"line": 18,
+				"character": 37
+			}
+		},
+		"source": "/repo/openapi.yaml"
+	},
+	{
+		"code": "operation-tags",
+		"path": [
+			"paths",
+			"/pets",
+			"get"
+		],
+		"message": "Operation must have non-empty \"tags\" array.",
+		"severity": 1,
+		"range": {
+			"start": {
+				"line": 8,
+				"character": 8
+			},
+			"end": {
+				"line": 18,
+				"character": 37
+			}
+		},
+		"source": "/repo/openapi.yaml"
+	}
+]

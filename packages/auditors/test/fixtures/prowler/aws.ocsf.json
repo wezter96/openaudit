@@ -1,0 +1,771 @@
+[
+  {
+    "message": "S3 Bucket customer-uploads-prod has public access due to bucket policy.",
+    "metadata": {
+      "event_code": "s3_bucket_public_access",
+      "product": {
+        "name": "Prowler",
+        "uid": "prowler",
+        "vendor_name": "Prowler",
+        "version": "5.4.0"
+      },
+      "profiles": [
+        "cloud",
+        "datasource"
+      ],
+      "tenant_uid": "",
+      "version": "1.4.0"
+    },
+    "severity_id": 4,
+    "severity": "High",
+    "status": "New",
+    "status_code": "FAIL",
+    "status_detail": "S3 Bucket customer-uploads-prod has public access due to bucket policy.",
+    "status_id": 1,
+    "activity_name": "Create",
+    "activity_id": 1,
+    "finding_info": {
+      "created_time": 1760372400,
+      "created_time_dt": "2026-10-13T16:20:00+00:00",
+      "desc": "Public S3 buckets allow anyone on the internet to read or modify their contents.",
+      "product_uid": "prowler",
+      "title": "Ensure there are no S3 buckets open to Everyone or Any AWS user.",
+      "types": [
+        "Software and Configuration Checks"
+      ],
+      "uid": "prowler-aws-s3_bucket_public_access-123456789012-eu-west-1-customer-uploads-prod"
+    },
+    "resources": [
+      {
+        "cloud_partition": "aws",
+        "region": "eu-west-1",
+        "data": {
+          "details": "",
+          "metadata": {}
+        },
+        "group": {
+          "name": "s3"
+        },
+        "labels": [],
+        "name": "customer-uploads-prod",
+        "type": "AwsS3Bucket",
+        "uid": "arn:aws:s3:::customer-uploads-prod"
+      }
+    ],
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_name": "Detection Finding",
+    "class_uid": 2004,
+    "cloud": {
+      "account": {
+        "name": "",
+        "type": "AWS Account",
+        "type_id": 10,
+        "uid": "123456789012",
+        "labels": []
+      },
+      "org": {
+        "name": "",
+        "uid": ""
+      },
+      "provider": "aws",
+      "region": "eu-west-1"
+    },
+    "remediation": {
+      "desc": "You can enable Public Access Block at the bucket level to prevent the exposure of your data stored in S3.",
+      "references": [
+        "https://docs.aws.amazon.com/AmazonS3/latest/dev/access-control-block-public-access.html",
+        "aws s3api put-public-access-block --bucket <bucket> --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+      ]
+    },
+    "risk_details": "Public S3 buckets allow anyone on the internet to read or modify their contents.",
+    "time": 1760372400,
+    "time_dt": "2026-10-13T16:20:00+00:00",
+    "type_uid": 200401,
+    "type_name": "Detection Finding: Create",
+    "unmapped": {
+      "related_url": "https://docs.aws.amazon.com/AmazonS3/latest/user-guide/block-public-access-account.html",
+      "categories": [],
+      "depends_on": [],
+      "related_to": [],
+      "notes": "",
+      "compliance": {
+        "CIS-1.4": [
+          "2.1.5"
+        ],
+        "CIS-2.0": [
+          "2.1.4"
+        ],
+        "AWS-Foundational-Security-Best-Practices": [
+          "s3"
+        ],
+        "PCI-3.2.1": [
+          "s3"
+        ]
+      }
+    }
+  },
+  {
+    "message": "MFA is not enabled for root account.",
+    "metadata": {
+      "event_code": "iam_root_mfa_enabled",
+      "product": {
+        "name": "Prowler",
+        "uid": "prowler",
+        "vendor_name": "Prowler",
+        "version": "5.4.0"
+      },
+      "profiles": [
+        "cloud",
+        "datasource"
+      ],
+      "tenant_uid": "",
+      "version": "1.4.0"
+    },
+    "severity_id": 5,
+    "severity": "Critical",
+    "status": "New",
+    "status_code": "FAIL",
+    "status_detail": "MFA is not enabled for root account.",
+    "status_id": 1,
+    "activity_name": "Create",
+    "activity_id": 1,
+    "finding_info": {
+      "created_time": 1760372400,
+      "created_time_dt": "2026-10-13T16:20:00+00:00",
+      "desc": "The root account is the most privileged user in an AWS account. MFA adds an extra layer of protection on top of a user name and password.",
+      "product_uid": "prowler",
+      "title": "Ensure MFA is enabled for the root account.",
+      "types": [
+        "Software and Configuration Checks"
+      ],
+      "uid": "prowler-aws-iam_root_mfa_enabled-123456789012-us-east-1-<root_account>"
+    },
+    "resources": [
+      {
+        "cloud_partition": "aws",
+        "region": "us-east-1",
+        "data": {
+          "details": "",
+          "metadata": {}
+        },
+        "group": {
+          "name": "iam"
+        },
+        "labels": [],
+        "name": "<root_account>",
+        "type": "AwsIamUser",
+        "uid": "arn:aws:iam::123456789012:root"
+      }
+    ],
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_name": "Detection Finding",
+    "class_uid": 2004,
+    "cloud": {
+      "account": {
+        "name": "",
+        "type": "AWS Account",
+        "type_id": 10,
+        "uid": "123456789012",
+        "labels": []
+      },
+      "org": {
+        "name": "",
+        "uid": ""
+      },
+      "provider": "aws",
+      "region": "us-east-1"
+    },
+    "remediation": {
+      "desc": "Using IAM console navigate to Dashboard and expand Activate MFA on your root account.",
+      "references": [
+        "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_root-user.html#id_root-user_manage_mfa"
+      ]
+    },
+    "risk_details": "The root account is the most privileged user in an AWS account. MFA adds an extra layer of protection on top of a user name and password.",
+    "time": 1760372400,
+    "time_dt": "2026-10-13T16:20:00+00:00",
+    "type_uid": 200401,
+    "type_name": "Detection Finding: Create",
+    "unmapped": {
+      "related_url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_root-user.html#id_root-user_manage_mfa",
+      "categories": [],
+      "depends_on": [],
+      "related_to": [],
+      "notes": "",
+      "compliance": {
+        "CIS-1.4": [
+          "1.5"
+        ],
+        "CIS-2.0": [
+          "1.5"
+        ],
+        "SOC2": [
+          "cc_6_1"
+        ]
+      }
+    }
+  },
+  {
+    "message": "Security group sg-0a1b2c3d4e5f67890 has SSH port 22 open to the Internet.",
+    "metadata": {
+      "event_code": "ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_22",
+      "product": {
+        "name": "Prowler",
+        "uid": "prowler",
+        "vendor_name": "Prowler",
+        "version": "5.4.0"
+      },
+      "profiles": [
+        "cloud",
+        "datasource"
+      ],
+      "tenant_uid": "",
+      "version": "1.4.0"
+    },
+    "severity_id": 3,
+    "severity": "Medium",
+    "status": "New",
+    "status_code": "FAIL",
+    "status_detail": "Security group sg-0a1b2c3d4e5f67890 has SSH port 22 open to the Internet.",
+    "status_id": 1,
+    "activity_name": "Create",
+    "activity_id": 1,
+    "finding_info": {
+      "created_time": 1760372400,
+      "created_time_dt": "2026-10-13T16:20:00+00:00",
+      "desc": "Exposing SSH to the internet invites brute force attacks.",
+      "product_uid": "prowler",
+      "title": "Ensure no security groups allow ingress from 0.0.0.0/0 or ::/0 to SSH port 22.",
+      "types": [
+        "Software and Configuration Checks"
+      ],
+      "uid": "prowler-aws-ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_22-123456789012-eu-west-1-sg-0a1b2c3d4e5f67890"
+    },
+    "resources": [
+      {
+        "cloud_partition": "aws",
+        "region": "eu-west-1",
+        "data": {
+          "details": "",
+          "metadata": {}
+        },
+        "group": {
+          "name": "ec2"
+        },
+        "labels": [],
+        "name": "sg-0a1b2c3d4e5f67890",
+        "type": "AwsEc2SecurityGroup",
+        "uid": "arn:aws:ec2:eu-west-1:123456789012:security-group/sg-0a1b2c3d4e5f67890"
+      }
+    ],
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_name": "Detection Finding",
+    "class_uid": 2004,
+    "cloud": {
+      "account": {
+        "name": "",
+        "type": "AWS Account",
+        "type_id": 10,
+        "uid": "123456789012",
+        "labels": []
+      },
+      "org": {
+        "name": "",
+        "uid": ""
+      },
+      "provider": "aws",
+      "region": "eu-west-1"
+    },
+    "remediation": {
+      "desc": "Modify the security group so SSH is only reachable from trusted CIDR ranges.",
+      "references": [
+        "https://docs.aws.amazon.com/vpc/latest/userguide/VPC_SecurityGroups.html"
+      ]
+    },
+    "risk_details": "Exposing SSH to the internet invites brute force attacks.",
+    "time": 1760372400,
+    "time_dt": "2026-10-13T16:20:00+00:00",
+    "type_uid": 200401,
+    "type_name": "Detection Finding: Create",
+    "unmapped": {
+      "related_url": "",
+      "categories": [],
+      "depends_on": [],
+      "related_to": [],
+      "notes": "",
+      "compliance": {
+        "CIS-1.4": [
+          "5.2"
+        ],
+        "CIS-2.0": [
+          "5.2"
+        ]
+      }
+    }
+  },
+  {
+    "message": "Trail main-trail does not have log file validation enabled.",
+    "metadata": {
+      "event_code": "cloudtrail_log_file_validation_enabled",
+      "product": {
+        "name": "Prowler",
+        "uid": "prowler",
+        "vendor_name": "Prowler",
+        "version": "5.4.0"
+      },
+      "profiles": [
+        "cloud",
+        "datasource"
+      ],
+      "tenant_uid": "",
+      "version": "1.4.0"
+    },
+    "severity_id": 2,
+    "severity": "Low",
+    "status": "New",
+    "status_code": "FAIL",
+    "status_detail": "Trail main-trail does not have log file validation enabled.",
+    "status_id": 1,
+    "activity_name": "Create",
+    "activity_id": 1,
+    "finding_info": {
+      "created_time": 1760372400,
+      "created_time_dt": "2026-10-13T16:20:00+00:00",
+      "desc": "Without validation, log tampering is hard to detect.",
+      "product_uid": "prowler",
+      "title": "Ensure CloudTrail log file validation is enabled.",
+      "types": [
+        "Software and Configuration Checks"
+      ],
+      "uid": "prowler-aws-cloudtrail_log_file_validation_enabled-123456789012-eu-west-1-main-trail"
+    },
+    "resources": [
+      {
+        "cloud_partition": "aws",
+        "region": "eu-west-1",
+        "data": {
+          "details": "",
+          "metadata": {}
+        },
+        "group": {
+          "name": "cloudtrail"
+        },
+        "labels": [],
+        "name": "main-trail",
+        "type": "AwsCloudTrailTrail",
+        "uid": "arn:aws:cloudtrail:eu-west-1:123456789012:trail/main-trail"
+      }
+    ],
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_name": "Detection Finding",
+    "class_uid": 2004,
+    "cloud": {
+      "account": {
+        "name": "",
+        "type": "AWS Account",
+        "type_id": 10,
+        "uid": "123456789012",
+        "labels": []
+      },
+      "org": {
+        "name": "",
+        "uid": ""
+      },
+      "provider": "aws",
+      "region": "eu-west-1"
+    },
+    "remediation": {
+      "desc": "Enable log file validation on the trail.",
+      "references": []
+    },
+    "risk_details": "Without validation, log tampering is hard to detect.",
+    "time": 1760372400,
+    "time_dt": "2026-10-13T16:20:00+00:00",
+    "type_uid": 200401,
+    "type_name": "Detection Finding: Create",
+    "unmapped": {
+      "related_url": "",
+      "categories": [],
+      "depends_on": [],
+      "related_to": [],
+      "notes": "",
+      "compliance": {}
+    }
+  },
+  {
+    "message": "Contact information is not set.",
+    "metadata": {
+      "event_code": "account_maintain_current_contact_details",
+      "product": {
+        "name": "Prowler",
+        "uid": "prowler",
+        "vendor_name": "Prowler",
+        "version": "5.4.0"
+      },
+      "profiles": [
+        "cloud",
+        "datasource"
+      ],
+      "tenant_uid": "",
+      "version": "1.4.0"
+    },
+    "severity_id": 1,
+    "severity": "Informational",
+    "status": "New",
+    "status_code": "FAIL",
+    "status_detail": "Contact information is not set.",
+    "status_id": 1,
+    "activity_name": "Create",
+    "activity_id": 1,
+    "finding_info": {
+      "created_time": 1760372400,
+      "created_time_dt": "2026-10-13T16:20:00+00:00",
+      "desc": "Contact details are used by AWS to reach you.",
+      "product_uid": "prowler",
+      "title": "Maintain current contact details.",
+      "types": [
+        "Software and Configuration Checks"
+      ],
+      "uid": "prowler-aws-account_maintain_current_contact_details-123456789012-us-east-1-<root_account>"
+    },
+    "resources": [
+      {
+        "cloud_partition": "aws",
+        "region": "us-east-1",
+        "data": {
+          "details": "",
+          "metadata": {}
+        },
+        "group": {
+          "name": "account"
+        },
+        "labels": [],
+        "name": "<root_account>",
+        "type": "Other",
+        "uid": "arn:aws:iam::123456789012:root"
+      }
+    ],
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_name": "Detection Finding",
+    "class_uid": 2004,
+    "cloud": {
+      "account": {
+        "name": "",
+        "type": "AWS Account",
+        "type_id": 10,
+        "uid": "123456789012",
+        "labels": []
+      },
+      "org": {
+        "name": "",
+        "uid": ""
+      },
+      "provider": "aws",
+      "region": "us-east-1"
+    },
+    "remediation": {
+      "desc": "Update the contact information.",
+      "references": []
+    },
+    "risk_details": "Contact details are used by AWS to reach you.",
+    "time": 1760372400,
+    "time_dt": "2026-10-13T16:20:00+00:00",
+    "type_uid": 200401,
+    "type_name": "Detection Finding: Create",
+    "unmapped": {
+      "related_url": "",
+      "categories": [],
+      "depends_on": [],
+      "related_to": [],
+      "notes": "",
+      "compliance": {
+        "CIS-1.4": [
+          "1.1"
+        ]
+      }
+    }
+  },
+  {
+    "message": "IAM password policy requires minimum length of 14 characters.",
+    "metadata": {
+      "event_code": "iam_password_policy_minimum_length_14",
+      "product": {
+        "name": "Prowler",
+        "uid": "prowler",
+        "vendor_name": "Prowler",
+        "version": "5.4.0"
+      },
+      "profiles": [
+        "cloud",
+        "datasource"
+      ],
+      "tenant_uid": "",
+      "version": "1.4.0"
+    },
+    "severity_id": 3,
+    "severity": "Medium",
+    "status": "New",
+    "status_code": "PASS",
+    "status_detail": "IAM password policy requires minimum length of 14 characters.",
+    "status_id": 1,
+    "activity_name": "Create",
+    "activity_id": 1,
+    "finding_info": {
+      "created_time": 1760372400,
+      "created_time_dt": "2026-10-13T16:20:00+00:00",
+      "desc": "Weak passwords.",
+      "product_uid": "prowler",
+      "title": "Ensure IAM password policy requires minimum length of 14 or greater.",
+      "types": [
+        "Software and Configuration Checks"
+      ],
+      "uid": "prowler-aws-iam_password_policy_minimum_length_14-123456789012-us-east-1-password_policy"
+    },
+    "resources": [
+      {
+        "cloud_partition": "aws",
+        "region": "us-east-1",
+        "data": {
+          "details": "",
+          "metadata": {}
+        },
+        "group": {
+          "name": "iam"
+        },
+        "labels": [],
+        "name": "password_policy",
+        "type": "AwsIamPasswordPolicy",
+        "uid": "arn:aws:iam::123456789012:password-policy"
+      }
+    ],
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_name": "Detection Finding",
+    "class_uid": 2004,
+    "cloud": {
+      "account": {
+        "name": "",
+        "type": "AWS Account",
+        "type_id": 10,
+        "uid": "123456789012",
+        "labels": []
+      },
+      "org": {
+        "name": "",
+        "uid": ""
+      },
+      "provider": "aws",
+      "region": "us-east-1"
+    },
+    "remediation": {
+      "desc": "Set minimum length 14.",
+      "references": []
+    },
+    "risk_details": "Weak passwords.",
+    "time": 1760372400,
+    "time_dt": "2026-10-13T16:20:00+00:00",
+    "type_uid": 200401,
+    "type_name": "Detection Finding: Create",
+    "unmapped": {
+      "related_url": "",
+      "categories": [],
+      "depends_on": [],
+      "related_to": [],
+      "notes": "",
+      "compliance": {
+        "CIS-1.4": [
+          "1.8"
+        ]
+      }
+    }
+  },
+  {
+    "message": "Manual check required.",
+    "metadata": {
+      "event_code": "iam_support_role_created",
+      "product": {
+        "name": "Prowler",
+        "uid": "prowler",
+        "vendor_name": "Prowler",
+        "version": "5.4.0"
+      },
+      "profiles": [
+        "cloud",
+        "datasource"
+      ],
+      "tenant_uid": "",
+      "version": "1.4.0"
+    },
+    "severity_id": 3,
+    "severity": "Medium",
+    "status": "New",
+    "status_code": "MANUAL",
+    "status_detail": "Manual check required.",
+    "status_id": 1,
+    "activity_name": "Create",
+    "activity_id": 1,
+    "finding_info": {
+      "created_time": 1760372400,
+      "created_time_dt": "2026-10-13T16:20:00+00:00",
+      "desc": "Support role.",
+      "product_uid": "prowler",
+      "title": "Ensure a support role has been created to manage incidents with AWS Support.",
+      "types": [
+        "Software and Configuration Checks"
+      ],
+      "uid": "prowler-aws-iam_support_role_created-123456789012-us-east-1-"
+    },
+    "resources": [
+      {
+        "cloud_partition": "aws",
+        "region": "us-east-1",
+        "data": {
+          "details": "",
+          "metadata": {}
+        },
+        "group": {
+          "name": "iam"
+        },
+        "labels": [],
+        "name": "",
+        "type": "AwsIamRole",
+        "uid": ""
+      }
+    ],
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_name": "Detection Finding",
+    "class_uid": 2004,
+    "cloud": {
+      "account": {
+        "name": "",
+        "type": "AWS Account",
+        "type_id": 10,
+        "uid": "123456789012",
+        "labels": []
+      },
+      "org": {
+        "name": "",
+        "uid": ""
+      },
+      "provider": "aws",
+      "region": "us-east-1"
+    },
+    "remediation": {
+      "desc": "Create one.",
+      "references": []
+    },
+    "risk_details": "Support role.",
+    "time": 1760372400,
+    "time_dt": "2026-10-13T16:20:00+00:00",
+    "type_uid": 200401,
+    "type_name": "Detection Finding: Create",
+    "unmapped": {
+      "related_url": "",
+      "categories": [],
+      "depends_on": [],
+      "related_to": [],
+      "notes": "",
+      "compliance": {
+        "CIS-1.4": [
+          "1.17"
+        ]
+      }
+    }
+  },
+  {
+    "message": "S3 Bucket scratch-data has versioning disabled.",
+    "metadata": {
+      "event_code": "s3_bucket_versioning_enabled",
+      "product": {
+        "name": "Prowler",
+        "uid": "prowler",
+        "vendor_name": "Prowler",
+        "version": "5.4.0"
+      },
+      "profiles": [
+        "cloud",
+        "datasource"
+      ],
+      "tenant_uid": "",
+      "version": "1.4.0"
+    },
+    "severity_id": 3,
+    "severity": "Medium",
+    "status": "Suppressed",
+    "status_code": "FAIL",
+    "status_detail": "S3 Bucket scratch-data has versioning disabled.",
+    "status_id": 3,
+    "activity_name": "Create",
+    "activity_id": 1,
+    "finding_info": {
+      "created_time": 1760372400,
+      "created_time_dt": "2026-10-13T16:20:00+00:00",
+      "desc": "No versioning.",
+      "product_uid": "prowler",
+      "title": "Check if S3 buckets have versioning enabled",
+      "types": [
+        "Software and Configuration Checks"
+      ],
+      "uid": "prowler-aws-s3_bucket_versioning_enabled-123456789012-eu-west-1-scratch-data"
+    },
+    "resources": [
+      {
+        "cloud_partition": "aws",
+        "region": "eu-west-1",
+        "data": {
+          "details": "",
+          "metadata": {}
+        },
+        "group": {
+          "name": "s3"
+        },
+        "labels": [],
+        "name": "scratch-data",
+        "type": "AwsS3Bucket",
+        "uid": "arn:aws:s3:::scratch-data"
+      }
+    ],
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_name": "Detection Finding",
+    "class_uid": 2004,
+    "cloud": {
+      "account": {
+        "name": "",
+        "type": "AWS Account",
+        "type_id": 10,
+        "uid": "123456789012",
+        "labels": []
+      },
+      "org": {
+        "name": "",
+        "uid": ""
+      },
+      "provider": "aws",
+      "region": "eu-west-1"
+    },
+    "remediation": {
+      "desc": "Enable versioning.",
+      "references": []
+    },
+    "risk_details": "No versioning.",
+    "time": 1760372400,
+    "time_dt": "2026-10-13T16:20:00+00:00",
+    "type_uid": 200401,
+    "type_name": "Detection Finding: Create",
+    "unmapped": {
+      "related_url": "",
+      "categories": [],
+      "depends_on": [],
+      "related_to": [],
+      "notes": "",
+      "compliance": {}
+    }
+  }
+]

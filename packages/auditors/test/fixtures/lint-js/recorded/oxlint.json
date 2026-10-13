@@ -1,0 +1,10 @@
+{ "diagnostics": [{"message": "Variable 'unused' is declared but never used. Unused variables should start with a '_'.","code": "eslint(no-unused-vars)","severity": "warning","url": "https://oxc.rs/docs/guide/usage/linter/rules/eslint/no-unused-vars.html","help": "Consider removing this declaration.","filename": "/repo/src/index.ts","labels": [{"label": "'unused' is declared here","span": {"offset": 67,"length": 6,"line": 3,"column": 8}}]},
+{"message": "`debugger` statement is not allowed","code": "eslint(no-debugger)","severity": "error","url": "https://oxc.rs/docs/guide/usage/linter/rules/eslint/no-debugger.html","help": "Remove the debugger statement","filename": "/repo/src/index.ts","labels": [{"span": {"offset": 50,"length": 9,"line": 2,"column": 2}}]},
+{"message": "Both sides of the logical operator are the same","code": "oxc(const-comparisons)","severity": "warning","url": "https://oxc.rs/docs/guide/usage/linter/rules/oxc/const-comparisons.html","help": "This logical expression will always evaluate to the same value as the expression itself.","filename": "/repo/src/index.ts","labels": [{"label": "If this expression evaluates to true","span": {"offset": 84,"length": 12,"line": 4,"column": 6}},{"label": "This expression will always evaluate to true","span": {"offset": 100,"length": 12,"line": 4,"column": 22}}]},
+{"message": "Checking equality with NaN will always return false","code": "eslint(use-isnan)","severity": "warning","url": "https://oxc.rs/docs/guide/usage/linter/rules/eslint/use-isnan.html","help": "Use the `isNaN` function to compare with NaN.","filename": "/repo/src/index.ts","labels": [{"span": {"offset": 125,"length": 3,"line": 5,"column": 10}}]}],
+              "number_of_files": 1,
+              "number_of_rules": 126,
+              "threads_count": 12,
+              "start_time": 0.005341458
+            }
+            

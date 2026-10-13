@@ -1,0 +1,5 @@
+description: x
+content:
+  application/json:
+    schema:
+      $ref: "https://evil.example/s.json"

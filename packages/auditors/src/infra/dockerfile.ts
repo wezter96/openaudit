@@ -180,6 +180,182 @@ const findDockerignore = (ws: Workspace, file: string) =>
 		return undefined;
 	});
 
+/** Hardcoded secrets and secret-looking build args in an ENV/ARG instruction. */
+const secretEnvFindings = (
+	ins: Instruction,
+	args: string,
+	base: Pick<FindingInput, "location" | "evidence">,
+): FindingInput[] => {
+	const findings: FindingInput[] = [];
+	for (const { key, value } of keyValues(args)) {
+		if (!SECRET_NAME_RE.test(key)) continue;
+		if (value !== undefined && !isPlaceholderValue(value)) {
+			findings.push({
+				...base,
+				evidence: `${ins.keyword} ${key}=${redact(value)}`,
+				ruleId: `container.dockerfile/secret-in-${ins.keyword.toLowerCase()}`,
+				title: `Secret hardcoded in ${ins.keyword}`,
+				severity: "high",
+				category: "security",
+				message: `\`${key}\` is set to a literal value; it is stored in the image metadata and visible to anyone who can pull the image.`,
+				remediation:
+					"Remove the value, rotate the credential, and pass secrets at runtime or with BuildKit `RUN --mount=type=secret`.",
+				references: [
+					"https://docs.docker.com/build/building/secrets/",
+					CIS_DOCKER,
+				],
+				tags: ["cis-docker-4.10", "cwe-798"],
+			});
+		} else if (ins.keyword === "ARG" && value === undefined) {
+			findings.push({
+				...base,
+				ruleId: "container.dockerfile/secret-build-arg",
+				title: "Secret passed as build argument",
+				severity: "medium",
+				category: "security",
+				message: `Build argument \`${key}\` looks like a credential; build-arg values are recorded in the image history.`,
+				remediation:
+					"Use BuildKit secret mounts (`RUN --mount=type=secret,id=…`) instead of ARG.",
+				references: ["https://docs.docker.com/build/building/secrets/"],
+				tags: ["cwe-532"],
+			});
+		}
+	}
+	return findings;
+};
+
+/** Remote or needless `ADD` usage. */
+const addFindings = (
+	args: string,
+	base: Pick<FindingInput, "location" | "evidence">,
+): FindingInput[] => {
+	const findings: FindingInput[] = [];
+	const tokens = args.split(/\s+/).filter((t) => !t.startsWith("--"));
+	const sources = tokens.slice(0, -1);
+	const hasChecksum = /--checksum=/.test(args);
+	if (sources.some((s) => /^https?:\/\//i.test(s))) {
+		if (!hasChecksum)
+			findings.push({
+				...base,
+				ruleId: "container.dockerfile/add-remote-url",
+				title: "ADD downloads a remote file without verification",
+				severity: "medium",
+				category: "supply-chain",
+				message:
+					"`ADD <url>` fetches content at build time without integrity verification.",
+				remediation:
+					"Use `ADD --checksum=sha256:… <url>`, or download with curl and verify a checksum in a RUN step.",
+				references: [
+					"https://docs.docker.com/reference/dockerfile/#add---checksum",
+					BEST_PRACTICES,
+				],
+				tags: ["cis-docker-4.9", "cwe-494"],
+			});
+	} else if (
+		sources.length > 0 &&
+		!sources.some((s) => ARCHIVE_RE.test(s) || /^git@|\.git$/.test(s))
+	) {
+		findings.push({
+			...base,
+			ruleId: "container.dockerfile/add-instead-of-copy",
+			title: "ADD used where COPY suffices",
+			severity: "low",
+			category: "best-practices",
+			message:
+				"`ADD` has implicit behaviour (archive extraction, URL fetching); `COPY` is explicit and safer for local files.",
+			remediation: "Replace `ADD` with `COPY` for local files.",
+			references: [BEST_PRACTICES],
+			tags: ["cis-docker-4.9"],
+		});
+	}
+	return findings;
+};
+
+/** Risky shell patterns in a RUN instruction. */
+const runFindings = (
+	args: string,
+	base: Pick<FindingInput, "location" | "evidence">,
+): FindingInput[] => {
+	const findings: FindingInput[] = [];
+	const cacheMount = /--mount=type=cache/.test(args);
+	if (PIPE_TO_SHELL_RE.test(args))
+		findings.push({
+			...base,
+			ruleId: "container.dockerfile/curl-pipe-shell",
+			title: "Remote script piped into a shell",
+			severity: "high",
+			category: "security",
+			message:
+				"A script is downloaded and executed in one step without integrity verification; a compromised server or MITM yields code execution in the build.",
+			remediation:
+				"Download to a file, verify its checksum or signature, then execute it — or use a package manager.",
+			references: [
+				"https://owasp.org/www-project-top-10-ci-cd-security-risks/CICD-SEC-03-Dependency-Chain-Abuse",
+			],
+			tags: ["cwe-494", "owasp-a08"],
+		});
+	if (/\bapt-get\s+(?:-\S+\s+)*install\b/.test(args)) {
+		if (!/--no-install-recommends/.test(args))
+			findings.push({
+				...base,
+				ruleId: "container.dockerfile/apt-no-install-recommends",
+				title: "apt-get install without --no-install-recommends",
+				severity: "low",
+				category: "performance",
+				message:
+					"Recommended packages are installed too, enlarging the image and its attack surface.",
+				remediation: "Use `apt-get install -y --no-install-recommends …`.",
+				references: [BEST_PRACTICES],
+			});
+		if (
+			!cacheMount &&
+			!/rm\s+-[rf]+\s+[^;&|]*\/var\/lib\/apt\/lists/.test(args)
+		)
+			findings.push({
+				...base,
+				ruleId: "container.dockerfile/apt-cache-not-cleaned",
+				title: "apt cache not cleaned",
+				severity: "low",
+				category: "performance",
+				message:
+					"The apt package lists remain in the layer, adding tens of megabytes.",
+				remediation:
+					"End the same RUN with `&& rm -rf /var/lib/apt/lists/*` (or use a BuildKit cache mount).",
+				references: [BEST_PRACTICES],
+			});
+	}
+	if (
+		/\bapk\s+(?:-\S+\s+)*add\b/.test(args) &&
+		!/--no-cache/.test(args) &&
+		!cacheMount
+	)
+		findings.push({
+			...base,
+			ruleId: "container.dockerfile/apk-no-cache",
+			title: "apk add without --no-cache",
+			severity: "low",
+			category: "performance",
+			message: "The apk index is left in the image layer.",
+			remediation: "Use `apk add --no-cache …`.",
+			references: [BEST_PRACTICES],
+		});
+	if (/(^|[\s;&|(])sudo\s/.test(args))
+		findings.push({
+			...base,
+			ruleId: "container.dockerfile/sudo",
+			title: "sudo used in RUN",
+			severity: "medium",
+			category: "security",
+			message:
+				"`sudo` in images has unpredictable TTY and signal behaviour and implies a privileged user setup.",
+			remediation:
+				"Run privileged steps before switching `USER`, or use `gosu` in entrypoints.",
+			references: [BEST_PRACTICES],
+			tags: ["cwe-250"],
+		});
+	return findings;
+};
+
 /** Audits one Dockerfile's text. Exported for tests. */
 export const auditDockerfile = (
 	file: string,
@@ -242,162 +418,16 @@ export const auditDockerfile = (
 			const base = { location: at(ins), evidence: ins.source };
 			switch (ins.keyword) {
 				case "ADD": {
-					const tokens = args.split(/\s+/).filter((t) => !t.startsWith("--"));
-					const sources = tokens.slice(0, -1);
-					const hasChecksum = /--checksum=/.test(args);
-					if (sources.some((s) => /^https?:\/\//i.test(s))) {
-						if (!hasChecksum)
-							findings.push({
-								...base,
-								ruleId: "container.dockerfile/add-remote-url",
-								title: "ADD downloads a remote file without verification",
-								severity: "medium",
-								category: "supply-chain",
-								message:
-									"`ADD <url>` fetches content at build time without integrity verification.",
-								remediation:
-									"Use `ADD --checksum=sha256:… <url>`, or download with curl and verify a checksum in a RUN step.",
-								references: [
-									"https://docs.docker.com/reference/dockerfile/#add---checksum",
-									BEST_PRACTICES,
-								],
-								tags: ["cis-docker-4.9", "cwe-494"],
-							});
-					} else if (
-						sources.length > 0 &&
-						!sources.some((s) => ARCHIVE_RE.test(s) || /^git@|\.git$/.test(s))
-					) {
-						findings.push({
-							...base,
-							ruleId: "container.dockerfile/add-instead-of-copy",
-							title: "ADD used where COPY suffices",
-							severity: "low",
-							category: "best-practices",
-							message:
-								"`ADD` has implicit behaviour (archive extraction, URL fetching); `COPY` is explicit and safer for local files.",
-							remediation: "Replace `ADD` with `COPY` for local files.",
-							references: [BEST_PRACTICES],
-							tags: ["cis-docker-4.9"],
-						});
-					}
+					findings.push(...addFindings(args, base));
 					break;
 				}
 				case "RUN": {
-					const cacheMount = /--mount=type=cache/.test(args);
-					if (PIPE_TO_SHELL_RE.test(args))
-						findings.push({
-							...base,
-							ruleId: "container.dockerfile/curl-pipe-shell",
-							title: "Remote script piped into a shell",
-							severity: "high",
-							category: "security",
-							message:
-								"A script is downloaded and executed in one step without integrity verification; a compromised server or MITM yields code execution in the build.",
-							remediation:
-								"Download to a file, verify its checksum or signature, then execute it — or use a package manager.",
-							references: [
-								"https://owasp.org/www-project-top-10-ci-cd-security-risks/CICD-SEC-03-Dependency-Chain-Abuse",
-							],
-							tags: ["cwe-494", "owasp-a08"],
-						});
-					if (/\bapt-get\s+(?:-\S+\s+)*install\b/.test(args)) {
-						if (!/--no-install-recommends/.test(args))
-							findings.push({
-								...base,
-								ruleId: "container.dockerfile/apt-no-install-recommends",
-								title: "apt-get install without --no-install-recommends",
-								severity: "low",
-								category: "performance",
-								message:
-									"Recommended packages are installed too, enlarging the image and its attack surface.",
-								remediation:
-									"Use `apt-get install -y --no-install-recommends …`.",
-								references: [BEST_PRACTICES],
-							});
-						if (
-							!cacheMount &&
-							!/rm\s+-[rf]+\s+[^;&|]*\/var\/lib\/apt\/lists/.test(args)
-						)
-							findings.push({
-								...base,
-								ruleId: "container.dockerfile/apt-cache-not-cleaned",
-								title: "apt cache not cleaned",
-								severity: "low",
-								category: "performance",
-								message:
-									"The apt package lists remain in the layer, adding tens of megabytes.",
-								remediation:
-									"End the same RUN with `&& rm -rf /var/lib/apt/lists/*` (or use a BuildKit cache mount).",
-								references: [BEST_PRACTICES],
-							});
-					}
-					if (
-						/\bapk\s+(?:-\S+\s+)*add\b/.test(args) &&
-						!/--no-cache/.test(args) &&
-						!cacheMount
-					)
-						findings.push({
-							...base,
-							ruleId: "container.dockerfile/apk-no-cache",
-							title: "apk add without --no-cache",
-							severity: "low",
-							category: "performance",
-							message: "The apk index is left in the image layer.",
-							remediation: "Use `apk add --no-cache …`.",
-							references: [BEST_PRACTICES],
-						});
-					if (/(^|[\s;&|(])sudo\s/.test(args))
-						findings.push({
-							...base,
-							ruleId: "container.dockerfile/sudo",
-							title: "sudo used in RUN",
-							severity: "medium",
-							category: "security",
-							message:
-								"`sudo` in images has unpredictable TTY and signal behaviour and implies a privileged user setup.",
-							remediation:
-								"Run privileged steps before switching `USER`, or use `gosu` in entrypoints.",
-							references: [BEST_PRACTICES],
-							tags: ["cwe-250"],
-						});
+					findings.push(...runFindings(args, base));
 					break;
 				}
 				case "ENV":
 				case "ARG": {
-					for (const { key, value } of keyValues(args)) {
-						if (!SECRET_NAME_RE.test(key)) continue;
-						if (value !== undefined && !isPlaceholderValue(value)) {
-							findings.push({
-								location: at(ins),
-								evidence: `${ins.keyword} ${key}=${redact(value)}`,
-								ruleId: `container.dockerfile/secret-in-${ins.keyword.toLowerCase()}`,
-								title: `Secret hardcoded in ${ins.keyword}`,
-								severity: "high",
-								category: "security",
-								message: `\`${key}\` is set to a literal value; it is stored in the image metadata and visible to anyone who can pull the image.`,
-								remediation:
-									"Remove the value, rotate the credential, and pass secrets at runtime or with BuildKit `RUN --mount=type=secret`.",
-								references: [
-									"https://docs.docker.com/build/building/secrets/",
-									CIS_DOCKER,
-								],
-								tags: ["cis-docker-4.10", "cwe-798"],
-							});
-						} else if (ins.keyword === "ARG" && value === undefined) {
-							findings.push({
-								...base,
-								ruleId: "container.dockerfile/secret-build-arg",
-								title: "Secret passed as build argument",
-								severity: "medium",
-								category: "security",
-								message: `Build argument \`${key}\` looks like a credential; build-arg values are recorded in the image history.`,
-								remediation:
-									"Use BuildKit secret mounts (`RUN --mount=type=secret,id=…`) instead of ARG.",
-								references: ["https://docs.docker.com/build/building/secrets/"],
-								tags: ["cwe-532"],
-							});
-						}
-					}
+					findings.push(...secretEnvFindings(ins, args, base));
 					break;
 				}
 				case "EXPOSE":

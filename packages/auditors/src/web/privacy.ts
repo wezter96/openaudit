@@ -4,142 +4,23 @@ import {
 	type Severity,
 } from "@openaudit/core";
 import { Effect } from "effect";
-
+import {
+	isTrackingCookie,
+	staticPattern,
+	TRACKERS as TRACKERS_ALL,
+	type Tracker,
+} from "../privacy-data";
 import { findAll, rawText, selectorOf, snippetOf, textOf } from "./dom";
 import { crawl, isLoopback, type Page, resolveUrl, resourcesOf } from "./page";
 import { parseSetCookie } from "./util";
 
-interface Tracker {
-	readonly name: string;
-	readonly kind:
-		| "analytics"
-		| "advertising"
-		| "session-replay"
-		| "marketing"
-		| "privacy-friendly analytics";
-	/** Matched against resource URLs and inline script source. */
-	readonly pattern: RegExp;
-}
-
-const TRACKERS: ReadonlyArray<Tracker> = [
-	{
-		name: "Google Analytics",
-		kind: "analytics",
-		pattern:
-			/google-analytics\.com\/|googletagmanager\.com\/gtag\/js|\bgtag\(\s*['"]config['"]\s*,\s*['"](G|UA)-/,
+/** Static HTML scanning skips monitoring SDKs: they are not consent-gated tracking. */
+const TRACKERS = TRACKERS_ALL.filter((t) => t.kind !== "monitoring").flatMap(
+	(tracker) => {
+		const pattern = staticPattern(tracker);
+		return pattern ? [{ tracker, pattern }] : [];
 	},
-	{
-		name: "Google Tag Manager",
-		kind: "marketing",
-		pattern: /googletagmanager\.com\/gtm\.js|GTM-[A-Z0-9]{4,}/,
-	},
-	{
-		name: "Google Ads / DoubleClick",
-		kind: "advertising",
-		pattern:
-			/doubleclick\.net|googleadservices\.com|googlesyndication\.com|AW-\d{6,}/,
-	},
-	{
-		name: "Meta Pixel",
-		kind: "advertising",
-		pattern:
-			/connect\.facebook\.net\/[^"']*fbevents|facebook\.com\/tr\?|\bfbq\(\s*['"]init/,
-	},
-	{
-		name: "Hotjar",
-		kind: "session-replay",
-		pattern: /static\.hotjar\.com|script\.hotjar\.com|\bhjid\s*:/,
-	},
-	{
-		name: "Microsoft Clarity",
-		kind: "session-replay",
-		pattern: /clarity\.ms\/tag/,
-	},
-	{
-		name: "FullStory",
-		kind: "session-replay",
-		pattern:
-			/fullstory\.com\/s\/fs\.js|edge\.fullstory\.com|window\['_fs_org'\]/,
-	},
-	{
-		name: "LogRocket",
-		kind: "session-replay",
-		pattern: /cdn\.logrocket\.io|cdn\.lr-ingest\.io/,
-	},
-	{
-		name: "Segment",
-		kind: "analytics",
-		pattern: /cdn\.segment\.com\/analytics\.js/,
-	},
-	{
-		name: "Mixpanel",
-		kind: "analytics",
-		pattern: /cdn\.mxpnl\.com|mixpanel\.init\(/,
-	},
-	{
-		name: "Amplitude",
-		kind: "analytics",
-		pattern: /cdn\.amplitude\.com|amplitude\.getInstance\(/,
-	},
-	{
-		name: "Heap",
-		kind: "analytics",
-		pattern: /cdn\.heapanalytics\.com|heap\.load\(/,
-	},
-	{
-		name: "LinkedIn Insight",
-		kind: "advertising",
-		pattern: /snap\.licdn\.com|_linkedin_partner_id/,
-	},
-	{
-		name: "TikTok Pixel",
-		kind: "advertising",
-		pattern: /analytics\.tiktok\.com|ttq\.load\(/,
-	},
-	{
-		name: "X (Twitter) Pixel",
-		kind: "advertising",
-		pattern: /static\.ads-twitter\.com|\btwq\(\s*['"]init/,
-	},
-	{
-		name: "Microsoft Advertising (Bing UET)",
-		kind: "advertising",
-		pattern: /bat\.bing\.com/,
-	},
-	{
-		name: "HubSpot",
-		kind: "marketing",
-		pattern: /js\.hs-scripts\.com|js\.hs-analytics\.net/,
-	},
-	{
-		name: "Intercom",
-		kind: "marketing",
-		pattern: /widget\.intercom\.io|js\.intercomcdn\.com/,
-	},
-	{
-		name: "Yandex Metrica",
-		kind: "analytics",
-		pattern: /mc\.yandex\.ru\/metrika/,
-	},
-	{
-		name: "Plausible",
-		kind: "privacy-friendly analytics",
-		pattern: /plausible\.io\/js\//,
-	},
-	{
-		name: "Fathom",
-		kind: "privacy-friendly analytics",
-		pattern: /cdn\.usefathom\.com/,
-	},
-	{
-		name: "Matomo",
-		kind: "privacy-friendly analytics",
-		pattern: /matomo\.(js|php)|piwik\.(js|php)/,
-	},
-];
-
-const TRACKING_COOKIE =
-	/^(_ga|_gid|_gat|_gcl_|_fbp|_fbc|_hj|_clck|_clsk|ajs_|mp_|amplitude|_uet|_ttp|li_|IDE$|NID$|_pin_)/i;
+);
 
 const THIRD_PARTY_HOSTS: ReadonlyArray<[RegExp, string]> = [
 	[/^fonts\.(googleapis|gstatic)\.com$/, "Google Fonts"],
@@ -170,7 +51,7 @@ export const privacy = defineAuditor({
 			/* -------------------------------- trackers ------------------------------- */
 			const found = new Map<
 				string,
-				{ tracker: Tracker; page: Page; evidence: string }
+				{ tracker: Tracker; pattern: RegExp; page: Page; evidence: string }
 			>();
 			for (const page of pages) {
 				const sources = [
@@ -182,16 +63,17 @@ export const privacy = defineAuditor({
 						(s) => ({ text: rawText(s), evidence: "inline script" }),
 					),
 				];
-				for (const tracker of TRACKERS) {
+				for (const { tracker, pattern } of TRACKERS) {
 					if (found.has(tracker.name)) continue;
-					const hit = sources.find((s) => tracker.pattern.test(s.text));
+					const hit = sources.find((s) => pattern.test(s.text));
 					if (hit)
 						found.set(tracker.name, {
 							tracker,
+							pattern,
 							page,
 							evidence:
 								hit.evidence === "inline script"
-									? `inline script matching ${tracker.pattern.source.slice(0, 60)}`
+									? `inline script matching ${pattern.source.slice(0, 60)}`
 									: hit.evidence,
 						});
 				}
@@ -200,7 +82,9 @@ export const privacy = defineAuditor({
 				const friendly = tracker.kind === "privacy-friendly analytics";
 				const severity: Severity = friendly
 					? "info"
-					: tracker.kind === "session-replay" || tracker.kind === "advertising"
+					: tracker.kind === "session-replay" ||
+							tracker.kind === "advertising" ||
+							tracker.kind === "fingerprinting"
 						? "medium"
 						: "low";
 				findings.push({
@@ -229,9 +113,9 @@ export const privacy = defineAuditor({
 			const cookies = start.response.cookies
 				.map(parseSetCookie)
 				.filter((c) => c.name);
-			const tracking = cookies.filter((c) => TRACKING_COOKIE.test(c.name));
+			const tracking = cookies.filter((c) => isTrackingCookie(c.name));
 			const longLived = cookies.filter((c) => {
-				if (TRACKING_COOKIE.test(c.name)) return false;
+				if (isTrackingCookie(c.name)) return false;
 				const maxAge = Number(c.attrs.get("max-age") ?? "");
 				const expires = Date.parse(c.attrs.get("expires") ?? "");
 				const lifetime =

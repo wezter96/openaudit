@@ -40,7 +40,10 @@ const fixText = (paths: ReadonlyArray<Record<string, unknown>>): string => {
 	const fixes = paths.flatMap((p) => {
 		const fix = isRecord(p.fixPath) ? p.fixPath : {};
 		const path = str(fix.path);
-		return path ? [`set ${path} to ${JSON.stringify(fix.value ?? "")}`] : [];
+		if (path) return [`set ${path} to ${JSON.stringify(fix.value ?? "")}`];
+		// Real reports leave fixPath empty and name the field to remove instead.
+		const remove = str(p.deletePath);
+		return remove ? [`remove ${remove}`] : [];
 	});
 	return fixes.length > 0 ? `Suggested: ${fixes.slice(0, 3).join("; ")}.` : "";
 };
@@ -66,11 +69,17 @@ export const parseKubescapeReport = (
 		const object = isRecord(resource?.object) ? resource.object : {};
 		const meta = isRecord(object.metadata) ? object.metadata : {};
 		const label = [str(object.kind), str(meta.name)].filter(Boolean).join("/");
+		// Kubescape reports the manifest's directory as `path` and only its
+		// basename as `relativePath`; older builds put the file in `path`.
 		const abs = str(source.path);
+		const base = str(source.relativePath);
+		const absFile = abs && base && !abs.endsWith(base) ? join(abs, base) : abs;
 		const file =
-			abs && isAbsolute(abs) && !relative(root, abs).startsWith("..")
-				? relPath(root, abs)
-				: (str(source.relativePath) ?? abs);
+			absFile &&
+			isAbsolute(absFile) &&
+			!relative(root, absFile).startsWith("..")
+				? relPath(root, absFile)
+				: (base ?? absFile);
 
 		return arr(rawResult.controls).flatMap((rawControl): FindingInput[] => {
 			if (!isRecord(rawControl)) return [];

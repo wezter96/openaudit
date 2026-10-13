@@ -1,0 +1,113 @@
+openapi: 3.0.3
+info:
+  title: Pets
+  version: 1.0.0
+servers:
+  - url: http://api.pets.example.com/v1
+  - url: http://localhost:3000
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      parameters:
+        - name: api_key
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: All pets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Pet"
+    post:
+      operationId: createPet
+      security:
+        - basicAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewPet"
+      responses:
+        "201":
+          description: Created
+  /pets/{id}:
+    get:
+      operationId: getPet
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: A pet
+        "401":
+          description: Unauthorized
+  /health:
+    get:
+      operationId: health
+      responses:
+        "200":
+          description: ok
+  /login:
+    post:
+      operationId: login
+      security: []
+      parameters:
+        - name: password
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+  /paged:
+    get:
+      operationId: paged
+      security:
+        - bearer: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {type: string}
+        "403":
+          description: Forbidden
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+    bearer:
+      type: http
+      scheme: bearer
+    keyQuery:
+      type: apiKey
+      in: query
+      name: key
+  schemas:
+    Pet:
+      type: object
+      properties:
+        name: {type: string}
+    NewPet:
+      type: object
+      properties:
+        name: {type: string}
+        isAdmin: {type: boolean}

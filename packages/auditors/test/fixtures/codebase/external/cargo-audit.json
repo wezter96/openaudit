@@ -4,13 +4,19 @@
     "last-commit": "6a1ba8ab2b1ba2bf8d0d4c3a8f5c0d1ad7a5b3a9",
     "last-updated": "2026-10-09T14:21:08+00:00"
   },
-  "lockfile": { "dependency-count": 52 },
+  "lockfile": {
+    "dependency-count": 52
+  },
   "settings": {
     "target_arch": [],
     "target_os": [],
     "severity": null,
     "ignore": [],
-    "informational_warnings": ["unmaintained", "unsound", "notice"]
+    "informational_warnings": [
+      "unmaintained",
+      "unsound",
+      "notice"
+    ]
   },
   "vulnerabilities": {
     "found": true,
@@ -23,25 +29,59 @@
           "title": "Potential segfault in the time crate",
           "description": "Unix-like operating systems may segfault due to dereferencing a dangling pointer in specific circumstances.",
           "date": "2020-11-18",
-          "aliases": ["CVE-2020-26235", "GHSA-wcg3-cvx6-7396"],
+          "aliases": [
+            "CVE-2020-26235",
+            "GHSA-wcg3-cvx6-7396"
+          ],
           "related": [],
           "collection": "crates",
-          "categories": ["code-execution", "memory-corruption"],
-          "keywords": ["segfault"],
+          "categories": [
+            "code-execution",
+            "memory-corruption"
+          ],
+          "keywords": [
+            "segfault"
+          ],
           "cvss": "CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
           "informational": null,
           "references": [],
           "url": "https://github.com/time-rs/time/issues/293",
           "withdrawn": null,
-          "license": "CC0-1.0"
+          "license": "CC0-1.0",
+          "source": null,
+          "expect-deleted": false
         },
         "versions": {
-          "patched": [">=0.2.23"],
-          "unaffected": ["=0.2.0", "=0.2.1", "=0.2.2", "=0.2.3", "=0.2.4", "=0.2.5", "=0.2.6"]
+          "patched": [
+            ">=0.2.23"
+          ],
+          "unaffected": [
+            "=0.2.0",
+            "=0.2.1",
+            "=0.2.2",
+            "=0.2.3",
+            "=0.2.4",
+            "=0.2.5",
+            "=0.2.6"
+          ]
         },
         "affected": {
-          "functions": { "time::OffsetDateTime::now_local": ["<0.2.23"] },
-          "os": ["linux", "redox", "solaris", "android", "ios", "macos", "netbsd", "openbsd", "freebsd"],
+          "functions": {
+            "time::OffsetDateTime::now_local": [
+              "<0.2.23"
+            ]
+          },
+          "os": [
+            "linux",
+            "redox",
+            "solaris",
+            "android",
+            "ios",
+            "macos",
+            "netbsd",
+            "openbsd",
+            "freebsd"
+          ],
           "arch": null
         },
         "package": {
@@ -68,6 +108,44 @@
           "replace": null
         },
         "advisory": {
+          "id": "RUSTSEC-2024-0375",
+          "package": "atty",
+          "title": "atty is unmaintained",
+          "description": "The maintainer of `atty` has advised that this crate is deprecated and will not receive any maintenance.",
+          "date": "2024-09-25",
+          "aliases": [],
+          "related": [],
+          "collection": "crates",
+          "categories": [],
+          "keywords": [],
+          "cvss": null,
+          "informational": "unmaintained",
+          "references": [],
+          "url": "https://github.com/softprops/atty/issues/57",
+          "withdrawn": null,
+          "license": "CC0-1.0",
+          "source": null,
+          "expect-deleted": false
+        },
+        "affected": null,
+        "versions": {
+          "patched": [],
+          "unaffected": []
+        }
+      }
+    ],
+    "unsound": [
+      {
+        "kind": "unsound",
+        "package": {
+          "name": "atty",
+          "version": "0.2.14",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "d9b39be18770d11421cdb1b9947a45dd3f37e93092cbf377614828a319d5fee8",
+          "dependencies": [],
+          "replace": null
+        },
+        "advisory": {
           "id": "RUSTSEC-2021-0145",
           "package": "atty",
           "title": "Potential unaligned read",
@@ -83,10 +161,37 @@
           "references": [],
           "url": "https://github.com/softprops/atty/issues/50",
           "withdrawn": null,
-          "license": "CC0-1.0"
+          "license": "CC0-1.0",
+          "source": null,
+          "expect-deleted": false
         },
+        "affected": {
+          "functions": {},
+          "os": [
+            "windows"
+          ],
+          "arch": null
+        },
+        "versions": {
+          "patched": [],
+          "unaffected": []
+        }
+      }
+    ],
+    "yanked": [
+      {
+        "kind": "yanked",
+        "package": {
+          "name": "bytes",
+          "version": "1.2.0",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+          "dependencies": [],
+          "replace": null
+        },
+        "advisory": null,
         "affected": null,
-        "versions": { "patched": [], "unaffected": [] }
+        "versions": null
       }
     ]
   }
