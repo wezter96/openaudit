@@ -27,7 +27,7 @@
 	"author": "Anton Wester",
 	"type": "module",
 	"bin": {
-		"openaudit": "./bin/openaudit.js"
+		"openaudit": "bin/openaudit.js"
 	},
 	"files": [
 		"bin",
