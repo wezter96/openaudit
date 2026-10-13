@@ -1,0 +1,120 @@
+name: openaudit
+description: Audit code, sites, containers and IaC for security, accessibility, performance and more. Uploads SARIF and an interactive HTML report.
+branding:
+  icon: shield
+  color: purple
+
+inputs:
+  target:
+    description: Directory, URL or image:<ref> to audit.
+    default: "."
+  fail-on:
+    description: Fail the step on findings at or above this severity (critical, high, medium, low, info, none).
+    default: high
+  diff:
+    description: >-
+      Only report findings in files changed since this git ref. Defaults to the
+      pull request's base branch on pull_request events; "none" audits everything.
+      Needs history: use actions/checkout with fetch-depth 0.
+    default: ""
+  only:
+    description: Comma-separated auditor ids or prefixes to run (e.g. "code,iac").
+    default: ""
+  exclude:
+    description: Comma-separated auditor ids or prefixes to skip.
+    default: ""
+  config:
+    description: Trusted config file (openaudit.config.json) for opt-in auditors and settings.
+    default: ""
+  upload-sarif:
+    description: Upload SARIF to GitHub code scanning (needs security-events write).
+    default: "true"
+  upload-report:
+    description: Upload the HTML, JSON, SARIF and Markdown reports as a workflow artifact.
+    default: "true"
+
+outputs:
+  score:
+    description: Overall score, 0-100.
+    value: ${{ steps.audit.outputs.score }}
+  grade:
+    description: Overall grade, A-F.
+    value: ${{ steps.audit.outputs.grade }}
+  report-dir:
+    description: Directory holding the reports.
+    value: ${{ steps.audit.outputs.report-dir }}
+
+runs:
+  using: composite
+  steps:
+    - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      with:
+        bun-version-file: ${{ github.action_path }}/package.json
+
+    - name: Install openaudit
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: bun install --frozen-lockfile
+
+    - name: Run openaudit
+      id: audit
+      shell: bash
+      env:
+        OA_BIN: ${{ github.action_path }}/apps/cli/src/bin.ts
+        OA_TARGET: ${{ inputs.target }}
+        OA_FAIL_ON: ${{ inputs.fail-on }}
+        OA_DIFF: ${{ inputs.diff }}
+        OA_ONLY: ${{ inputs.only }}
+        OA_EXCLUDE: ${{ inputs.exclude }}
+        OA_CONFIG: ${{ inputs.config }}
+        OA_BASE_REF: ${{ github.base_ref }}
+        OA_OUT: ${{ runner.temp }}/openaudit-report
+      run: |
+        set -uo pipefail
+        args=("$OA_TARGET" --format html,json,sarif,markdown --out "$OA_OUT" --fail-on "$OA_FAIL_ON" --quiet)
+        diff="$OA_DIFF"
+        if [ -z "$diff" ] && [ -n "$OA_BASE_REF" ]; then
+          git -C "$OA_TARGET" fetch --no-tags --quiet origin "+refs/heads/${OA_BASE_REF}:refs/remotes/origin/${OA_BASE_REF}" || true
+          diff="origin/${OA_BASE_REF}"
+        fi
+        if [ -n "$diff" ] && [ "$diff" != "none" ]; then args+=(--diff "$diff"); fi
+        if [ -n "$OA_ONLY" ]; then args+=(--only "$OA_ONLY"); fi
+        if [ -n "$OA_EXCLUDE" ]; then args+=(--exclude "$OA_EXCLUDE"); fi
+        if [ -n "$OA_CONFIG" ]; then args+=(--config "$OA_CONFIG"); fi
+
+        code=0
+        bun "$OA_BIN" "${args[@]}" || code=$?
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        echo "report-dir=$OA_OUT" >> "$GITHUB_OUTPUT"
+        if [ -f "$OA_OUT/openaudit-report.sarif" ]; then echo "has-sarif=true" >> "$GITHUB_OUTPUT"; fi
+        if [ -f "$OA_OUT/openaudit-report.json" ]; then
+          bun -e 'const r = await Bun.file(process.argv[1]).json(); console.log(`score=${r.summary.score}\ngrade=${r.summary.grade}`)' \
+            "$OA_OUT/openaudit-report.json" >> "$GITHUB_OUTPUT"
+          cat "$OA_OUT/openaudit-report.md" >> "$GITHUB_STEP_SUMMARY"
+        fi
+        # Exit 1 (findings) is reported by the last step, after uploads.
+        if [ "$code" -ge 2 ]; then exit "$code"; fi
+
+    - name: Upload SARIF to code scanning
+      if: ${{ always() && inputs.upload-sarif == 'true' && steps.audit.outputs.has-sarif == 'true' }}
+      uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+      with:
+        sarif_file: ${{ runner.temp }}/openaudit-report/openaudit-report.sarif
+        category: openaudit
+
+    - name: Upload reports
+      if: ${{ always() && inputs.upload-report == 'true' }}
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: openaudit-report
+        path: ${{ runner.temp }}/openaudit-report
+        if-no-files-found: ignore
+
+    - name: Fail on findings
+      if: ${{ steps.audit.outputs.exit-code == '1' }}
+      shell: bash
+      env:
+        OA_FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        echo "::error::openaudit found issues at or above \"$OA_FAIL_ON\". See the job summary and the openaudit-report artifact."
+        exit 1

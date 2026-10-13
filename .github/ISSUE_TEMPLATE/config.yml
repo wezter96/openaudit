@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/wezter96/openaudit/security/advisories/new
+    about: Please report vulnerabilities in openaudit privately, not as an issue.
+  - name: Community (OpenSverige)
+    url: https://opensverige.se/
+    about: Questions, demos and feedback with others building AI agents.

@@ -1,0 +1,27 @@
+name: New auditor or scanner
+description: Propose a new check or a free, open-source tool to wrap.
+labels: [auditor]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What should it check?
+      description: The issue it finds, which targets (codebase, URL, web app, container, IaC, mobile, cloud) and which area (security, accessibility, ...).
+    validations:
+      required: true
+  - type: input
+    id: tool
+    attributes:
+      label: Tool to wrap (if any)
+      description: Link to the project and its licence. openaudit only wraps tools that are free to use on private code.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety
+      options:
+        - label: The tool can run without executing the scanned project's code (no builds, installs or plugins from project config), or I've explained below why it should be opt-in.
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Output format, speed, network use, false-positive rate, or anything else useful.

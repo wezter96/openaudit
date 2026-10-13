@@ -1,0 +1,38 @@
+name: False positive or missed finding
+description: A rule flagged something it shouldn't, or missed something it should have caught.
+labels: [rules]
+body:
+  - type: input
+    id: rule
+    attributes:
+      label: Rule id
+      description: From the report, e.g. `code.secrets/aws-key`. Leave empty for a missed finding.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What happened
+      options:
+        - False positive (flagged, but not a real issue)
+        - Missed finding (a real issue was not reported)
+        - Wrong severity or category
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Minimal example
+      description: The smallest code, config, header or page that reproduces it. Remove secrets and private data.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected and why
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: openaudit version
+      description: Output of `openaudit --version`.

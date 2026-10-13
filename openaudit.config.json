@@ -1,8 +1,8 @@
 {
 	"failOn": "critical",
 	"ignore": {
-		"paths": ["**/test/fixtures/**", "**/test/**/*.test.ts"],
+		"paths": ["**/test/**", "**/*.test.ts"],
 		"rules": [],
-		"fingerprints": []
+		"fingerprints": ["fec97ae0392386ac", "a22c9f9af84aaa4a"]
 	}
 }

@@ -4,17 +4,18 @@ Bun + TypeScript + **Effect 4** monorepo (Better-T-Stack). Scripts live in `pack
 
 ## Layout
 - `packages/core`: report model (`model.ts`, the public contract with `schemaVersion`), `Auditor` interface, engine, target detection, infrastructure services, reporters.
-- `packages/auditors`: deterministic auditors, one folder per area (`codebase`, `web`, `infra`, `mobile`), each registered in that folder's `index.ts`.
+- `packages/auditors`: deterministic auditors, one folder per area (`codebase`, `web`, `infra`, `mobile`, `cloud`), each registered in that folder's `index.ts`.
 - `packages/agent`: playbooks plus agentic auditors (Claude Agent SDK) and AI insights.
 - `packages/mcp`: MCP server. `apps/cli`: the `openaudit` binary. `apps/server` + `packages/api`: Hono/oRPC HTTP API. `apps/web`: TanStack Start site.
 
 ## Auditor conventions
 - `run(ctx)` closes over infrastructure through `AuditContext` (`ctx.workspace`, `ctx.http`, `ctx.exec`), so it has no Effect requirements. Infrastructure is resolved once in the engine.
 - A missing tool, key or irrelevant target is a `SkipAudit` (status `skipped`, with the reason shown to users). `AuditorError` is for genuine failures. The engine also converts defects and timeouts per auditor, so one auditor never sinks a run.
+- Tag findings so the engine can merge the same issue across tools: advisory ids as lowercase tags (`cve-…`, `ghsa-…`), `secrets` plus `cwe-798` for leaked credentials, `cwe-N` and `wcag-x.y.z` where known, and `owasp-aNN` only for the OWASP Top 10 2021. Merging needs a file and line, or a URL and selector (`packages/core/src/correlate.ts`).
 - Rule ids are `<auditor id>/<kebab-rule>`; ids and fingerprints are a stable contract that baselines and suppressions depend on. Rename them only with a migration note.
 - Findings carry a location, a remediation and a redacted `evidence` (use `redact`). Mark heuristics `confidence: "low"`.
 - External-tool wrappers set `engine: "external"` and `tool`, skip with an install hint, and have parser tests against recorded JSON.
-- Wrapped tools must not run target code: no installs or builds, and run from a temp dir when a tool loads config or hooks from its cwd (pnpm's `.pnpmfile.cjs`, pa11y config, deepsec config). Pass hardening as CLI flags, because project config overrides env vars. Anything slow, costly, traffic-heavy or code-executing is `defaultEnabled: false` (opt-in via `--only`). Shared helpers live in `packages/auditors/src/tool.ts`.
+- Wrapped tools must not run target code: no installs or builds, and run from a temp dir when a tool loads config or hooks from its cwd (pnpm's `.pnpmfile.cjs`, pa11y config, deepsec config). Pass hardening as CLI flags, because project config overrides env vars. Git calls on a target use `GIT_HARDENING_ENV` from core and compare commits, never the working tree. Anything slow, costly, traffic-heavy or code-executing is `defaultEnabled: false` (opt-in via `--only`). Shared helpers live in `packages/auditors/src/tool.ts`.
 - Targets are untrusted input: read files through `Workspace`, which confines reads to the root and skips symlinks. Send HTTP through `ctx.http`, which scopes user headers to the target origin and strips credentials on cross-origin redirects. URL auditors send only low-volume GET/HEAD requests.
 
 ## Effect 4

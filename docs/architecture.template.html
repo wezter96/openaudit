@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>openaudit architecture</title>
+<style>
+:root {
+	--bg: #f7f7f5; --panel: #ffffff; --ink: #1c1d21; --muted: #62646d; --line: #dcdcd6;
+	--builtin: #0f766e; --builtin-bg: #e3f4f1;
+	--external: #4338ca; --external-bg: #e8e8fb;
+	--agentic: #b45309; --agentic-bg: #fdf0dc;
+	--gap: #fbe9e9; --gap-ink: #a12d2d; --accent: #1c1d21;
+	--heat: 79, 70, 229;
+}
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		--bg: #131417; --panel: #1b1c20; --ink: #ececef; --muted: #9a9ca6; --line: #2e3036;
+		--builtin: #5eead4; --builtin-bg: #10302c;
+		--external: #a5b4fc; --external-bg: #23244a;
+		--agentic: #fbbf24; --agentic-bg: #3a2a0e;
+		--gap: #3a1b1b; --gap-ink: #f6a3a3; --accent: #ececef;
+		--heat: 129, 140, 248;
+	}
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1240px; margin: 0 auto; padding: 32px 16px 64px; }
+h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -0.02em; }
+h2 { font-size: 18px; margin: 40px 0 4px; letter-spacing: -0.01em; }
+p.lede, p.sub { color: var(--muted); margin: 0 0 16px; max-width: 80ch; }
+code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.stats { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 0; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; }
+.stat b { font-size: 20px; display: block; }
+.stat span { color: var(--muted); font-size: 12px; }
+
+/* pipeline */
+.flow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; align-items: stretch; }
+.stage { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; position: relative; }
+.stage h3 { margin: 0 0 2px; font-size: 14px; }
+.stage .pkg { color: var(--muted); font-size: 11.5px; margin-bottom: 8px; display: block; }
+.stage ul { margin: 0; padding-left: 16px; }
+.stage li { margin: 2px 0; }
+.arrow { display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.flowrow { display: grid; grid-template-columns: 1fr 28px 1fr 28px 1.25fr 28px 1fr 28px 1fr; align-items: stretch; }
+.flowrow .arrow::before { content: "→"; font-size: 20px; }
+.engines { display: grid; gap: 6px; }
+.eng { border-radius: 8px; padding: 6px 10px; font-size: 12.5px; }
+.eng b { font-size: 15px; }
+.eng.builtin { background: var(--builtin-bg); color: var(--builtin); }
+.eng.external { background: var(--external-bg); color: var(--external); }
+.eng.agentic { background: var(--agentic-bg); color: var(--agentic); }
+.infra { margin-top: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.infra div { background: var(--panel); border: 1px dashed var(--line); border-radius: 10px; padding: 10px 12px; font-size: 12.5px; }
+.infra b { display: block; font-size: 13px; }
+
+/* targets */
+.legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 12.5px; margin: 8px 0 12px; align-items: center; }
+.targets { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; }
+.tcol { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.tcol h3 { margin: 0; font-size: 14px; }
+.tcol .hint { color: var(--muted); font-size: 11.5px; display: block; margin-bottom: 10px; min-height: 34px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { font: 11.5px ui-monospace, SFMono-Regular, Menlo, monospace; border-radius: 6px; padding: 2px 6px; border: 1px solid transparent; cursor: pointer; transition: opacity .15s; }
+.chip.builtin { background: var(--builtin-bg); color: var(--builtin); }
+.chip.external { background: var(--external-bg); color: var(--external); }
+.chip.agentic { background: var(--agentic-bg); color: var(--agentic); }
+.chip.optin { border-style: dashed; border-color: currentColor; }
+.legend .chip { cursor: default; }
+.dim .chip:not(.hit) { opacity: .18; }
+.group { font-size: 11px; color: var(--muted); margin: 10px 0 4px; text-transform: uppercase; letter-spacing: .06em; }
+.group:first-of-type { margin-top: 0; }
+
+/* matrix */
+.matrixwrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+table { border-collapse: collapse; width: 100%; min-width: 720px; }
+th, td { padding: 8px 10px; text-align: center; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+th { font-weight: 600; color: var(--muted); }
+th.row { text-align: left; color: var(--ink); white-space: nowrap; }
+td.cell { cursor: pointer; font-variant-numeric: tabular-nums; }
+td.cell .n { font-weight: 650; font-size: 14px; display: block; }
+td.cell .mix { font-size: 10.5px; color: var(--muted); }
+td.cell.empty { background: var(--gap); color: var(--gap-ink); }
+td.cell.na { color: var(--muted); cursor: default; background: transparent; }
+td.cell.sel { outline: 2px solid var(--accent); outline-offset: -2px; }
+tr:last-child th, tr:last-child td { border-bottom: 0; }
+.filterbar { margin: 8px 0 0; font-size: 12.5px; color: var(--muted); min-height: 20px; }
+.filterbar button { font: inherit; background: none; border: 1px solid var(--line); color: var(--ink); border-radius: 6px; padding: 1px 8px; margin-left: 6px; cursor: pointer; }
+
+/* agent + trust */
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+.card h3 { margin: 0 0 4px; font-size: 15px; }
+.card p { margin: 0 0 10px; color: var(--muted); }
+.steps { counter-reset: s; list-style: none; padding: 0; margin: 0; }
+.steps li { counter-increment: s; padding: 6px 0 6px 34px; position: relative; border-top: 1px solid var(--line); }
+.steps li:first-child { border-top: 0; }
+.steps li::before { content: counter(s); position: absolute; left: 0; top: 6px; width: 22px; height: 22px; border-radius: 50%; background: var(--agentic-bg); color: var(--agentic); font-size: 12px; font-weight: 700; display: grid; place-items: center; }
+.tools { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
+.tools code { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; }
+ul.plain { margin: 0; padding-left: 18px; }
+ul.plain li { margin: 4px 0; }
+
+/* gaps */
+.gaps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.gap { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.gap.p1 { border-left-color: var(--gap-ink); }
+.gap.p2 { border-left-color: var(--agentic); }
+.gap.p3 { border-left-color: var(--muted); }
+.gap h4 { margin: 0 0 4px; font-size: 14px; }
+.gap p { margin: 0; color: var(--muted); font-size: 13px; }
+.gap .tag { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+.gap.p1 .tag { color: var(--gap-ink); } .gap.p2 .tag { color: var(--agentic); } .gap.p3 .tag { color: var(--muted); }
+footer { margin-top: 40px; color: var(--muted); font-size: 12px; }
+
+@media (max-width: 1000px) {
+	.flowrow { grid-template-columns: 1fr; }
+	.flowrow .arrow::before { content: "↓"; }
+	.flowrow .arrow { height: 24px; }
+	.targets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.infra { grid-template-columns: 1fr; }
+}
+@media (max-width: 700px) {
+	.two, .gaps, .targets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<main>
+	<h1>openaudit architecture</h1>
+	<p class="lede">What a run touches, from entry point to report, and which aspects each target kind is audited for. Generated from the auditor registry on __DATE__.</p>
+	<div class="stats" id="stats"></div>
+
+	<h2>Pipeline</h2>
+	<p class="sub">Every entry point drives the same engine. Each auditor runs in isolation: a missing tool becomes <em>skipped</em>, a crash or timeout becomes <em>error</em>, and the rest of the run carries on.</p>
+	<div class="flowrow">
+		<div class="stage">
+			<h3>Entry points</h3>
+			<span class="pkg">apps/cli · packages/mcp · apps/server + packages/api · apps/web</span>
+			<ul>
+				<li><b>CLI</b> <code>openaudit</code>: audit, list, doctor, init, mcp, schema</li>
+				<li><b>MCP server</b> (stdio) for Claude Code, Cursor, Codex</li>
+				<li><b>HTTP API</b> (Hono + oRPC) with SSRF guard</li>
+				<li><b>Web app</b> (TanStack Start)</li>
+				<li><b>GitHub Action</b> (<code>action.yml</code>): PR diff mode, SARIF, report artifact</li>
+			</ul>
+		</div>
+		<div class="arrow"></div>
+		<div class="stage">
+			<h3>Target detection</h3>
+			<span class="pkg">core/target.ts</span>
+			<ul>
+				<li>Directory, file, <code>http(s)://</code> URL, <code>image:&lt;ref&gt;</code> or <code>cloud:&lt;provider&gt;</code></li>
+				<li>Resolves to one or more of 7 kinds: codebase, url, webapp, container, iac, mobile, cloud</li>
+				<li>Config: <code>--config</code> is trusted; a target's own config is read with restrictions</li>
+			</ul>
+		</div>
+		<div class="arrow"></div>
+		<div class="stage">
+			<h3>Engine</h3>
+			<span class="pkg">core/engine.ts</span>
+			<ul>
+				<li>Selection: <code>--only</code>, <code>--exclude</code>, <code>--category</code>; untrusted config can only narrow</li>
+				<li>Concurrency (default 4), per-auditor timeouts</li>
+				<li>Correlation: one issue reported by several tools is kept once and lists who confirmed it</li>
+				<li>Fingerprints, baseline, suppressions and <code>--diff &lt;ref&gt;</code> (changed files only)</li>
+			</ul>
+			<div class="engines" id="engines" style="margin-top:10px"></div>
+		</div>
+		<div class="arrow"></div>
+		<div class="stage">
+			<h3>Scoring</h3>
+			<span class="pkg">core/scoring.ts</span>
+			<ul>
+				<li>0–100 score and A–F grade overall and per category</li>
+				<li>Severity: critical, high, medium, low, info</li>
+				<li><code>--fail-on</code> gate → exit 0 ok, 1 findings, 2 usage error</li>
+				<li>Optional <code>--ai</code> insights: prioritised summary</li>
+			</ul>
+		</div>
+		<div class="arrow"></div>
+		<div class="stage">
+			<h3>Reports</h3>
+			<span class="pkg">core/reporters</span>
+			<ul>
+				<li>Terminal</li>
+				<li>JSON (versioned schema, <code>openaudit schema</code>)</li>
+				<li>SARIF for code scanning</li>
+				<li>Markdown</li>
+				<li>Interactive HTML: overview, a tab per area, OWASP/CWE view</li>
+			</ul>
+		</div>
+	</div>
+	<div class="infra">
+		<div><b>Workspace</b>Reads confined to the target root; symlinks skipped.</div>
+		<div><b>Http</b>User headers sent only to the target origin; credentials stripped on cross-origin redirects; URL auditors send low-volume GET/HEAD.</div>
+		<div><b>Exec</b>Wrapped tools run from temp dirs with hardening flags; no installs or builds; 15-minute cap.</div>
+	</div>
+
+	<h2>Auditors by target</h2>
+	<p class="sub">Hover a chip for its title and the tool it wraps. Click a chip or a matrix cell to highlight related auditors. An auditor that serves several target kinds appears in each column.</p>
+	<div class="legend">
+		<span class="chip builtin">built-in</span>
+		<span class="chip external">wraps a scanner</span>
+		<span class="chip agentic">agentic (LLM)</span>
+		<span class="chip external optin">dashed = opt-in (<code>--only</code>)</span>
+	</div>
+	<div class="targets" id="targets"></div>
+
+	<h2>Coverage: category × target kind</h2>
+	<p class="sub">Each cell counts auditors that report that category for that kind; the small line splits them into built-in / external / agentic. Red cells have no auditor; grey dashes mark combinations that don't apply.</p>
+	<div class="matrixwrap"><table id="matrix"></table></div>
+	<div class="filterbar" id="filterbar"></div>
+
+	<h2>Running with AI agents</h2>
+	<p class="sub">The playbooks cover work that static rules can't do: following data flows, walking authenticated journeys, judging architecture. They run two ways.</p>
+	<div class="two">
+		<div class="card">
+			<h3>In-process: <code>--agentic</code></h3>
+			<p>openaudit drives the Claude Agent SDK itself. Needs <code>ANTHROPIC_API_KEY</code> or Claude Code auth. Agents can read and search the code but not write, edit, run shell commands or browse the web. Browser playbooks go through a guard.</p>
+			<ol class="steps">
+				<li>Engine selects the agentic auditors for the target kind</li>
+				<li>Each of the 10 playbooks runs as its own agent session</li>
+				<li>The agent records each confirmed issue with <code>report_finding</code>; HTTP requests are limited to the target origin</li>
+				<li><code>agent.deepsec</code> (Vercel deepsec) is opt-in only, with $5 / 30 min / 25-file caps by default</li>
+			</ol>
+		</div>
+		<div class="card">
+			<h3>Agent-in-the-loop: MCP</h3>
+			<p>Your own agent (Claude Code, Cursor, Codex) calls openaudit as a tool, runs the deterministic audit, then investigates with a playbook and submits what it found.</p>
+			<ol class="steps">
+				<li><code>detect_target</code> → <code>run_audit</code></li>
+				<li><code>list_playbooks</code> → <code>get_playbook</code></li>
+				<li>Agent investigates with its own tools</li>
+				<li><code>submit_findings</code> merges results into the report; <code>compare_reports</code> diffs runs</li>
+			</ol>
+			<div class="tools" id="mcptools"></div>
+		</div>
+	</div>
+
+	<h2>Trust boundary</h2>
+	<div class="card">
+		<p>The target is treated as hostile input. These rules come from issues reproduced during development.</p>
+		<ul class="plain">
+			<li>A target's <code>openaudit.config.json</code> can only narrow the default set. It cannot enable opt-in or agentic auditors, send data, spend money, add headers or switch off the <code>--fail-on</code> gate.</li>
+			<li>JS audits (npm, pnpm, bun) run on a scratch copy of the lockfile and <code>package.json</code>, so the project's <code>.npmrc</code> proxy settings and <code>.pnpmfile.cjs</code> hooks are never loaded.</li>
+			<li>Git calls force <code>core.fsmonitor=false</code> and <code>core.hooksPath=/dev/null</code>; <code>--diff</code> and deepsec compare commits rather than the working tree, so clean filters never fire; history scans run on a fresh mirror clone.</li>
+			<li>Linters whose config runs code (ESLint, clippy, mypy, golangci-lint) are opt-in; tsc is openaudit's own copy, oxlint gets a config with JS plugins stripped, and Spectral never reads the project ruleset.</li>
+			<li>ZAP active scanning is refused unless the host is on an allow-list in a trusted <code>--config</code>.</li>
+			<li>Brakeman gets an empty config, so the app's <code>config/brakeman.yml</code> can't load extra checks. pa11y and deepsec run from temp dirs.</li>
+			<li>Slow, costly, traffic-heavy or code-executing tools are opt-in: <span id="optin"></span>.</li>
+		</ul>
+	</div>
+
+	<h2>Still open</h2>
+	<p class="sub">Red = worth doing next. Grey = larger scope or blocked upstream.</p>
+	<div class="gaps">
+		<div class="gap p1"><span class="tag">Quality</span><h4>Run the AI paths for real</h4><p><code>--agentic</code> and <code>--ai</code> have never run against the live API. Doing so costs money, so it waits for a go-ahead.</p></div>
+		<div class="gap p1"><span class="tag">Quality</span><h4>Reconstructed fixtures</h4><p>ZAP active scan, Prowler, golangci-lint v2, cargo-audit and the deepsec export are still parsed from documented formats rather than real recordings.</p></div>
+		<div class="gap p1"><span class="tag">Engine</span><h4>Merge IaC and container findings</h4><p>Checkov, KICS, Kubescape, kube-linter and the built-in checks report the same misconfiguration under different rule ids with no shared tag, so they are not merged yet. Needs a rule-equivalence map.</p></div>
+		<div class="gap p3"><span class="tag">Scoring</span><h4>CVSS v4 scores</h4><p>v4 vectors fall back to the advisory database's own label, which is usually present. Scoring them directly needs the MacroVector tables.</p></div>
+		<div class="gap p3"><span class="tag">URL</span><h4>DNSSEC</h4><p>Node's resolver can't validate signatures, so DNSSEC is skipped rather than guessed.</p></div>
+		<div class="gap p3"><span class="tag">Mobile</span><h4>iOS accessibility</h4><p>Compiled storyboards and nibs aren't analysed; iOS gets Info.plist hints only.</p></div>
+		<div class="gap p3"><span class="tag">Compliance</span><h4>ASVS, SOC 2 and CIS views</h4><p>The report maps findings to OWASP Top 10 and the CWE Top 25. Mapping to ASVS, SOC 2 or CIS controls needs curated data.</p></div>
+	</div>
+
+	<footer>openaudit · generated from the auditor registry by <code>bun docs/architecture.ts</code>. Re-run it after adding auditors.</footer>
+</main>
+<script>
+const AUDITORS = __AUDITORS__;
+const MCP_TOOLS = __MCPTOOLS__;
+const TARGETS = [
+	["codebase", "Source repos: SAST, secrets, deps, types, lint, APIs, licences"],
+	["url", "Live sites: headers, TLS, DNS, APIs, SEO, privacy"],
+	["webapp", "Running apps in a real browser (localhost/staging)"],
+	["container", "Dockerfiles, Compose, images"],
+	["iac", "GitHub Actions, Kubernetes, Terraform"],
+	["mobile", "APK / IPA builds and mobile source"],
+	["cloud", "Live AWS, Azure, GCP, Kubernetes"],
+];
+const CATS = ["security","accessibility","performance","seo","privacy","best-practices","reliability","maintainability","supply-chain","compliance"];
+// Combinations that don't apply to a target kind (shown as a dash rather than a gap).
+const NA = new Set(["codebase:seo","container:accessibility","container:seo","iac:accessibility","iac:seo","iac:performance","mobile:seo","container:maintainability","iac:maintainability","url:maintainability","webapp:maintainability","container:compliance","mobile:maintainability","webapp:supply-chain","url:supply-chain","container:privacy","iac:privacy","cloud:accessibility","cloud:seo","cloud:performance","cloud:maintainability","cloud:supply-chain","cloud:privacy","cloud:best-practices","cloud:reliability"]);
+const ENG = ["builtin","external","agentic"];
+const ENG_LABEL = { builtin: "built-in", external: "wrap a scanner", agentic: "agentic (LLM)" };
+
+const el = (tag, attrs = {}, ...kids) => {
+	const n = document.createElement(tag);
+	for (const [k, v] of Object.entries(attrs)) {
+		if (k === "class") n.className = v;
+		else n.setAttribute(k, v);
+	}
+	n.append(...kids);
+	return n;
+};
+
+// stats
+const tools = new Set(AUDITORS.filter(a => a.tool).map(a => a.tool));
+const stats = [[AUDITORS.length, "auditors"], [TARGETS.length, "target kinds"], [CATS.length, "categories"], [tools.size, "external tools"], [AUDITORS.filter(a => a.optin).length, "opt-in"], [MCP_TOOLS.length, "MCP tools"]];
+document.getElementById("stats").append(...stats.map(([n, l]) => el("div", { class: "stat" }, el("b", {}, String(n)), el("span", {}, l))));
+
+// engine counts
+document.getElementById("engines").append(...ENG.map(e => {
+	const n = AUDITORS.filter(a => a.engine === e).length;
+	return el("div", { class: `eng ${e}` }, el("b", {}, String(n)), ` ${ENG_LABEL[e]}`);
+}));
+
+document.getElementById("mcptools").append(...MCP_TOOLS.map(t => el("code", {}, t)));
+document.getElementById("optin").textContent = AUDITORS.filter(a => a.optin && a.engine !== "agentic").map(a => a.tool || a.id).filter((t, i, all) => all.indexOf(t) === i).join(", ");
+
+// target columns
+const chipsById = new Map();
+const targetsEl = document.getElementById("targets");
+for (const [t, hint] of TARGETS) {
+	const col = el("div", { class: "tcol" }, el("h3", {}, t), el("span", { class: "hint" }, hint));
+	for (const e of ENG) {
+		const xs = AUDITORS.filter(a => a.engine === e && a.targets.includes(t));
+		if (!xs.length) continue;
+		col.append(el("div", { class: "group" }, `${ENG_LABEL[e]} · ${xs.length}`));
+		const box = el("div", { class: "chips" });
+		for (const a of xs) {
+			const c = el("span", { class: `chip ${a.engine}${a.optin ? " optin" : ""}`, title: `${a.title}${a.tool ? ` — needs ${a.tool}` : ""}\n${a.cats.join(", ")}${a.optin ? "\nopt-in" : ""}` }, a.id);
+			c.addEventListener("click", () => filter(x => x.id === a.id, `<code>${a.id}</code>: ${a.cats.join(", ")}`));
+			box.append(c);
+			if (!chipsById.has(a.id)) chipsById.set(a.id, []);
+			chipsById.get(a.id).push(c);
+		}
+		col.append(box);
+	}
+	targetsEl.append(col);
+}
+
+// matrix
+const table = document.getElementById("matrix");
+const head = el("tr", {}, el("th", { class: "row" }, ""), ...TARGETS.map(([t]) => el("th", {}, t)));
+table.append(head);
+const cells = [];
+for (const c of CATS) {
+	const tr = el("tr", {}, el("th", { class: "row" }, c));
+	for (const [t] of TARGETS) {
+		const xs = AUDITORS.filter(a => a.cats.includes(c) && a.targets.includes(t));
+		const key = `${t}:${c}`;
+		let td;
+		if (!xs.length && NA.has(key)) td = el("td", { class: "cell na" }, "–");
+		else if (!xs.length) td = el("td", { class: "cell empty", title: "No auditor covers this" }, el("span", { class: "n" }, "0"), el("span", { class: "mix" }, "gap"));
+		else {
+			const mix = ENG.map(e => xs.filter(a => a.engine === e).length).join(" / ");
+			td = el("td", { class: "cell" }, el("span", { class: "n" }, String(xs.length)), el("span", { class: "mix" }, mix));
+			const alpha = Math.min(0.08 + xs.length * 0.05, 0.6);
+			td.style.background = `rgba(var(--heat), ${alpha})`;
+			td.addEventListener("click", () => { for (const x of cells) x.classList.remove("sel"); td.classList.add("sel"); filter(a => a.cats.includes(c) && a.targets.includes(t), `${c} on ${t}: ${xs.length} auditors`); });
+		}
+		cells.push(td);
+		tr.append(td);
+	}
+	table.append(tr);
+}
+
+// highlight
+const bar = document.getElementById("filterbar");
+function filter(pred, label) {
+	targetsEl.classList.add("dim");
+	for (const c of document.querySelectorAll(".chip.hit")) c.classList.remove("hit");
+	for (const a of AUDITORS) if (pred(a)) for (const c of chipsById.get(a.id) || []) c.classList.add("hit");
+	bar.innerHTML = `Highlighting ${label}`;
+	const btn = el("button", {}, "Clear");
+	btn.addEventListener("click", clear);
+	bar.append(btn);
+	targetsEl.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+function clear() {
+	targetsEl.classList.remove("dim");
+	for (const x of cells) x.classList.remove("sel");
+	bar.textContent = "";
+}
+</script>
+</body>
+</html>

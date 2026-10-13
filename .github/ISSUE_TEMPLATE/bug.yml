@@ -1,0 +1,29 @@
+name: Bug
+description: openaudit crashed, errored or behaved unexpectedly.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      description: e.g. `openaudit . --only code --format html -o report`
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Relevant terminal output or the auditor's error message. Remove secrets and private paths.
+      render: text
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Output of `openaudit --version` and `openaudit doctor`, plus your OS.
+      render: text
