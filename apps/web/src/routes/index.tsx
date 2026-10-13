@@ -157,7 +157,7 @@ function HomeComponent() {
 						<h3 className="mb-2 font-semibold">Machine-readable output</h3>
 						<CodeBlock
 							code={
-								"bunx @openaudit/cli . --json > report.json\nbunx openaudit https://staging.example --format sarif --out audit.sarif"
+								"bunx @openaudit/cli . --json > report.json\nbunx @openaudit/cli https://staging.example --format sarif --out audit.sarif"
 							}
 							prompt
 							label="JSON and SARIF commands"
