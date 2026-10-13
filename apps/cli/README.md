@@ -105,7 +105,7 @@ claude mcp add openaudit -- bunx @openaudit/cli mcp
 ```json
 {
   "mcpServers": {
-    "openaudit": { "command": "bunx", "args": ["openaudit", "mcp"] }
+    "openaudit": { "command": "bunx", "args": ["@openaudit/cli", "mcp"] }
   }
 }
 ```
@@ -115,7 +115,7 @@ claude mcp add openaudit -- bunx @openaudit/cli mcp
 ```toml
 [mcp_servers.openaudit]
 command = "bunx"
-args = ["openaudit", "mcp"]
+args = ["@openaudit/cli", "mcp"]
 ```
 
 Tools: `detect_target`, `list_auditors`, `run_audit`, `get_report` (json, markdown, sarif or html), `get_finding` (with ±5 lines of source), `compare_reports`, `list_playbooks`, `get_playbook` and `submit_findings`. Every tool returns a short markdown summary and also structured content. Reports are kept in memory (the last 20) and, for directory targets, written to `.openaudit/reports/<id>.json`, which is git-ignored automatically. The `audit_project` prompt walks an agent through the whole loop: audit, triage, run the playbooks, submit findings, fix, then compare reports.
