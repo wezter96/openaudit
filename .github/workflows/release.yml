@@ -1,0 +1,80 @@
+name: Release
+
+# Publishes the `openaudit` package (apps/cli) to npm when a v* tag is pushed,
+# then creates a GitHub Release. See RELEASING.md for the one-time setup.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+          no-cache: true
+      - run: bun install --frozen-lockfile
+      - name: Check the tag matches the package version
+        run: bun run release:check
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+      - run: bunx biome ci .
+      - run: bun run check-types
+        env:
+          VITE_SERVER_URL: http://localhost:3000
+          CORS_ORIGIN: http://localhost:3001
+      - run: bun run test
+        env:
+          VITE_SERVER_URL: http://localhost:3000
+          CORS_ORIGIN: http://localhost:3001
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub Release
+      id-token: write # npm trusted publishing (OIDC) and provenance
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+          no-cache: true
+      # Trusted publishing needs npm >= 11.5.1, which Node 24 ships.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: bun install --frozen-lockfile
+      - name: Publish to npm
+        working-directory: apps/cli
+        env:
+          TAG: ${{ github.ref_name }}
+          # Fallback for the very first publish, if trusted publishing could
+          # not be configured before the package existed. Add an NPM_TOKEN
+          # secret (automation token), uncomment, and remove it afterwards.
+          # NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # Pre-releases (v1.2.3-rc.1) go to the "next" dist-tag, not "latest".
+          if [[ "$TAG" == *-* ]]; then dist_tag=next; else dist_tag=latest; fi
+          npm publish --provenance --access public --tag "$dist_tag"
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          flags=(--generate-notes --verify-tag)
+          if [[ "$TAG" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$TAG" "${flags[@]}" --title "$TAG"

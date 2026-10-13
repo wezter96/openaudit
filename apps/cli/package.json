@@ -2,25 +2,75 @@
 	"name": "openaudit",
 	"version": "0.1.0",
 	"description": "Audit codebases, URLs, running apps, containers, IaC and mobile builds for security, accessibility, performance, SEO and more. Agent-ready via MCP.",
+	"keywords": [
+		"security",
+		"audit",
+		"accessibility",
+		"seo",
+		"sast",
+		"sarif",
+		"mcp",
+		"cli",
+		"performance",
+		"supply-chain"
+	],
+	"homepage": "https://openaudit.se",
+	"bugs": {
+		"url": "https://github.com/wezter96/openaudit/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/wezter96/openaudit.git",
+		"directory": "apps/cli"
+	},
+	"license": "MIT",
+	"author": "Anton Wester",
 	"type": "module",
 	"bin": {
-		"openaudit": "./src/bin.ts"
+		"openaudit": "./bin/openaudit.js"
+	},
+	"files": [
+		"bin",
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
+	"engines": {
+		"bun": ">=1.4"
+	},
+	"publishConfig": {
+		"access": "public",
+		"provenance": true
 	},
 	"scripts": {
 		"check-types": "tsc --noEmit",
 		"test": "bun test",
-		"compile": "bun build --compile --minify ./src/bin.ts --outfile dist/openaudit"
+		"build": "bun scripts/build.ts",
+		"prepack": "bun scripts/build.ts",
+		"compile": "bun build --compile --minify ./src/bin.ts --outfile dist/openaudit",
+		"release:check": "bun scripts/check-release.ts"
 	},
 	"dependencies": {
+		"@anthropic-ai/claude-agent-sdk": "^0.3.296",
+		"@anthropic-ai/sdk": "^0.133.0",
+		"@modelcontextprotocol/sdk": "^1.32.1",
+		"effect": "4.0.3",
+		"fflate": "^0.8.2",
+		"htmlparser2": "^10.0.0",
+		"typescript": "^6.0.3",
+		"yaml": "^2.8.1",
+		"zod": "^4.5.4"
+	},
+	"optionalDependencies": {
+		"axe-core": "^4.14.0",
+		"playwright-core": "^1.64.0"
+	},
+	"devDependencies": {
 		"@openaudit/core": "workspace:*",
 		"@openaudit/auditors": "workspace:*",
 		"@openaudit/agent": "workspace:*",
 		"@openaudit/mcp": "workspace:*",
-		"effect": "4.0.3"
-	},
-	"devDependencies": {
 		"@openaudit/config": "workspace:*",
-		"@types/bun": "catalog:",
-		"typescript": "catalog:"
+		"@types/bun": "catalog:"
 	}
 }

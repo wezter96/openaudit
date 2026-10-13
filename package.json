@@ -36,7 +36,8 @@
 		"postinstall": "varlock codegen --path ./apps/web/ && varlock codegen --path ./apps/server/",
 		"check": "biome check --write .",
 		"test": "turbo run test",
-		"audit": "bun apps/cli/src/bin.ts"
+		"audit": "bun apps/cli/src/bin.ts",
+		"release:check": "cd apps/cli && bun run release:check && bun run build"
 	},
 	"dependencies": {
 		"zod": "catalog:"
