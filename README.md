@@ -204,3 +204,7 @@ openaudit is shared with [OpenSverige](https://opensverige.se/), Sweden's open c
 ## License
 
 [MIT](LICENSE). The scanners openaudit wraps keep their own licences and are installed separately.
+
+---
+
+<p align="center">Brought to you by the team behind <a href="https://sokhem.se/">SökHem</a> · <a href="https://sokhem.se/">sökhem.se</a></p>
