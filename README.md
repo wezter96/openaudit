@@ -2,7 +2,7 @@
 
 Audit everything you ship (code, sites, running apps, containers, infrastructure and mobile builds) from your terminal or your AI agent.
 
-openaudit runs 23 built-in auditors, wraps 8 established scanners when they're installed, and covers the judgment-heavy work (authorization review, keyboard and screen-reader journeys, privacy data flows and more) with 10 **playbooks** that AI agents execute. Everything lands in one scored report: terminal, JSON, SARIF, Markdown or a self-contained HTML page.
+openaudit runs 23 built-in auditors, wraps 34 established scanners (including Vercel's AI-driven deepsec) when they're installed, and covers the judgment-heavy work (authorization review, keyboard and screen-reader journeys, privacy data flows and more) with 10 **playbooks** that AI agents execute. Everything lands in one scored report: terminal, JSON, SARIF, Markdown or a self-contained HTML page.
 
 ```bash
 bunx openaudit .                          # a codebase
@@ -15,12 +15,14 @@ bunx openaudit image:nginx:1.27           # a container image
 
 | Target | Built-in auditors | Wrapped tools (used when installed) |
 |---|---|---|
-| Codebase | secrets, static security (SAST), vulnerable dependencies (OSV.dev), accessibility, performance, quality, repo hygiene | gitleaks, Semgrep, osv-scanner, Trivy |
-| URL | security headers, TLS, SEO, accessibility, performance, exposed files, privacy and trackers | Lighthouse |
+| Codebase | secrets, static security (SAST), vulnerable dependencies (OSV.dev), accessibility, performance, quality, repo hygiene | **Secrets:** gitleaks, TruffleHog. **SAST:** Semgrep, Bandit, gosec, Brakeman, CodeQL\*. **Dependencies:** osv-scanner, Trivy, npm/pnpm/bun audit, pip-audit, cargo-audit, govulncheck\*, Grype\*. **Supply chain:** OpenSSF Scorecard, Syft licences\*. **Quality and licences:** jscpd, knip\*, ScanCode\*. **AI review:** deepsec\* |
+| URL | security headers, TLS, SEO, accessibility, performance, exposed files, privacy and trackers | Lighthouse, pa11y, OWASP ZAP baseline\*, testssl.sh\* |
 | Running web app (`--browser`) | axe-core in Chromium, console errors, failed and mixed-content requests, Core Web Vitals | |
-| Containers | Dockerfile, Compose, image (root user, age, size, secrets) | Trivy, hadolint |
-| Infrastructure as code | GitHub Actions, Kubernetes, Terraform | Checkov |
+| Containers | Dockerfile, Compose, image (root user, age, size, secrets) | Trivy, hadolint, Dockle\* |
+| Infrastructure as code | GitHub Actions, Kubernetes, Terraform | zizmor, actionlint, kube-linter, Checkov, KICS\*, Kubescape\* |
 | Mobile | Android manifest (incl. binary AXML in APKs), iOS Info.plist (incl. binary plists in IPAs), embedded secrets | |
+
+\* Opt-in: slow, noisy, sends more traffic to the target, spends money, or runs project code. Select it with `--only <id>`, e.g. `--only code.codeql` or `--only agent.deepsec`.
 
 Findings are grouped into security, accessibility, performance, SEO, privacy, best practices, reliability, maintainability, supply chain and compliance. Each category gets a 0–100 score and a grade. `bunx openaudit list` shows every auditor and playbook, and `bunx openaudit doctor` shows which optional tools are available.
 
@@ -52,7 +54,8 @@ Details are in [`apps/cli/README.md`](apps/cli/README.md) (CLI, CI, MCP setup) a
 openaudit treats every target as hostile:
 - **Files:** reads are confined to the project root and never follow symlinks out of it.
 - **HTTP:** user-supplied headers go only to the exact target origin, and credentials are stripped on cross-origin redirects.
-- **Agents:** agents have no shell, and the browser is held to the target origin at the network layer.
+- **Agents:** openaudit's own agents have no shell, and the browser is held to the target origin at the network layer. deepsec's reviewer does get a sandboxed shell, which is why it is opt-in.
+- **Wrapped tools:** tools never build or install the target, and they run from temporary directories so project config can't redirect them (e.g. pnpm hook files, pa11y config). A config file inside the target can narrow an audit but can't enable opt-in auditors.
 - **Hosted URL-audit API:** connections are pinned to DNS-validated public IPs.
 - **Evidence:** secrets in evidence are redacted.
 

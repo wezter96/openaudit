@@ -7,7 +7,7 @@ bunx openaudit                      # audit the current directory
 bunx openaudit https://example.com  # audit a live site
 ```
 
-Requires [Bun](https://bun.sh) 1.2 or later. External scanners (gitleaks, semgrep, osv-scanner, trivy, hadolint, checkov, lighthouse) are optional. When one is missing, the auditor that wraps it is skipped and tells you how to install it. Run `openaudit doctor` to see what is available.
+Requires [Bun](https://bun.sh) 1.2 or later. External scanners (gitleaks, TruffleHog, Semgrep, Trivy, zizmor, pa11y and the others listed by `openaudit list`) are optional. When one is missing, the auditor that wraps it is skipped and tells you how to install it. Run `openaudit doctor` to see what is available.
 
 ## Usage
 
@@ -59,7 +59,7 @@ Exit code 3 fails closed, so a target cannot pass CI by crashing the auditor tha
 
 `openaudit init` writes `openaudit.config.json`. Flags on the command line take precedence over it.
 
-A config found in the audited target is written by whoever controls the target, so it is only partly trusted. From there, openaudit honours `only`, `exclude`, `categories`, `failOn` (except `"none"`), `ignore` and `options.maxPages`, and prints a notice when the config narrows which auditors run. Settings that send data, cost money or add credentials (`options.agentic`, `ai`, `model`, `headers`, `settings`, `browser`, ...) are ignored with a warning. Those settings are accepted only from flags or from a file passed explicitly with `--config <path>`. Every report states how many findings each config or baseline suppressed. Use `--no-config` to ignore the target's config entirely. **When CI audits untrusted changes (pull requests from forks), pass `--fail-on` and `--no-config` explicitly**, because the change itself can edit the config.
+A config found in the audited target is written by whoever controls the target, so it is only partly trusted. From there, openaudit honours `only` (which can only narrow the default set: it never enables opt-in or agentic auditors), `exclude`, `categories`, `failOn` (except `"none"`), `ignore` and `options.maxPages`, and prints a notice when the config narrows which auditors run. Settings that send data, cost money or add credentials (`options.agentic`, `ai`, `model`, `headers`, `settings`, `browser`, ...) are ignored with a warning. Those settings are accepted only from flags or from a file passed explicitly with `--config <path>`. Every report states how many findings each config or baseline suppressed. Use `--no-config` to ignore the target's config entirely. **When CI audits untrusted changes (pull requests from forks), pass `--fail-on` and `--no-config` explicitly**, because the change itself can edit the config.
 
 ```json
 {

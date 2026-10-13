@@ -14,6 +14,7 @@ Bun + TypeScript + **Effect 4** monorepo (Better-T-Stack). Scripts live in `pack
 - Rule ids are `<auditor id>/<kebab-rule>`; ids and fingerprints are a stable contract that baselines and suppressions depend on. Rename them only with a migration note.
 - Findings carry a location, a remediation and a redacted `evidence` (use `redact`). Mark heuristics `confidence: "low"`.
 - External-tool wrappers set `engine: "external"` and `tool`, skip with an install hint, and have parser tests against recorded JSON.
+- Wrapped tools must not run target code: no installs or builds, and run from a temp dir when a tool loads config or hooks from its cwd (pnpm's `.pnpmfile.cjs`, pa11y config, deepsec config). Pass hardening as CLI flags, because project config overrides env vars. Anything slow, costly, traffic-heavy or code-executing is `defaultEnabled: false` (opt-in via `--only`). Shared helpers live in `packages/auditors/src/tool.ts`.
 - Targets are untrusted input: read files through `Workspace`, which confines reads to the root and skips symlinks. Send HTTP through `ctx.http`, which scopes user headers to the target origin and strips credentials on cross-origin redirects. URL auditors send only low-volume GET/HEAD requests.
 
 ## Effect 4
