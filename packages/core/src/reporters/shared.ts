@@ -1,10 +1,14 @@
 import type { Finding, Location, Report, Severity } from "../model";
 import { severityRank } from "../model";
 
-/** All findings in a report, most severe first, then by rule id and location. */
+/**
+ * All findings in a report, most severe first, then by rule id and location.
+ * Duplicates of another auditor's finding are left out.
+ */
 export const sortedFindings = (report: Report): Finding[] =>
 	report.results
 		.flatMap((r) => r.findings)
+		.filter((f) => f.duplicateOf === undefined)
 		.sort(
 			(a, b) =>
 				severityRank(a.severity) - severityRank(b.severity) ||
@@ -29,10 +33,25 @@ export const formatLocation = (loc: Location | undefined): string => {
 };
 
 /** Human label of the audit target. */
-export const targetLabel = (report: Report): string =>
-	report.target.url ??
-	(report.target.image ? `image:${report.target.image}` : undefined) ??
-	report.target.input;
+/** Last segment of a local path: `/home/me/repos/shop/` → `shop`. */
+export const baseName = (path: string): string =>
+	path
+		.replace(/[\\/]+$/, "")
+		.split(/[\\/]/)
+		.pop() || path;
+
+/**
+ * What a report is about, as shown to people: the URL, `image:<ref>`,
+ * `cloud:<provider>`, or the folder or file name. Local paths are reduced to
+ * their last segment so shared reports don't reveal the auditor's machine.
+ */
+export const targetLabel = (report: Report): string => {
+	const t = report.target;
+	if (t.url) return t.url;
+	if (t.image) return `image:${t.image}`;
+	if (t.cloud) return `cloud:${t.cloud}`;
+	return baseName(t.root ?? t.file ?? t.input);
+};
 
 export const SEVERITY_LABEL: Record<Severity, string> = {
 	critical: "Critical",
@@ -121,3 +140,16 @@ export const suppressionLine = (s: SuppressionSummary): string => {
 		.map(([k, n]) => `${n} by ${k}`);
 	return `${plural(suppressedTotal(s), "finding")} suppressed by ${s.source} (${parts.join(", ")})`;
 };
+
+/**
+ * JSON that is safe inside `<script type="application/json">`: `<`, `>` and
+ * `&` cannot close the element or open a comment, and U+2028/U+2029 are
+ * escaped for older parsers that treat them as line terminators.
+ */
+export const scriptSafeJson = (value: unknown): string =>
+	JSON.stringify(value)
+		.replaceAll("<", "\\u003c")
+		.replaceAll(">", "\\u003e")
+		.replaceAll("&", "\\u0026")
+		.replaceAll("\u2028", "\\u2028")
+		.replaceAll("\u2029", "\\u2029");

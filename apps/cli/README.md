@@ -15,7 +15,7 @@ Requires [Bun](https://bun.sh) 1.2 or later. External scanners (gitleaks, Truffl
 openaudit [target] [flags]          # same as: openaudit audit [target]
 ```
 
-`target` is a directory (default `.`), a file, an `http(s)://` URL, or `image:<ref>` for a container image. openaudit detects what the target contains (Node, Python, Docker, Terraform, Kubernetes, GitHub Actions, Android/iOS, ...) and runs the auditors that apply.
+`target` is a directory (default `.`), a file, an `http(s)://` URL, `image:<ref>` for a container image, or `cloud:<aws|azure|gcp|kubernetes>` for a live cloud account (opt-in Prowler, using your ambient credentials). openaudit detects what the target contains (Node, Python, Docker, Terraform, Kubernetes, GitHub Actions, Android/iOS, ...) and runs the auditors that apply.
 
 | Flag | Meaning |
 | --- | --- |
@@ -26,6 +26,7 @@ openaudit [target] [flags]          # same as: openaudit audit [target]
 | `--only`, `--exclude <patterns>` | Choose auditors by id (`web.headers`), prefix (`web`) or glob (`code.*`). |
 | `--category <list>` | Only run auditors in these categories, e.g. `security,accessibility`. |
 | `--baseline <report.json>` | Suppress findings already in an earlier JSON report, so only new findings count. |
+| `--diff <ref>` | Keep only findings in files changed since the git ref (`<ref>...HEAD`), e.g. `origin/main` on a pull request. Findings with no file are dropped. The report records the ref and the dropped count. |
 | `--offline` | Make no network requests except to the target (skips OSV lookups and similar). |
 | `--browser`, `--max-pages <n>` | Drive a real Chromium through Playwright for URL targets (needs `playwright-core` and a Chromium). |
 | `-H, --header "Name: value"` | Extra header for the target origin only, e.g. an auth cookie for staging. Repeatable. |
@@ -121,13 +122,17 @@ Tools: `detect_target`, `list_auditors`, `run_audit`, `get_report` (json, markdo
 
 ## CI: GitHub code scanning
 
+The simplest setup is the bundled GitHub Action (`action.yml` at the repository root). On pull requests it audits only the files the PR changed, uploads SARIF, attaches the reports (HTML, JSON, SARIF, Markdown) as an artifact, writes a job summary and fails on findings at or above `fail-on`. Inputs: `target`, `fail-on`, `diff` (defaults to the PR base; `none` audits everything), `only`, `exclude`, `config`, `upload-sarif`, `upload-report`. Outputs: `score`, `grade`, `report-dir`. Check out with `fetch-depth: 0` so the base branch's history is available. The job needs `security-events: write`.
+
+To run the CLI directly instead:
+
 ```yaml
 - uses: oven-sh/setup-bun@v2
 - name: openaudit
   run: bunx openaudit . --format sarif,markdown --out openaudit --fail-on high
 - name: Upload SARIF
   if: always()
-  uses: github/codeql-action/upload-sarif@v3
+  uses: github/codeql-action/upload-sarif@v4
   with:
     sarif_file: openaudit/openaudit-report.sarif
     category: openaudit

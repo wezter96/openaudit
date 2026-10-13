@@ -14,7 +14,9 @@ import {
 	type Auditor,
 	type Category,
 	CoreLive,
+	changedFilesSince,
 	type FindingInput,
+	limitToChangedFiles,
 	makeWorkspace,
 	type Report,
 	resolveTarget,
@@ -22,6 +24,7 @@ import {
 	type Severity,
 	selectAuditors,
 	type TargetKind,
+	toCsv,
 	toHtml,
 	toJson,
 	toMarkdown,
@@ -192,7 +195,9 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 	const store = options.store ?? new ReportStore();
 	const cwd = options.cwd ?? process.cwd();
 	const resolveInput = (target: string) =>
-		/^https?:\/\/|^image:/i.test(target) ? target : resolve(cwd, target);
+		/^https?:\/\/|^image:|^cloud:/i.test(target)
+			? target
+			: resolve(cwd, target);
 
 	const server = new McpServer(
 		{ name: "openaudit", title: "openaudit", version: VERSION },
@@ -301,7 +306,7 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 		{
 			title: "Run audit",
 			description:
-				"Audit a directory, file, http(s) URL or image:<ref>. Returns a summary with the most severe findings (text) and the full report (structuredContent), plus a reportId for get_report, get_finding, submit_findings and compare_reports. Directory targets also get .openaudit/reports/<reportId>.json.",
+				"Audit a directory, file, http(s) URL, image:<ref> or cloud:<provider>. Returns a summary with the most severe findings (text) and the full report (structuredContent), plus a reportId for get_report, get_finding, submit_findings and compare_reports. Directory targets also get .openaudit/reports/<reportId>.json.",
 			inputSchema: {
 				target: z
 					.string()
@@ -338,6 +343,12 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 						"Gate: gatePassed is false when any finding is at least this severe",
 					),
 				concurrency: z.number().int().min(1).max(32).optional(),
+				diffBase: z
+					.string()
+					.optional()
+					.describe(
+						"Git ref (e.g. origin/main): keep only findings in files changed since it. Directory targets in a git repo only.",
+					),
 			},
 			outputSchema: {
 				reportId: S.reportId,
@@ -400,9 +411,20 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 					);
 				}
 			};
+			const target = resolveInput(args.target);
+			let changed: string[] | undefined;
+			if (args.diffBase !== undefined) {
+				try {
+					changed = await changedFilesSince(target, args.diffBase);
+				} catch (error) {
+					return errorResult(
+						error instanceof Error ? error.message : String(error),
+					);
+				}
+			}
 			const res = await run(
 				runAudit({
-					target: resolveInput(args.target),
+					target,
 					auditors,
 					options,
 					selection,
@@ -413,7 +435,10 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 				}).pipe(Effect.provide(CoreLive)),
 			);
 			if (!res.ok) return errorResult(res.error);
-			const report = res.value;
+			const report =
+				changed && args.diffBase !== undefined
+					? limitToChangedFiles(res.value, args.diffBase, changed)
+					: res.value;
 			const reportId = ReportStore.newId();
 			const saved = await store.put(reportId, report);
 			const reportPath = saved?.saved ? saved.path : undefined;
@@ -446,11 +471,11 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 		{
 			title: "Get report",
 			description:
-				"Render a stored report as json, markdown (PR comments), sarif (code scanning) or html. HTML is written to a file and its path returned.",
+				"Render a stored report as json, markdown (PR comments), sarif (code scanning), csv (spreadsheets) or html. HTML is written to a file and its path returned.",
 			inputSchema: {
 				reportId: S.reportId,
 				format: z
-					.enum(["json", "markdown", "sarif", "html"])
+					.enum(["json", "markdown", "sarif", "csv", "html"])
 					.default("markdown"),
 			},
 			outputSchema: {
@@ -485,7 +510,9 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 					? toJson(report)
 					: format === "sarif"
 						? toSarif(report)
-						: toMarkdown(report);
+						: format === "csv"
+							? toCsv(report)
+							: toMarkdown(report);
 			return textResult(content, { reportId, format, content });
 		},
 	);

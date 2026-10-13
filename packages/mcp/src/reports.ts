@@ -3,6 +3,7 @@ import { lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
 	type AuditorResult,
+	correlate,
 	type Finding,
 	type FindingInput,
 	fingerprintOf,
@@ -174,9 +175,11 @@ export const saveNote = (result: SaveResult | undefined): string | undefined =>
 			? `Saved: ${result.path}`
 			: `Not saved to disk (kept in memory only): ${result.reason}`;
 
+/** Findings that count, most severe first (duplicates left out). */
 export const allFindingsOf = (report: Report): Finding[] =>
 	report.results
 		.flatMap((r) => r.findings)
+		.filter((f) => f.duplicateOf === undefined)
 		.sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
 
 export interface ReportDiff {
@@ -255,9 +258,11 @@ export const mergeAgentFindings = (
 		durationMs: existing?.durationMs ?? 0,
 		findings,
 	};
-	const results = existing
-		? report.results.map((r) => (r.auditor === auditor.id ? result : r))
-		: [...report.results, result];
+	const results = correlate(
+		existing
+			? report.results.map((r) => (r.auditor === auditor.id ? result : r))
+			: [...report.results, result],
+	);
 	return {
 		report: {
 			...report,

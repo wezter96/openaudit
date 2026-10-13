@@ -65,6 +65,7 @@ export const TargetKind = Schema.Literals([
 	"container",
 	"iac",
 	"mobile",
+	"cloud",
 ]);
 export type TargetKind = typeof TargetKind.Type;
 
@@ -99,11 +100,24 @@ export const Finding = Schema.Struct({
 	auditor: Schema.String,
 	/** Stable hash of rule + location + evidence, for baselines and dedupe. */
 	fingerprint: Schema.String,
+	/**
+	 * Other auditors that reported the same issue. Set by the engine on the
+	 * finding it keeps when several tools agree.
+	 */
+	alsoReportedBy: Schema.optional(Schema.Array(Schema.String)),
+	/**
+	 * Fingerprint of the finding this one duplicates. Duplicates stay in their
+	 * auditor's results but are not scored, counted or gated on.
+	 */
+	duplicateOf: Schema.optional(Schema.String),
 });
 export type Finding = typeof Finding.Type;
 
-/** What an auditor returns; the engine fills in `auditor` and `fingerprint`. */
-export type FindingInput = Omit<Finding, "auditor" | "fingerprint"> & {
+/** What an auditor returns; the engine fills in the rest. */
+export type FindingInput = Omit<
+	Finding,
+	"auditor" | "fingerprint" | "alsoReportedBy" | "duplicateOf"
+> & {
 	readonly fingerprint?: string;
 };
 
@@ -171,12 +185,14 @@ export type Summary = typeof Summary.Type;
 
 export const TargetInfo = Schema.Struct({
 	input: Schema.String,
-	type: Schema.Literals(["directory", "file", "url", "image"]),
+	type: Schema.Literals(["directory", "file", "url", "image", "cloud"]),
 	kinds: Schema.Array(TargetKind),
 	root: Schema.optional(Schema.String),
 	url: Schema.optional(Schema.String),
 	file: Schema.optional(Schema.String),
 	image: Schema.optional(Schema.String),
+	/** Cloud provider for `cloud:<provider>` targets, e.g. `aws`. */
+	cloud: Schema.optional(Schema.String),
 	/** Detected technologies, e.g. `node`, `python`, `react`, `terraform`. */
 	technologies: Schema.Array(Schema.String),
 });
@@ -216,6 +232,10 @@ export const Report = Schema.Struct({
 	summary: Summary,
 	results: Schema.Array(AuditorResult),
 	ai: Schema.optional(AiInsights),
+	/** Present in diff mode: only findings in files changed since `base` are kept. */
+	diff: Schema.optional(
+		Schema.Struct({ base: Schema.String, changedFiles: Schema.Number }),
+	),
 	/** Present when suppressions removed findings, so hidden results stay visible. */
 	suppressed: Schema.optional(Schema.Array(Suppression)),
 });

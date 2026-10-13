@@ -1,5 +1,5 @@
 import { mkdir } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import * as Agent from "@openaudit/agent";
 import { builtinAuditors } from "@openaudit/auditors";
 import {
@@ -7,10 +7,13 @@ import {
 	CATEGORIES,
 	type Category,
 	CoreLive,
+	changedFilesSince,
 	colorEnabled,
 	FORMAT_EXTENSIONS,
+	GitError,
 	isAtLeast,
 	isReportFormat,
+	limitToChangedFiles,
 	type Report,
 	type ReportFormat,
 	renderReport,
@@ -58,6 +61,8 @@ export interface AuditFlags {
 	readonly ai: boolean;
 	readonly model?: string;
 	readonly baseline?: string;
+	/** Keep only findings in files changed since this git ref. */
+	readonly diff?: string;
 	readonly concurrency?: number;
 	readonly json: boolean;
 	readonly quiet: boolean;
@@ -148,6 +153,31 @@ export const readBaseline = async (path: string): Promise<string[]> => {
 	);
 };
 
+/**
+ * A path as shown in reports: relative to where openaudit was run, or just the
+ * file name when it lies elsewhere, so reports don't reveal local directories.
+ */
+const shownPath = (cwd: string, path: string): string => {
+	const rel = relative(cwd, path);
+	return rel && !rel.startsWith("..") && !isAbsolute(rel)
+		? rel
+		: basename(path);
+};
+
+/** Files changed since `base`; diff mode only makes sense for a git checkout. */
+const diffFiles = async (target: string, base: string): Promise<string[]> => {
+	if (/^https?:\/\/|^image:|^cloud:/i.test(target))
+		throw new UsageError(
+			"--diff needs a directory target inside a git repository.",
+		);
+	try {
+		return await changedFilesSince(target, base);
+	} catch (error) {
+		if (error instanceof GitError) throw new UsageError(error.message);
+		throw error;
+	}
+};
+
 /** Runs `openaudit audit` and returns the process exit code. */
 export const auditCommand = async (
 	flags: AuditFlags,
@@ -203,7 +233,7 @@ const audit = async (
 	for (const f of formats) {
 		if (!isReportFormat(f))
 			throw new UsageError(
-				`Unknown format "${f}". Use: terminal, json, sarif, markdown, html.`,
+				`Unknown format "${f}". Use: terminal, json, sarif, markdown, html, csv.`,
 			);
 	}
 	const uniqueFormats = [...new Set(formats)] as ReportFormat[];
@@ -248,9 +278,10 @@ const audit = async (
 	if (configPath && showProgress)
 		io.stderr(`\x1b[2mUsing ${configPath}\x1b[0m\n`);
 
-	const target = /^https?:\/\/|^image:/i.test(flags.target)
+	const target = /^https?:\/\/|^image:|^cloud:/i.test(flags.target)
 		? flags.target
 		: resolve(io.cwd, flags.target);
+	const changed = flags.diff ? await diffFiles(target, flags.diff) : undefined;
 
 	const result = await Effect.runPromise(
 		Effect.result(
@@ -280,7 +311,7 @@ const audit = async (
 	}
 	const applied = applySuppressions(result.success, [
 		{
-			source: configPath ?? CONFIG_FILE,
+			source: configPath ? shownPath(io.cwd, configPath) : CONFIG_FILE,
 			rules: config.ignore?.rules,
 			paths: config.ignore?.paths,
 			fingerprints: config.ignore?.fingerprints,
@@ -290,10 +321,14 @@ const audit = async (
 			fingerprints: baseline,
 		},
 	]);
-	const suppressed = applied.suppressed.filter((s) => suppressedTotal(s) > 0);
+	let suppressed = applied.suppressed.filter((s) => suppressedTotal(s) > 0);
 	let report: Report = suppressed.length
 		? { ...applied.report, suppressed }
 		: applied.report;
+	if (changed && flags.diff) {
+		report = limitToChangedFiles(report, flags.diff, changed);
+		suppressed = [...(report.suppressed ?? [])];
+	}
 
 	if (flags.ai || opts.ai)
 		report = await attachInsights(
@@ -350,6 +385,7 @@ const audit = async (
 	if (failOn) {
 		const breached = report.results
 			.flatMap((r) => r.findings)
+			.filter((f) => f.duplicateOf === undefined)
 			.filter((f) => isAtLeast(f.severity, failOn));
 		if (breached.length) {
 			if (!machine && !flags.quiet)

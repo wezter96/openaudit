@@ -2,7 +2,7 @@ import type { Report } from "@openaudit/core/model";
 import { cn } from "@openaudit/ui/lib/utils";
 
 import { LocalDate } from "./local-date";
-import { CATEGORY_LABEL, GRADE_MEANING } from "./meta";
+import { CATEGORY_LABEL, GRADE_MEANING, targetName } from "./meta";
 
 /**
  * The inspection tag: overall grade and per-category scores, styled after the
@@ -21,7 +21,7 @@ export function ScoreTag({
 	const { summary, target } = report;
 	// The engine scores an audit where nothing ran as 100; don't present that as an A.
 	const graded = summary.categories.length > 0;
-	const label = target.url ? hostOf(target.url) : target.input;
+	const label = target.url ? hostOf(target.url) : targetName(target);
 
 	return (
 		<div

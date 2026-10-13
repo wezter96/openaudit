@@ -14,6 +14,7 @@ const TARGET_KINDS: ReadonlyArray<TargetKind> = [
 	"container",
 	"iac",
 	"mobile",
+	"cloud",
 ];
 
 /** Ids come from run_audit; the pattern keeps them safe to use in file names. */
@@ -71,6 +72,8 @@ export type FindingInputShape = z.infer<typeof findingInput>;
 export const finding = findingInput.extend({
 	auditor: z.string(),
 	fingerprint: z.string(),
+	alsoReportedBy: z.array(z.string()).optional(),
+	duplicateOf: z.string().optional(),
 });
 
 const counts = z.object({
@@ -97,12 +100,13 @@ export const summary = z.object({
 
 export const targetInfo = z.object({
 	input: z.string(),
-	type: z.enum(["directory", "file", "url", "image"]),
+	type: z.enum(["directory", "file", "url", "image", "cloud"]),
 	kinds: z.array(targetKind),
 	root: z.string().optional(),
 	url: z.string().optional(),
 	file: z.string().optional(),
 	image: z.string().optional(),
+	cloud: z.string().optional(),
 	technologies: z.array(z.string()),
 });
 

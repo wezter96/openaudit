@@ -3,6 +3,7 @@ import { Schema } from "effect";
 
 import {
 	type AuditorResult,
+	baseName,
 	type Finding,
 	type Report,
 	Report as ReportSchema,
@@ -212,7 +213,9 @@ describe("sarif", () => {
 describe("markdown", () => {
 	const text = toMarkdown(report);
 	test("has a score table and severity groups", () => {
-		expect(text).toContain("## openaudit: .");
+		// The folder name, never the local path.
+		expect(text).toContain("## openaudit: my repo");
+		expect(text).not.toContain("/work/");
 		expect(text).toContain("| Category | Score | Grade |");
 		expect(text).toContain("| security |");
 		expect(text).toContain("### Critical (1)");
@@ -233,47 +236,7 @@ describe("markdown", () => {
 	});
 });
 
-describe("html", () => {
-	const html = toHtml(report);
-	test("is a self-contained, accessible document", () => {
-		expect(html.startsWith("<!doctype html>")).toBe(true);
-		expect(html).toContain('<html lang="en">');
-		expect(html).toContain("<main");
-		expect(html).toContain('<label for="f-q">Search</label>');
-		expect(html).toContain('role="img" aria-label="Overall score');
-		expect(html).toContain("prefers-color-scheme:dark");
-		// No external resources.
-		expect(html).not.toMatch(/<(link|img|iframe)\b/);
-		expect(html).not.toMatch(/\s(src)=["']https?:/);
-		expect(html).toContain("default-src 'none'");
-	});
-
-	test("escapes report strings", () => {
-		expect(html).not.toContain("<script>alert");
-		expect(html).not.toContain("</script><script>alert(2)");
-		expect(html).not.toContain("<img src=x");
-		expect(html).toContain("&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;");
-		expect(html).not.toContain('href="javascript:');
-		// Exactly one script element: ours.
-		expect(html.match(/<script>/g)).toHaveLength(1);
-	});
-
-	test("CSP hashes match the inline style and script", () => {
-		const csp = html.match(/content="(default-src[^"]+)"/)?.[1] ?? "";
-		const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
-		const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "";
-		const hash = (s: string) =>
-			new Bun.CryptoHasher("sha256").update(s).digest("base64");
-		expect(csp).toContain(`'sha256-${hash(script)}'`);
-		expect(csp).toContain(`'sha256-${hash(style)}'`);
-	});
-
-	test("renders filters, findings and auditors", () => {
-		expect(html.match(/<li class="finding/g)).toHaveLength(4);
-		expect(html).toContain('data-severity="critical"');
-		expect(html).toContain("semgrep not found on PATH");
-	});
-});
+// The HTML reporter has its own suite in html-report.test.ts.
 
 describe("terminal", () => {
 	test("plain output without colour", () => {
@@ -417,5 +380,13 @@ describe("hostile report content", () => {
 		expect(toTerminal(report, { color: false, suppressed })).not.toContain(
 			"--baseline",
 		);
+	});
+});
+
+describe("baseName", () => {
+	test("keeps only the last path segment", () => {
+		expect(baseName("/home/me/repos/shop/")).toBe("shop");
+		expect(baseName("C:\\Users\\me\\shop")).toBe("shop");
+		expect(baseName("app-release.apk")).toBe("app-release.apk");
 	});
 });

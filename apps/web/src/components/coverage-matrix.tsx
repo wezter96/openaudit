@@ -2,7 +2,14 @@ import { Check } from "lucide-react";
 
 import { TARGET_LABEL } from "./report/meta";
 
-type Target = "codebase" | "url" | "webapp" | "container" | "iac" | "mobile";
+type Target =
+	| "codebase"
+	| "url"
+	| "webapp"
+	| "container"
+	| "iac"
+	| "mobile"
+	| "cloud";
 
 const TARGETS: ReadonlyArray<{ id: Target; short: string }> = [
 	{ id: "codebase", short: "Code" },
@@ -11,6 +18,7 @@ const TARGETS: ReadonlyArray<{ id: Target; short: string }> = [
 	{ id: "container", short: "Container" },
 	{ id: "iac", short: "IaC" },
 	{ id: "mobile", short: "Mobile" },
+	{ id: "cloud", short: "Cloud" },
 ];
 
 const AREAS: ReadonlyArray<{
@@ -20,8 +28,17 @@ const AREAS: ReadonlyArray<{
 }> = [
 	{
 		area: "Security",
-		checks: "Secrets, injection-prone code, headers, TLS, misconfiguration",
-		covers: ["codebase", "url", "webapp", "container", "iac", "mobile"],
+		checks:
+			"Secrets, injection-prone code, headers, TLS, DNS and email, exposed APIs, misconfiguration",
+		covers: [
+			"codebase",
+			"url",
+			"webapp",
+			"container",
+			"iac",
+			"mobile",
+			"cloud",
+		],
 	},
 	{
 		area: "Accessibility",
@@ -40,7 +57,8 @@ const AREAS: ReadonlyArray<{
 	},
 	{
 		area: "Privacy",
-		checks: "Trackers, cookies, consent, mobile permissions",
+		checks:
+			"Tracking SDKs, PII in logs, trackers and cookies before consent, mobile permissions",
 		covers: ["codebase", "url", "webapp", "mobile"],
 	},
 	{
@@ -49,14 +67,25 @@ const AREAS: ReadonlyArray<{
 		covers: ["codebase", "url", "webapp", "container", "iac", "mobile"],
 	},
 	{
+		area: "Reliability",
+		checks:
+			"Type errors, broken pages and redirects, Kubernetes probes and limits",
+		covers: ["codebase", "url", "webapp", "container", "iac"],
+	},
+	{
+		area: "Maintainability",
+		checks: "Linting, strict typing, duplication, dead code, complexity",
+		covers: ["codebase"],
+	},
+	{
 		area: "Supply chain",
 		checks: "Known-vulnerable dependencies, pinning, unmaintained packages",
 		covers: ["codebase", "container", "iac", "mobile"],
 	},
 	{
 		area: "Compliance",
-		checks: "Licences, cookie consent, policy checks on infrastructure",
-		covers: ["codebase", "url", "webapp", "iac", "mobile"],
+		checks: "Licences, privacy policy signals, cloud benchmarks (CIS)",
+		covers: ["codebase", "url", "cloud"],
 	},
 ];
 

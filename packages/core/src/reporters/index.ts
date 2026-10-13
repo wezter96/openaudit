@@ -1,4 +1,5 @@
 import type { Report } from "../model";
+import { toCsv } from "./csv";
 import { toHtml } from "./html";
 import { toJson } from "./json";
 import { toMarkdown } from "./markdown";
@@ -6,12 +7,14 @@ import { toSarif } from "./sarif";
 import type { SuppressionSummary } from "./shared";
 import { toTerminal } from "./terminal";
 
+export { CSV_COLUMNS, csvCell, toCsv } from "./csv";
 export { type HtmlOptions, toHtml } from "./html";
 export { canonicalize, type JsonOptions, toJson } from "./json";
 export { type MarkdownOptions, toMarkdown } from "./markdown";
 export { type SarifOptions, toSarif, toSarifLog } from "./sarif";
 export { jsonSchemaOf, reportJsonSchema } from "./schema";
 export {
+	baseName,
 	escapeHtml,
 	formatDuration,
 	formatLocation,
@@ -30,6 +33,7 @@ export const REPORT_FORMATS = [
 	"sarif",
 	"markdown",
 	"html",
+	"csv",
 ] as const;
 export type ReportFormat = (typeof REPORT_FORMATS)[number];
 
@@ -40,6 +44,7 @@ export const FORMAT_EXTENSIONS: Record<ReportFormat, string> = {
 	sarif: "sarif",
 	markdown: "md",
 	html: "html",
+	csv: "csv",
 };
 
 export const isReportFormat = (value: string): value is ReportFormat =>
@@ -64,6 +69,8 @@ export const renderReport = (
 			return toMarkdown(report, { suppressed: options.suppressed });
 		case "html":
 			return toHtml(report, { suppressed: options.suppressed });
+		case "csv":
+			return toCsv(report);
 		case "terminal":
 			return toTerminal(report, options);
 	}

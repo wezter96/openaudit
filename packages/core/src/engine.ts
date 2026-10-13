@@ -1,6 +1,7 @@
 import { Duration, Effect } from "effect";
 
 import type { AuditContext, AuditOptions, Auditor } from "./auditor";
+import { correlate, isPrimary } from "./correlate";
 import type { TargetError } from "./errors";
 import {
 	type AuditorResult,
@@ -261,7 +262,7 @@ export const runAudit = (
 			options,
 		);
 
-		const results = yield* Effect.forEach(
+		const ran = yield* Effect.forEach(
 			selected,
 			(auditor) =>
 				Effect.sync(() => emit({ type: "start", auditor })).pipe(
@@ -272,6 +273,7 @@ export const runAudit = (
 				),
 			{ concurrency: input.concurrency ?? 4 },
 		);
+		const results = correlate(ran);
 
 		const finishedAt = new Date();
 		return {
@@ -286,8 +288,12 @@ export const runAudit = (
 		} satisfies Report;
 	});
 
-/** All findings in a report, most severe first. */
+/**
+ * All findings in a report, most severe first. Duplicates of another
+ * auditor's finding are left out; the kept one lists them in `alsoReportedBy`.
+ */
 export const allFindings = (report: Report): ReadonlyArray<Finding> =>
 	report.results
 		.flatMap((r) => r.findings)
+		.filter(isPrimary)
 		.sort((a, b) => severityRank(a.severity) - severityRank(b.severity));

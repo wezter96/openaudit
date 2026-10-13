@@ -48,7 +48,10 @@ export const countSeverities = (
 };
 
 export const summarize = (results: ReadonlyArray<AuditorResult>): Summary => {
-	const findings = results.flatMap((r) => r.findings);
+	// Duplicates confirm a finding another auditor already reported.
+	const findings = results
+		.flatMap((r) => r.findings)
+		.filter((f) => f.duplicateOf === undefined);
 
 	// Only score categories that some auditor actually examined.
 	const examined = new Set<Category>();

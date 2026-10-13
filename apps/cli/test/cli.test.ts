@@ -119,6 +119,58 @@ describe("openaudit audit", () => {
 	});
 });
 
+describe("--diff", () => {
+	test("keeps only findings in files changed since the ref", async () => {
+		const repo = await mkdtemp(join(tmpdir(), "openaudit-diff-"));
+		const git = (...args: string[]) =>
+			Bun.spawnSync(["git", "-C", repo, ...args], {
+				env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: repo },
+			});
+		const risky = "export const run = (input) => eval(input);\n";
+		await writeFile(join(repo, "old.js"), risky);
+		git("init", "-q", "-b", "main");
+		git("-c", "user.email=t@t", "-c", "user.name=t", "add", ".");
+		git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base");
+		git("checkout", "-qb", "feature");
+		await writeFile(join(repo, "new.js"), risky);
+		git("add", ".");
+		git(
+			"-c",
+			"user.email=t@t",
+			"-c",
+			"user.name=t",
+			"commit",
+			"-qm",
+			"feature",
+		);
+
+		const full = await cli([".", "--json", "--only", "code.security"], repo);
+		const files = (r: string) =>
+			JSON.parse(r)
+				.results.flatMap(
+					(x: { findings: { location?: { file?: string } }[] }) => x.findings,
+				)
+				.map((f: { location?: { file?: string } }) => f.location?.file);
+		expect(files(full.stdout)).toEqual(
+			expect.arrayContaining(["old.js", "new.js"]),
+		);
+
+		const diff = await cli(
+			[".", "--json", "--only", "code.security", "--diff", "main"],
+			repo,
+		);
+		expect(diff.code).toBe(0);
+		const report = JSON.parse(diff.stdout);
+		expect([...new Set(files(diff.stdout))]).toEqual(["new.js"]);
+		expect(report.diff).toEqual({ base: "main", changedFiles: 1 });
+		expect(report.suppressed[0].source).toBe("--diff main");
+
+		const bad = await cli([".", "--diff", "--output=/tmp/x"], repo);
+		expect(bad.code).toBe(2);
+		await rm(repo, { recursive: true, force: true });
+	});
+});
+
 describe("openaudit init + config", () => {
 	test("writes a config that the audit command honours", async () => {
 		const project = await mkdtemp(join(tmpdir(), "openaudit-init-"));
@@ -196,7 +248,7 @@ describe("untrusted target config", () => {
 
 	test("only narrows: it cannot enable opt-in or agentic auditors", async () => {
 		const root = await project({
-			only: ["code.hygiene", "code.knip", "code.codeql", "agent"],
+			only: ["code.hygiene", "code.knip", "code.clippy", "agent"],
 		});
 		const res = await cli(["--json"], root);
 		expect(res.code).toBe(0);
@@ -215,11 +267,12 @@ describe("untrusted target config", () => {
 				paths: [".gitignore"],
 			},
 		});
-		const configPath = join(await realpath(root), "openaudit.config.json");
 		const terminal = await cli([], root);
+		// Relative to where openaudit runs, never the absolute local path.
 		expect(terminal.stdout).toContain(
-			`2 findings suppressed by ${configPath} (1 by rule, 1 by path)`,
+			"2 findings suppressed by openaudit.config.json (1 by rule, 1 by path)",
 		);
+		expect(terminal.stdout).not.toContain(await realpath(root));
 		const markdown = await cli(["-f", "markdown"], root);
 		expect(markdown.stdout).toContain("2 findings suppressed by");
 		const json = await cli(["--json", "--fail-on", "medium"], root);
@@ -227,7 +280,7 @@ describe("untrusted target config", () => {
 		expect(json.stderr).toContain("2 findings suppressed by");
 		expect(JSON.parse(json.stdout).summary.counts.medium).toBe(0);
 		expect(JSON.parse(json.stdout).suppressed).toEqual([
-			{ source: configPath, rules: 1, paths: 1, fingerprints: 0 },
+			{ source: "openaudit.config.json", rules: 1, paths: 1, fingerprints: 0 },
 		]);
 
 		const bypass = await cli(

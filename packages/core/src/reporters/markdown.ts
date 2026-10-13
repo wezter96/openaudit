@@ -71,6 +71,10 @@ const findingLines = (f: Finding): string[] => {
 	const lines = [head, `  ${md(f.message)}`];
 	if (f.evidence) lines.push(`  Evidence: ${code(f.evidence)}`);
 	if (f.remediation) lines.push(`  **Fix:** ${md(f.remediation)}`);
+	if (f.alsoReportedBy?.length)
+		lines.push(
+			`  Also reported by ${f.alsoReportedBy.map((a) => code(a)).join(", ")}`,
+		);
 	const refs = (f.references ?? []).flatMap((r) => safeUrl(r) ?? []);
 	if (refs.length)
 		lines.push(`  Refs: ${refs.map((r) => `<${r}>`).join(", ")}`);

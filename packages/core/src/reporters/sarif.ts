@@ -134,6 +134,9 @@ export const toSarifLog = (report: Report) => {
 				severity: f.severity,
 				category: f.category,
 				auditor: f.auditor,
+				...(f.alsoReportedBy?.length
+					? { alsoReportedBy: [...f.alsoReportedBy] }
+					: {}),
 				...(f.confidence ? { confidence: f.confidence } : {}),
 				...(f.evidence ? { evidence: f.evidence } : {}),
 				...(f.tags?.length ? { tags: [...f.tags] } : {}),

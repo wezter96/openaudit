@@ -123,6 +123,10 @@ export const toTerminal = (
 				if (f.evidence) out.push(`     ${paint("dim", block(f.evidence))}`);
 				if (f.remediation)
 					out.push(`     ${paint("green", "fix:")} ${block(f.remediation)}`);
+				if (f.alsoReportedBy?.length)
+					out.push(
+						`     ${paint("dim", `also reported by ${t(f.alsoReportedBy.join(", "))}`)}`,
+					);
 				out.push(`     ${paint("dim", `fingerprint ${t(f.fingerprint)}`)}`);
 			}
 		}

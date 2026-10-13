@@ -19,6 +19,7 @@ const TARGET_KINDS: ReadonlyArray<TargetKind> = [
 	"container",
 	"iac",
 	"mobile",
+	"cloud",
 ];
 
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;

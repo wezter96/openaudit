@@ -36,6 +36,7 @@ export const TargetKindSchema = z.enum([
 	"container",
 	"iac",
 	"mobile",
+	"cloud",
 ]);
 
 export const EngineSchema = z.enum(["builtin", "external", "agentic"]);
@@ -72,6 +73,8 @@ export const FindingSchema = z.object({
 	tags: z.array(z.string()).optional(),
 	auditor: z.string(),
 	fingerprint: z.string(),
+	alsoReportedBy: z.array(z.string()).optional(),
+	duplicateOf: z.string().optional(),
 });
 
 export const ReportSchema = z
@@ -80,12 +83,13 @@ export const ReportSchema = z
 		tool: z.object({ name: z.string(), version: z.string() }),
 		target: z.object({
 			input: z.string(),
-			type: z.enum(["directory", "file", "url", "image"]),
+			type: z.enum(["directory", "file", "url", "image", "cloud"]),
 			kinds: z.array(TargetKindSchema),
 			root: z.string().optional(),
 			url: z.string().optional(),
 			file: z.string().optional(),
 			image: z.string().optional(),
+			cloud: z.string().optional(),
 			technologies: z.array(z.string()),
 		}),
 		startedAt: z.string(),

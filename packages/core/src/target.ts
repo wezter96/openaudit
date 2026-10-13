@@ -91,9 +91,12 @@ export interface ResolvedTarget {
  * Turns user input into a target:
  * - `http(s)://…` → url (+ webapp when `browser` is set)
  * - `image:<ref>` → container image
+ * - `cloud:<provider>` → a live cloud account (aws, azure, gcp, kubernetes)
  * - a directory → codebase, plus container/iac/mobile when detected
  * - a `.apk`/`.aab`/`.ipa` → mobile; a Dockerfile → container; `.tf`/`.yaml` → iac
  */
+const CLOUD_PROVIDERS = new Set(["aws", "azure", "gcp", "kubernetes"]);
+
 export const resolveTarget = (
 	input: string,
 	options: AuditOptions,
@@ -124,6 +127,24 @@ export const resolveTarget = (
 					kinds: ["container"],
 					image,
 					technologies: ["docker"],
+				},
+			};
+		}
+
+		if (input.startsWith("cloud:")) {
+			const cloud = input.slice("cloud:".length).toLowerCase();
+			if (!CLOUD_PROVIDERS.has(cloud))
+				return yield* new TargetError({
+					message: `Unknown cloud provider "${cloud}". Use cloud:aws, cloud:azure, cloud:gcp or cloud:kubernetes.`,
+				});
+			return {
+				root: undefined,
+				info: {
+					input,
+					type: "cloud",
+					kinds: ["cloud"],
+					cloud,
+					technologies: [],
 				},
 			};
 		}

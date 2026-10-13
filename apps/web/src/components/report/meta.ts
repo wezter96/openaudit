@@ -3,6 +3,7 @@ import type {
 	AuditorStatus,
 	Category,
 	Grade,
+	Report,
 	Severity,
 	TargetKind,
 } from "@openaudit/core/model";
@@ -66,6 +67,7 @@ export const TARGET_LABEL: Record<TargetKind, string> = {
 	container: "Container",
 	iac: "Infrastructure as code",
 	mobile: "Mobile build",
+	cloud: "Cloud account",
 };
 
 export const ENGINE_LABEL: Record<AuditorEngine, string> = {
@@ -106,4 +108,16 @@ export const safeHref = (value: string): string | undefined => {
 	} catch {
 		return undefined;
 	}
+};
+
+/** URL, image, cloud provider, or just the folder/file name of a local path. */
+export const targetName = (target: Report["target"]): string => {
+	if (target.url) return target.url;
+	if (target.image) return `image:${target.image}`;
+	if (target.cloud) return `cloud:${target.cloud}`;
+	const path = (target.root ?? target.file ?? target.input).replace(
+		/[\\/]+$/,
+		"",
+	);
+	return path.split(/[\\/]/).pop() || path;
 };

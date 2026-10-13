@@ -1,5 +1,6 @@
 import {
 	type AuditorResult,
+	correlate,
 	type Finding,
 	matchesPattern,
 	type Report,
@@ -73,8 +74,10 @@ export const applySuppressions = (
 		return { ...r, status, findings };
 	});
 
+	// Suppressing a kept finding promotes one of its duplicates.
+	const correlated = correlate(results);
 	return {
-		report: { ...report, results, summary: summarize(results) },
+		report: { ...report, results: correlated, summary: summarize(correlated) },
 		suppressed: counts,
 	};
 };

@@ -173,7 +173,7 @@ jobs:
         run: bunx openaudit . --format sarif,json --out audit --fail-on high
       - name: Upload to code scanning
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: audit/openaudit-report.sarif
       - uses: actions/upload-artifact@v4

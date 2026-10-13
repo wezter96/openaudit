@@ -5,7 +5,7 @@ import { useId, useMemo } from "react";
 import { AuditorTable } from "./auditor-table";
 import { FindingsList } from "./findings-list";
 import { LocalDate } from "./local-date";
-import { formatDuration, SEVERITY_ORDER } from "./meta";
+import { formatDuration, SEVERITY_ORDER, targetName } from "./meta";
 import { ScoreTag } from "./score-tag";
 import { SeverityCountsRow } from "./severity";
 
@@ -28,6 +28,7 @@ export function ReportView({
 		() =>
 			report.results
 				.flatMap((r) => r.findings)
+				.filter((f) => f.duplicateOf === undefined)
 				.sort(
 					(a, b) =>
 						SEVERITY_ORDER.indexOf(a.severity) -
@@ -61,7 +62,7 @@ export function ReportView({
 							id={`${id}-title`}
 							className="break-words font-bold text-2xl tracking-tight sm:text-3xl"
 						>
-							Report for {report.target.url ?? report.target.input}
+							Report for {targetName(report.target)}
 						</h2>
 						<dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
 							<dt className="text-ink-soft">Audited</dt>

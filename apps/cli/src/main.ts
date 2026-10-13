@@ -78,7 +78,7 @@ const auditParams = {
 	),
 	format: list(
 		"format",
-		"Output format(s): terminal, json, sarif, markdown, html. Repeat or comma-separate; several need --out",
+		"Output format(s): terminal, json, sarif, markdown, html, csv. Repeat or comma-separate; several need --out",
 	).pipe(Flag.withAlias("f")),
 	out: opt(
 		Flag.String("out").pipe(Flag.withAlias("o")),
@@ -113,6 +113,10 @@ const auditParams = {
 	baseline: opt(
 		Flag.String("baseline"),
 		"Earlier JSON report; its findings are suppressed (only new findings count)",
+	),
+	diff: opt(
+		Flag.String("diff"),
+		"Only report findings in files changed since this git ref (e.g. origin/main), for pull requests",
 	),
 	concurrency: opt(
 		Flag.Int("concurrency"),
@@ -161,6 +165,7 @@ const toAuditFlags = (p: ParsedAudit): AuditFlags => ({
 	ai: p.ai,
 	model: Option.getOrUndefined(p.model),
 	baseline: Option.getOrUndefined(p.baseline),
+	diff: Option.getOrUndefined(p.diff),
 	concurrency: Option.getOrUndefined(p.concurrency),
 	json: p.json,
 	quiet: p.quiet,
