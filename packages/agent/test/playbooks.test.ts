@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { CATEGORIES } from "@openaudit/core";
 
 import {
-	agenticAuditors,
 	getPlaybook,
+	playbookAuditors,
 	playbooks,
 	renderPlaybook,
 } from "../src";
@@ -51,10 +51,10 @@ describe("playbooks", () => {
 	});
 
 	test("one opt-in agentic auditor per playbook", () => {
-		expect(agenticAuditors.map((a) => a.id)).toEqual(
+		expect(playbookAuditors.map((a) => a.id)).toEqual(
 			playbooks.map((p) => p.id),
 		);
-		for (const a of agenticAuditors) {
+		for (const a of playbookAuditors) {
 			expect(a.engine).toBe("agentic");
 			expect(a.defaultEnabled).toBe(false);
 			expect(a.network).toBe(true);

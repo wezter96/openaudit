@@ -1,0 +1,55 @@
+[
+  {
+    "title": "[HIGH] Order lookup has no ownership check (CWE-639)",
+    "description": "**File:** `src/api/orders.ts` (lines 12, 13)\n**Project:** openaudit\n**Severity:** HIGH  •  **Confidence:** high  •  **Slug:** `idor`\n\n## Finding\n\nGET /orders/:id loads any order by id without comparing it to the session user. CWE-639. Key seen: sk_live_abcdefghijklmnop1234.\n\n## Recommendation\n\nConstrain the query by the authenticated user id.",
+    "severity": "HIGH",
+    "labels": ["security", "project:openaudit", "severity:HIGH", "slug:idor", "confidence:high", "revalidation:true-positive", "missing-owner"],
+    "metadata": {
+      "projectId": "openaudit",
+      "filePath": "src/api/orders.ts",
+      "lineNumbers": [12, 13],
+      "severity": "HIGH",
+      "vulnSlug": "idor",
+      "confidence": "high",
+      "discoveredAt": "2026-10-13T16:49:21.000Z",
+      "runId": "20261013164921-247a73acc45b543b",
+      "revalidation": { "verdict": "true-positive", "reasoning": "Handler reads req.params.id and never checks req.user." },
+      "owners": { "teams": [], "oncall": [], "managers": [] }
+    }
+  },
+  {
+    "title": "[CRITICAL] eval of query string",
+    "description": "**File:** `b.js` (lines 1)\n\n## Finding\n\nreq.query.q reaches eval.\n\n## Recommendation\n\nRemove eval.",
+    "severity": "CRITICAL",
+    "labels": ["security"],
+    "metadata": {
+      "projectId": "openaudit",
+      "filePath": "b.js",
+      "lineNumbers": [1],
+      "severity": "CRITICAL",
+      "vulnSlug": "other-Code Injection!",
+      "confidence": "medium"
+    }
+  },
+  {
+    "title": "[BUG] Off-by-one in pagination",
+    "description": "## Finding\n\nLast page skipped.\n\n## Recommendation\n\nUse <=.",
+    "severity": "BUG",
+    "labels": [],
+    "metadata": { "filePath": "../../etc/passwd", "lineNumbers": [4], "severity": "BUG", "vulnSlug": "pagination", "confidence": "low" }
+  },
+  {
+    "title": "[MEDIUM] Maybe open redirect",
+    "description": "## Finding\n\nRedirect target taken from query.\n\n## Recommendation\n\nAllowlist hosts.",
+    "severity": "MEDIUM",
+    "labels": [],
+    "metadata": { "filePath": "src/r.ts", "lineNumbers": [9], "severity": "MEDIUM", "vulnSlug": "open-redirect", "confidence": "medium", "revalidation": { "verdict": "uncertain", "reasoning": "Depends on proxy config." } }
+  },
+  {
+    "title": "[HIGH] Already dismissed",
+    "description": "## Finding\n\nx\n\n## Recommendation\n\ny",
+    "severity": "HIGH",
+    "labels": [],
+    "metadata": { "filePath": "src/x.ts", "lineNumbers": [1], "severity": "HIGH", "vulnSlug": "xss", "confidence": "high", "revalidation": { "verdict": "false-positive", "reasoning": "Escaped upstream." } }
+  }
+]

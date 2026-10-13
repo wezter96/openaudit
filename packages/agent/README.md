@@ -65,6 +65,14 @@ The available keys are `maxTurns`, `maxBudgetUsd`, `effort` (`low` to `max`, def
 
 The openaudit MCP server serves these playbooks to the agent you already use (Claude Code, Cursor and others). The host agent calls `get_playbook`, does the work with its own tools and permissions, and sends results with `submit_findings`. The playbook text is the same in both modes, and its reporting section matches the `report_finding` fields.
 
+### 3. Vercel deepsec (`--only agent.deepsec`)
+
+`agent.deepsec` wraps [deepsec](https://github.com/vercel-labs/deepsec): a regex pass finds candidate files, then deepsec's own agent reviews the riskiest ones. It is opt-in and runs only when selected explicitly; a config inside the target cannot enable it. Requirements and limits:
+
+- **Install and auth.** A local `deepsec` binary (`npm i -g deepsec@2.3.10`) and an API credential in the environment (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `OPENAI_API_KEY`, or `AI_GATEWAY_API_KEY`). Without a credential it is skipped. It never falls back to deepsec's use of a logged-in `claude`/`codex` CLI.
+- **Cost.** `deepsec process` has no cost flag, so openaudit reviews files in chunks of 5 and stops once deepsec's recorded spend reaches `maxCostUsd` (default `5`) or `maxDuration` (default `30m`). The cap can overshoot by one chunk. Set these under `settings["agent.deepsec"]` in a `--config` file, along with `maxFiles`, `diff` (`true` or a git ref, for CI on changed files), `provider` and `model`.
+- **Trust.** Unlike openaudit's agents, deepsec's reviewer gets `Bash` inside the Agent SDK's OS sandbox, and deepsec continues without the sandbox if it can't start. Run it only on code you trust. openaudit keeps deepsec's state and config lookup in a temp directory, never the target, and overrides `.git/config` keys that make git run commands.
+
 ## Model, auth and cost
 
 - **Model.** The default is `claude-opus-5-5`. Override it with `options.model` (the CLI's model option) or `OPENAUDIT_MODEL`.

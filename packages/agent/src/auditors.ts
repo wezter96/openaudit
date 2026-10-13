@@ -1026,6 +1026,7 @@ export const makeAgenticAuditor = (
 	});
 
 /** One agentic auditor per playbook (engine `agentic`, opt-in). */
-export const agenticAuditors: ReadonlyArray<Auditor> = playbooks.map((p) =>
+/** One agentic auditor per playbook. */
+export const playbookAuditors: ReadonlyArray<Auditor> = playbooks.map((p) =>
 	makeAgenticAuditor(p),
 );
