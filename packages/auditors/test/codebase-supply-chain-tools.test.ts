@@ -807,4 +807,55 @@ describe("hostile project config", () => {
 		},
 		60_000,
 	);
+
+	// A project .npmrc can point npm at a proxy (with strict-ssl off) and so
+	// see the audit request; the audit runs from a scratch copy instead.
+	test.skipIf(!Bun.which("npm"))(
+		"npm audit never reads the project's .npmrc",
+		async () => {
+			let hits = 0;
+			const proxy = Bun.serve({
+				port: 0,
+				fetch: () => {
+					hits++;
+					return new Response("", { status: 502 });
+				},
+			});
+			const root = await mkdtemp(join(tmpdir(), "openaudit-npmrc-"));
+			await writeFile(
+				join(root, "package.json"),
+				'{"name":"t","version":"1.0.0","dependencies":{"minimist":"1.2.0"}}',
+			);
+			await writeFile(
+				join(root, "package-lock.json"),
+				JSON.stringify({
+					name: "t",
+					version: "1.0.0",
+					lockfileVersion: 3,
+					requires: true,
+					packages: {
+						"": {
+							name: "t",
+							version: "1.0.0",
+							dependencies: { minimist: "1.2.0" },
+						},
+						"node_modules/minimist": {
+							version: "1.2.0",
+							resolved:
+								"https://registry.npmjs.org/minimist/-/minimist-1.2.0.tgz",
+						},
+					},
+				}),
+			);
+			await writeFile(
+				join(root, ".npmrc"),
+				`proxy=${proxy.url}\nhttps-proxy=${proxy.url}\nstrict-ssl=false\nnoproxy=\n`,
+			);
+			await runAuditor(npmAudit, root);
+			proxy.stop(true);
+			expect(hits).toBe(0);
+			await rm(root, { recursive: true, force: true });
+		},
+		60_000,
+	);
 });

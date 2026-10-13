@@ -5,8 +5,10 @@ import { Effect } from "effect";
 
 import {
 	candidateFiles,
+	changedFiles,
 	DeepsecSettings,
 	deepsecCommands,
+	GIT_HARDENING_ENV,
 	makeDeepsecAuditor,
 	parseDeepsecExport,
 	recordedCostUsd,
@@ -152,12 +154,45 @@ describe("settings and argv", () => {
 	test("diff mode argv", () => {
 		const paths = { root: "/work/app", exportFile: "/t/e.json" };
 		const ref = deepsecCommands(settings({ diff: "origin/dev" }), paths);
-		const p = ref.process();
-		expect(p[p.indexOf("--diff") + 1]).toBe("origin/dev");
-		expect(p).not.toContain("--files");
+		// openaudit lists changed files itself, commit to commit, so git never
+		// touches the working tree (clean filters) and the cost cap still applies.
+		expect(ref.gitDiff).toEqual([
+			"git",
+			"-C",
+			"/work/app",
+			"diff",
+			"--name-only",
+			"--no-renames",
+			"--diff-filter=AM",
+			"--no-ext-diff",
+			"--no-textconv",
+			"-z",
+			"origin/dev",
+			"HEAD",
+			"--",
+		]);
+		const p = ref.process(["a.ts"]);
+		expect(p).not.toContain("--diff");
+		expect(p[p.indexOf("--files") + 1]).toBe("a.ts");
 		expect(deepsecCommands(settings({ diff: true }), paths).diffRef).toBe(
 			"origin/main",
 		);
+		expect(deepsecCommands(settings({}), paths).gitDiff).toBeUndefined();
+	});
+
+	test("changed files are filtered and capped", () => {
+		expect(
+			changedFiles(
+				"src/a.ts\0../etc/passwd\0-rf\0/abs\0b c.ts\0x,y.ts\0src/a.ts\0lib/b.js\0",
+				5,
+			),
+		).toEqual(["src/a.ts", "lib/b.js"]);
+		expect(changedFiles("a\0b\0c\0", 2)).toEqual(["a", "b"]);
+	});
+
+	test("git hardening overrides command-running config", () => {
+		expect(GIT_HARDENING_ENV.GIT_CONFIG_KEY_0).toBe("core.fsmonitor");
+		expect(GIT_HARDENING_ENV.GIT_CONFIG_VALUE_0).toBe("false");
 	});
 });
 

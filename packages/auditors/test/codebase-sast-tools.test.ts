@@ -362,6 +362,7 @@ describe("sast auditors", () => {
 		};
 		const report = await runWith(trufflehog, none, present, run);
 		expect(cmd).toContain("--no-verification");
+		expect(cmd.some((a) => a.startsWith("--exclude-paths="))).toBe(true);
 		expect(cmd).toContain("--no-update");
 		expect(report.results[0]?.findings).toHaveLength(2);
 		await runWith(trufflehog, none, present, run, {
@@ -398,11 +399,15 @@ describe("sast auditors", () => {
 
 	test("brakeman detects the Rails app", async () => {
 		let cmd: ReadonlyArray<string> = [];
+		let config = "";
 		const report = await runWith(brakeman, sast, present, async (c) => {
 			cmd = c;
+			config = await Bun.file(c[c.indexOf("-c") + 1] ?? "").text();
 			return { code: 0, stdout: text("brakeman.json"), stderr: "" };
 		});
 		expect(cmd[cmd.indexOf("-p") + 1]).toBe(sast);
+		// An empty config file replaces the app's config/brakeman.yml.
+		expect(config).toBe("---\n{}\n");
 		expect(cmd).toContain("--no-exit-on-warn");
 		expect(report.results[0]?.findings).toHaveLength(5);
 	});

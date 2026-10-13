@@ -963,7 +963,7 @@ const jsAudit = (opts: {
 	defineAuditor({
 		id: opts.id,
 		title: opts.title,
-		description: `Runs \`${opts.tool} ${opts.args.join(" ")}\` per lockfile (${opts.lockfiles.join(", ")}). Reads the lockfile only: nothing is installed and no lifecycle script runs. The registry is pinned to registry.npmjs.org so a project .npmrc cannot redirect the request; private registries are therefore not audited.`,
+		description: `Runs \`${opts.tool} ${opts.args.join(" ")}\` per lockfile (${opts.lockfiles.join(", ")}). Runs on a temporary copy of the lockfile and package.json, so nothing is installed, no script runs and the project's .npmrc/bunfig/workspace config is never read. The registry is pinned to registry.npmjs.org; private registries are therefore not audited.`,
 		categories: ["supply-chain", "security"],
 		targets: ["codebase"],
 		engine: "external",
@@ -981,15 +981,39 @@ const jsAudit = (opts: {
 				const bin = yield* requireTool(ctx, opts.tool, opts.install);
 				const findings: FindingInput[] = [];
 				for (const lock of locks) {
+					const text = yield* ws
+						.readText(lock)
+						.pipe(Effect.orElseSucceed(() => ""));
+					const manifest = dirOf(lock)
+						? `${dirOf(lock)}/package.json`
+						: "package.json";
+					const pkg = yield* ws
+						.readText(manifest)
+						.pipe(Effect.orElseSucceed(() => undefined));
+					// Run against copies of the lockfile and package.json only, so the
+					// project's .npmrc / bunfig.toml / pnpm-workspace.yaml / hook files
+					// are never read (they can set proxies, CAs or run code).
+					const scratch = yield* Effect.promise(() =>
+						mkdtemp(join(tmpdir(), "openaudit-js-audit-")),
+					);
 					// Exit 1 = vulnerabilities found (or an error, reported as JSON).
-					const res = yield* run(
-						ctx,
-						[bin, ...opts.args, "--registry", NPM_REGISTRY],
-						{
-							cwd: ws.absolute(dirOf(lock) || "."),
-							okCodes: [0, 1],
-							env: opts.env,
-						},
+					const res = yield* Effect.promise(async () => {
+						await writeFile(join(scratch, baseOf(lock)), text);
+						if (pkg !== undefined)
+							await writeFile(join(scratch, "package.json"), pkg);
+					}).pipe(
+						Effect.andThen(
+							run(ctx, [bin, ...opts.args, "--registry", NPM_REGISTRY], {
+								cwd: scratch,
+								okCodes: [0, 1],
+								env: opts.env,
+							}),
+						),
+						Effect.ensuring(
+							Effect.promise(() =>
+								rm(scratch, { recursive: true, force: true }),
+							),
+						),
 					);
 					const json = yield* parseJson(res.stdout || "{}", opts.tool);
 					const err = errorMessage(json);
@@ -999,9 +1023,6 @@ const jsAudit = (opts: {
 								message: `${opts.tool} audit failed: ${truncate(err, 300)}`,
 							}),
 						);
-					const text = yield* ws
-						.readText(lock)
-						.pipe(Effect.orElseSucceed(() => ""));
 					findings.push(...opts.parse(json, ws.root, lock, text));
 				}
 				return findings;

@@ -34,9 +34,10 @@ import { scrubSecrets } from "./auditors";
  * small chunks, then `deepsec export --format json --out <tmp>/export.json`.
  * `process` has no cost flag (only `init`/`setup` take `--max-cost-usd`), so
  * the cost cap is enforced here between chunks from the `costUsd` deepsec
- * records per file. The overshoot is bounded by one chunk. In diff mode
- * (`process --diff <ref>`) the file set is chosen by deepsec and only the
- * wall-clock limit applies.
+ * records per file. The overshoot is bounded by one chunk. In diff mode the
+ * changed files come from a commit-to-commit `git diff <ref> HEAD` run here
+ * (deepsec's own `--diff` compares the working tree, which runs clean filters
+ * from the target's git config) and go through the same chunked review.
  *
  * deepsec drives a coding agent with shell access to the target: Claude gets
  * Read/Glob/Grep/Bash inside the Agent SDK's OS sandbox (deepsec falls back to
@@ -45,8 +46,9 @@ import { scrubSecrets } from "./auditors";
  * `--only agent.deepsec`), never enabled by a config inside the target, and
  * only runs with explicit credentials in the environment. deepsec's own config
  * file is loaded from cwd upwards, so cwd is a fresh temp dir, never the
- * target. Git runs inside the target in diff mode, so repository config that
- * runs commands (`core.fsmonitor`) is overridden through the environment.
+ * target. deepsec still runs git in the target (remote, rev-parse, log), so
+ * repository config that runs commands (`core.fsmonitor`) is overridden
+ * through the environment.
  */
 
 /** Overrides target `.git/config` keys that make git run commands. */
@@ -163,6 +165,24 @@ export const deepsecCommands = (
 	return {
 		diffRef,
 		scan: ["deepsec", "scan", ...base],
+		/** Tree-to-tree diff: never touches the working tree or index. */
+		gitDiff: diffRef
+			? [
+					"git",
+					"-C",
+					paths.root,
+					"diff",
+					"--name-only",
+					"--no-renames",
+					"--diff-filter=AM",
+					"--no-ext-diff",
+					"--no-textconv",
+					"-z",
+					diffRef,
+					"HEAD",
+					"--",
+				]
+			: undefined,
 		process: (files?: ReadonlyArray<string>) => [
 			"deepsec",
 			"process",
@@ -178,7 +198,8 @@ export const deepsecCommands = (
 			String(CHUNK_SIZE),
 			"--max-turns",
 			"60",
-			...(diffRef ? ["--diff", diffRef] : ["--files", (files ?? []).join(",")]),
+			"--files",
+			(files ?? []).join(","),
 		],
 		export: [
 			"deepsec",
@@ -379,20 +400,28 @@ const readRecords = (dataRoot: string): Array<Record<string, unknown>> => {
 	return records;
 };
 
+/** Chunk files travel through a comma-separated flag: keep them boring. */
+const passableFile = (path: string | undefined): path is string =>
+	!!path && /^[A-Za-z0-9_./@+-]+$/.test(path) && !path.startsWith("-");
+
+/** Paths from `git diff --name-only -z`, filtered and capped. */
+export const changedFiles = (stdout: string, max: number): string[] =>
+	[
+		...new Set(
+			stdout
+				.split("\0")
+				.map((p) => safeRel(p))
+				.filter(passableFile),
+		),
+	].slice(0, max);
+
 /** Files with regex candidates, most suspicious first. */
 export const candidateFiles = (dataRoot: string, max: number): string[] => {
 	const infos: FileInfo[] = [];
 	for (const r of readRecords(dataRoot)) {
 		const path = safeRel(str(r.filePath));
 		const n = Array.isArray(r.candidates) ? r.candidates.length : 0;
-		// Chunk files travel through a comma-separated flag: keep them boring.
-		if (
-			path &&
-			n > 0 &&
-			/^[A-Za-z0-9_./@+-]+$/.test(path) &&
-			!path.startsWith("-")
-		)
-			infos.push({ path, candidates: n });
+		if (passableFile(path) && n > 0) infos.push({ path, candidates: n });
 	}
 	return infos
 		.sort((a, b) => b.candidates - a.candidates || a.path.localeCompare(b.path))
@@ -484,32 +513,40 @@ export const makeDeepsecAuditor = (
 							);
 
 				return yield* Effect.gen(function* () {
-					if (cmds.diffRef) {
-						yield* check("process", yield* run(cmds.process(), remaining()));
+					let files: string[];
+					if (cmds.gitDiff) {
+						const diff = yield* run(cmds.gitDiff, 120_000);
+						if (diff.code !== 0)
+							return yield* Effect.fail(
+								new AuditorError({
+									message: `git diff ${cmds.diffRef} HEAD failed: ${scrubSecrets(diff.stderr).slice(0, 300)}`,
+								}),
+							);
+						files = changedFiles(diff.stdout, settings.maxFiles);
 					} else {
 						yield* check("scan", yield* run(cmds.scan, remaining()));
-						const files = candidateFiles(dataRoot, settings.maxFiles);
-						if (files.length === 0) return [] as FindingInput[];
-						for (let i = 0; i < files.length; i += CHUNK_SIZE) {
-							if (remaining() <= 0) {
-								yield* ctx.log("deepsec: duration budget reached, stopping");
-								break;
-							}
-							const spent = recordedCostUsd(dataRoot);
-							if (spent >= settings.maxCostUsd) {
-								yield* ctx.log(
-									`deepsec: cost cap reached ($${spent.toFixed(2)} of $${settings.maxCostUsd})`,
-								);
-								break;
-							}
-							yield* check(
-								"process",
-								yield* run(
-									cmds.process(files.slice(i, i + CHUNK_SIZE)),
-									remaining(),
-								),
-							);
+						files = candidateFiles(dataRoot, settings.maxFiles);
+					}
+					if (files.length === 0) return [] as FindingInput[];
+					for (let i = 0; i < files.length; i += CHUNK_SIZE) {
+						if (remaining() <= 0) {
+							yield* ctx.log("deepsec: duration budget reached, stopping");
+							break;
 						}
+						const spent = recordedCostUsd(dataRoot);
+						if (spent >= settings.maxCostUsd) {
+							yield* ctx.log(
+								`deepsec: cost cap reached ($${spent.toFixed(2)} of $${settings.maxCostUsd})`,
+							);
+							break;
+						}
+						yield* check(
+							"process",
+							yield* run(
+								cmds.process(files.slice(i, i + CHUNK_SIZE)),
+								remaining(),
+							),
+						);
 					}
 					yield* check("export", yield* run(cmds.export, 120_000));
 					let json: string;

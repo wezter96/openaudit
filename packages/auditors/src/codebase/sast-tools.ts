@@ -497,10 +497,20 @@ export const brakeman = defineAuditor({
 				"brakeman",
 				"Install: gem install brakeman or brew install brakeman (https://brakemanscanner.org).",
 			);
+			// Brakeman reads config/brakeman.yml from the app unless -c names an
+			// existing file, and that config can add Ruby check paths that
+			// Brakeman loads (code execution). Pass an empty config instead.
+			const config = join(
+				tmpdir(),
+				`openaudit-brakeman-${crypto.randomUUID()}.yml`,
+			);
+			yield* Effect.promise(() => Bun.write(config, "---\n{}\n"));
 			const res = yield* runTool(
 				ctx,
 				[
 					bin,
+					"-c",
+					config,
 					"-f",
 					"json",
 					"-q",
@@ -512,6 +522,8 @@ export const brakeman = defineAuditor({
 				],
 				ws.root,
 				[0],
+			).pipe(
+				Effect.ensuring(Effect.promise(() => rm(config, { force: true }))),
 			);
 			return parseBrakemanReport(
 				yield* parseJson(res.stdout, "brakeman"),
