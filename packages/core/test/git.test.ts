@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { changedFilesSince, GitError } from "../src/git";
@@ -44,6 +50,52 @@ describe("changedFilesSince", () => {
 			await expect(changedFilesSince(".", ref)).rejects.toBeInstanceOf(
 				GitError,
 			);
+	});
+
+	test("replace refs in the target cannot hide changed files", async () => {
+		const dir = repo();
+		try {
+			// A commit with main's tree, parented on main, standing in for HEAD.
+			const swap = Bun.spawnSync(
+				[
+					"git",
+					"-C",
+					dir,
+					"commit-tree",
+					"-p",
+					"main",
+					"-m",
+					"x",
+					"main^{tree}",
+				],
+				{ env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: dir } },
+			)
+				.stdout.toString()
+				.trim();
+			git(dir, "replace", "HEAD", swap);
+			expect(await changedFilesSince(dir, "main")).toEqual(["a.ts", "b.ts"]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("grafts in the target cannot hide changed files", async () => {
+		const dir = repo();
+		try {
+			// Graft HEAD in as main's parent, so the merge base becomes HEAD.
+			const sha = (ref: string) =>
+				Bun.spawnSync(["git", "-C", dir, "rev-parse", ref])
+					.stdout.toString()
+					.trim();
+			mkdirSync(join(dir, ".git", "info"), { recursive: true });
+			writeFileSync(
+				join(dir, ".git", "info", "grafts"),
+				`${sha("main")} ${sha("HEAD")}\n`,
+			);
+			expect(await changedFilesSince(dir, "main")).toEqual(["a.ts", "b.ts"]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	test("hostile git config in the target never runs", async () => {

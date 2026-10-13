@@ -7,9 +7,13 @@ import { summarize } from "./scoring";
  * fsmonitor, hooks, diff drivers and filters that run commands. Every git call
  * openaudit makes on a target uses this environment, and compares commits
  * (tree to tree) rather than the working tree, so clean filters and textconv
- * drivers never fire.
+ * drivers never fire. Replace refs (`refs/replace/*`) and grafts
+ * (`info/grafts`) are ignored, so a target cannot rewrite its own history to
+ * hide commits or changes. The graft file is a path that cannot exist.
  */
 export const GIT_HARDENING_ENV: Record<string, string> = {
+	GIT_NO_REPLACE_OBJECTS: "1",
+	GIT_GRAFT_FILE: "/dev/null/no-grafts",
 	GIT_CONFIG_NOSYSTEM: "1",
 	GIT_CONFIG_COUNT: "2",
 	GIT_CONFIG_KEY_0: "core.fsmonitor",

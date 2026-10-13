@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { privacy } from "../src/codebase/privacy";
+import { maskPersonalData, privacy } from "../src/codebase/privacy";
 import { runAuditor } from "./helpers";
 
 const FILES: Record<string, string> = {
@@ -183,6 +183,74 @@ describe("code.privacy", () => {
 				.filter((f) => f.ruleId === rule("tracking-id"))
 				.every((f) => f.severity === "info"),
 		).toBe(true);
+	});
+
+	test("quotes no personal data from the source in findings", async () => {
+		const pii = [
+			"jane.doe@example.org",
+			"415-555-0132",
+			"+44 20 7946 0958",
+			"203.0.113.42",
+			"2001:db8::8a2e:370:7334",
+			"4111 1111 1111 1111",
+			"078-05-1120",
+		];
+		const files: Record<string, string> = {
+			"src/pii.ts": `export const f = (user: any) => {
+  console.log("signup jane.doe@example.org +1 415-555-0132 from 203.0.113.42", user.email);
+  logger.info(\`card 4111 1111 1111 1111 ssn 078-05-1120 for \${user.ssn}\`);
+  posthog.init("k", { session_recording: { maskAllInputs: false } }); // owner jane.doe@example.org
+};
+`,
+			"src/app.py": `log.info(f"login 2001:db8::8a2e:370:7334 {user.email}")\n`,
+			"public/index.html": `<link href="https://fonts.googleapis.com/css2?family=Inter" rel="stylesheet"> <!-- +44 20 7946 0958 -->
+<script>gtag('config', 'G-ABCDE12345'); /* jane.doe@example.org */</script>
+`,
+		};
+		const root = mkdtempSync(join(tmpdir(), "openaudit-privacy-pii-"));
+		try {
+			for (const [path, text] of Object.entries(files)) {
+				mkdirSync(dirname(join(root, path)), { recursive: true });
+				writeFileSync(join(root, path), text);
+			}
+			const findings = (await runAuditor(privacy, root)).results.flatMap(
+				(r) => r.findings,
+			);
+			expect(findings.map((f) => f.ruleId).sort()).toEqual(
+				[
+					"google-fonts",
+					"pii-in-logs",
+					"pii-in-logs",
+					"pii-in-logs",
+					"session-replay-unmasked",
+					"tracking-id",
+					"tracking-sdk-inventory",
+				].map(rule),
+			);
+			const out = JSON.stringify(findings);
+			for (const value of pii) expect(out).not.toContain(value);
+			const signup = findings.find(
+				(f) => f.ruleId === rule("pii-in-logs") && f.location?.line === 2,
+			);
+			expect(signup?.message).toContain("`email`");
+			expect(signup?.evidence).toContain("[email]");
+			expect(signup?.evidence).toContain("user.email");
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test("maskPersonalData names the kind of value and leaves code alone", () => {
+		expect(
+			maskPersonalData(
+				'log("a.b+c@mail.example.com 10.0.0.12 fe80::1ff:fe23:4567:890a +1 (415) 555-0132 4242-4242-4242-4242 078-05-1120")',
+			),
+		).toBe('log("[email] [ip] [ip] [phone] [card] [ssn]")');
+		for (const code of [
+			'log("v1.2.3", 2024-01-01, 12:30:45, Face::Detector, port 8080)',
+			"const ts = 1700000000001; const n = 123456789;",
+		])
+			expect(maskPersonalData(code)).toBe(code);
 	});
 
 	test("reports nothing for a codebase without trackers", async () => {

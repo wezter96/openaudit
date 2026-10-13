@@ -437,6 +437,67 @@ const piiIdentifier = (expr: string): string | undefined => {
 	);
 };
 
+/* ------------------------------ PII in evidence ----------------------------- */
+
+const luhn = (digits: string): boolean => {
+	let sum = 0;
+	for (let i = 0; i < digits.length; i++) {
+		let d = Number(digits[digits.length - 1 - i]);
+		if (i % 2 === 1) d = d * 2 > 9 ? d * 2 - 9 : d * 2;
+		sum += d;
+	}
+	return sum % 10 === 0;
+};
+
+/** Personal-data literals, in the order they are masked. */
+const PERSONAL_DATA: ReadonlyArray<{
+	re: RegExp;
+	label: string;
+	keep?: (m: string) => boolean;
+}> = [
+	{
+		re: /[\w.%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g,
+		label: "email",
+	},
+	{
+		re: /(?<![\w.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\w.])/g,
+		label: "ip",
+	},
+	{
+		re: /(?<![\w:])(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}(?![\w:])|(?<![\w:])(?:[0-9a-f]{1,4}:){1,6}(?::[0-9a-f]{1,4}){1,6}(?![\w:])/gi,
+		label: "ip",
+		keep: (m) => !/\d/.test(m),
+	},
+	{
+		re: /(?<![\w.-])(?:\d{13,19}|\d{4}(?:[ -]\d{4}){2}[ -]\d{1,7}|\d{4}[ -]\d{6}[ -]\d{5})(?![\w.-])/g,
+		label: "card",
+		keep: (m) => !luhn(m.replace(/\D/g, "")),
+	},
+	{ re: /(?<![\w-])\d{3}-\d{2}-\d{4}(?![\w-])/g, label: "ssn" },
+	{
+		re: /(?<![\w.+])(?:\+\d{1,3}[ .-]?)?(?:\(\d{1,4}\)[ .-]?)?\d{2,4}(?:[ .-]\d{2,4}){1,3}(?![\w.])|\+\d{8,15}\b/g,
+		label: "phone",
+		keep: (m) =>
+			m.replace(/\D/g, "").length < 9 || /^\d{4}-\d{2}-\d{2}\b/.test(m),
+	},
+];
+
+/**
+ * Replaces personal-data literals (emails, IP addresses, card-like numbers,
+ * SSNs, phone numbers) in quoted source with a placeholder naming the kind,
+ * so shared reports point at code without repeating anyone's data.
+ */
+export const maskPersonalData = (line: string): string =>
+	PERSONAL_DATA.reduce(
+		(out, { re, label, keep }) =>
+			out.replace(re, (m) => (keep?.(m) ? m : `[${label}]`)),
+		line,
+	);
+
+/** A source line as evidence: credentials and personal data masked. */
+const evidenceOf = (line: string, max?: number) =>
+	truncate(maskPersonalData(scrubLine(line)), max);
+
 /* -------------------------------- scanning -------------------------------- */
 
 const finding = (
@@ -470,7 +531,7 @@ const scanPiiInLogs = (file: SourceFile): FindingInput[] => {
 					severity: "medium",
 					message: `A logging call includes \`${truncate(id, 40)}\`, which looks like personal or sensitive data. Logs are copied to third-party aggregators, kept for long periods and widely readable, which defeats access controls and retention limits on the original data.`,
 					location: { file: path, line: lineNo },
-					evidence: truncate(scrubLine(line)),
+					evidence: evidenceOf(line),
 					remediation:
 						"Log opaque identifiers (user id, request id) instead of the value, or mask/hash it before logging. Add a redaction filter to the logger for known field names.",
 					references: [
@@ -504,7 +565,7 @@ const scanReplayMasking = (file: SourceFile): FindingInput[] => {
 					severity: "medium",
 					message: `Session recording is configured with masking turned off: ${rule.what}. Recordings can then contain credentials, health or payment data and identify visitors without their knowledge.`,
 					location: { file: path, line: lineOf(index) },
-					evidence: truncate(scrubLine(line)),
+					evidence: evidenceOf(line),
 					remediation:
 						"Keep input masking on (maskAllInputs: true), mask or block sensitive elements by selector, record only after consent and exclude checkout, account and health pages.",
 					references: [cweUrl(359)],
@@ -571,7 +632,7 @@ const scanTrackingIds = (file: SourceFile): IdHit[] => {
 					severity: "info",
 					message: `${rule.name} ${id} is hard-coded. It is public by design, not a secret, but it shows which tracking accounts the project reports to; list them in your records of processing and make sure they load only after consent.`,
 					location: { file: path, line: lineOf(index) },
-					evidence: truncate(line, 160),
+					evidence: evidenceOf(line),
 					remediation:
 						"Move the ID to configuration per environment so that staging and test builds do not report to production accounts.",
 					references: ["https://gdpr-info.eu/art-30-gdpr/"],
@@ -599,7 +660,7 @@ const scanGoogleFonts = (file: SourceFile): FindingInput[] => {
 				message:
 					"Fonts are fetched from fonts.googleapis.com / fonts.gstatic.com, so every visitor's IP address is sent to Google. A German court held this to violate GDPR without consent (LG München I, 3 O 17493/20).",
 				location: { file: path, line: n + 1 },
-				evidence: truncate(line, 160),
+				evidence: evidenceOf(line),
 				remediation:
 					"Self-host the font files (download them, serve them from your own origin, or use a bundler/framework font loader that does so at build time).",
 				references: ["https://developers.google.com/fonts/faq/privacy"],

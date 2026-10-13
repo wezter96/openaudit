@@ -1,7 +1,17 @@
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+	lstat,
+	mkdir,
+	mkdtemp,
+	readdir,
+	readFile,
+	realpath,
+	rm,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
 	type AuditContext,
 	AuditorError,
@@ -69,17 +79,146 @@ export const gitHardeningEnv = (
 export const cloneEnv = (home: string) =>
 	gitHardeningEnv(home, [["protocol.file.allow", "always"]]);
 
-export const cloneArgs = (git: string, source: string, dest: string) => [
+/**
+ * Environment for git and gitleaks on the mirror. Pins the repository to the
+ * mirror, so an inherited `GIT_DIR`, `GIT_COMMON_DIR` or object directory
+ * cannot point the scan at something else.
+ */
+export const scanEnv = (home: string, mirror: string) => ({
+	...gitHardeningEnv(home),
+	GIT_DIR: mirror,
+	GIT_COMMON_DIR: mirror,
+	GIT_OBJECT_DIRECTORY: join(mirror, "objects"),
+	GIT_ALTERNATE_OBJECT_DIRECTORIES: "",
+});
+
+const shellQuote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`;
+
+/**
+ * The source side of the clone, run by git through `sh`. `--strict` makes
+ * upload-pack serve exactly the confined git dir instead of looking for a
+ * `.git` or gitfile inside it. The target's own config could hide refs from
+ * the mirror (`uploadpack.hideRefs`); command-line config is read last, so
+ * these entries expose every ref again. Grafts are switched off so the pack
+ * follows the real parents (git does not pass our environment through).
+ */
+export const uploadPackCommand = (git: string) =>
+	[
+		`GIT_GRAFT_FILE=${shellQuote(GIT_HARDENING_ENV.GIT_GRAFT_FILE ?? "")}`,
+		shellQuote(git),
+		"-c",
+		shellQuote("transfer.hideRefs=!refs"),
+		"-c",
+		shellQuote("transfer.hideRefs=!HEAD"),
+		"upload-pack",
+		"--strict",
+	].join(" ");
+
+/**
+ * Mirrors `gitDir` (from `confineGitDir`). A `file://` URL, unlike a path,
+ * is not resolved by the clone itself, which would follow a `.git` gitfile
+ * planted inside the git dir.
+ */
+export const cloneArgs = (git: string, gitDir: string, dest: string) => [
 	git,
 	"clone",
 	"--mirror",
 	"--no-local",
 	"--no-hardlinks",
 	"--quiet",
+	"--upload-pack",
+	uploadPackCommand(git),
 	"--",
-	source,
+	pathToFileURL(gitDir).href,
 	dest,
 ];
+
+/* -------------------------------------------------------------------------- */
+/*                                 Confinement                                */
+/* -------------------------------------------------------------------------- */
+
+const within = (root: string, path: string) =>
+	path === root || path.startsWith(`${root}${sep}`);
+
+/** First symlink under `dir` (not followed), if any. */
+const findSymlink = async (dir: string): Promise<string | undefined> => {
+	for (const entry of await readdir(dir, { withFileTypes: true })) {
+		const path = join(dir, entry.name);
+		if (entry.isSymbolicLink()) return path;
+		if (entry.isDirectory()) {
+			const found = await findSymlink(path);
+			if (found) return found;
+		}
+	}
+	return undefined;
+};
+
+const realpathOrUndefined = (path: string) =>
+	realpath(path).catch(() => undefined);
+
+export type ConfinedGitDir =
+	| { readonly gitDir: string }
+	| { readonly refused: string };
+
+/**
+ * Resolves the target's git directory and refuses any repository layout that
+ * would make git read objects or refs from outside the target root: a `.git`
+ * symlink, a gitfile or `commondir` pointing outside, symlinks inside the git
+ * directory, or `objects/info/alternates`. Otherwise secrets from another
+ * repository on the auditor's machine would be reported as the target's.
+ */
+export const confineGitDir = async (root: string): Promise<ConfinedGitDir> => {
+	const refuse = (why: string) => ({
+		refused: `${why}, so git could read repository data from outside the target; the history scan was refused.`,
+	});
+	const top = await realpath(root);
+	const dotGit = join(top, ".git");
+	const st = await lstat(dotGit).catch(() => undefined);
+	if (!st) return { refused: "Target is not the root of a git repository" };
+	if (st.isSymbolicLink()) return refuse(".git is a symlink");
+
+	let gitDir = dotGit;
+	if (st.isFile()) {
+		const pointer = /^gitdir: (.+)$/m.exec(await readFile(dotGit, "utf8"));
+		const resolved =
+			pointer?.[1] &&
+			(await realpathOrUndefined(resolve(top, pointer[1].trim())));
+		if (!resolved || !within(top, resolved))
+			return refuse(
+				".git is a gitfile that points outside the target (as in a linked worktree or submodule; audit the repository that owns it)",
+			);
+		gitDir = resolved;
+	} else if (!st.isDirectory())
+		return { refused: "Target is not the root of a git repository" };
+
+	const label = (path: string) => relative(top, path) || ".";
+	const dirs = [gitDir];
+	const common = await readFile(join(gitDir, "commondir"), "utf8").catch(
+		() => undefined,
+	);
+	if (common !== undefined) {
+		// Like git, strip only trailing line breaks.
+		const resolved = await realpathOrUndefined(
+			resolve(gitDir, common.replace(/[\r\n]+$/, "")),
+		);
+		if (!resolved || !within(top, resolved))
+			return refuse(`${label(gitDir)}/commondir points outside the target`);
+		dirs.push(resolved);
+	}
+	for (const dir of new Set(dirs)) {
+		const link = await findSymlink(dir);
+		if (link) return refuse(`${label(link)} is a symlink`);
+		const alternates = await readFile(
+			join(dir, "objects", "info", "alternates"),
+			"utf8",
+		).catch(() => "");
+		if (alternates.split("\n").some((l) => l && !l.startsWith("#")))
+			return refuse(
+				`${label(dir)}/objects/info/alternates borrows objects from another object store (run \`git repack -a -d\` and delete it to scan this repository)`,
+			);
+	}
+	return { gitDir };
+};
 
 /* -------------------------------------------------------------------------- */
 /*                                   Parsing                                  */
@@ -192,6 +331,41 @@ export const parseSecretsHistory = (
 	return findings;
 };
 
+/**
+ * An info finding when the scan could not see all of history, so a clean
+ * result is not mistaken for a complete one. A `shallow` file (which a
+ * hostile repository can also plant to hide old commits) cuts history at its
+ * boundary; `maxCommits` keeps only the newest commits.
+ */
+export const incompleteHistory = (
+	shallow: boolean,
+	commits: number,
+	maxCommits: number,
+): FindingInput[] => {
+	const reasons = [
+		shallow
+			? "The repository is shallow (it has a `shallow` file), so commits beyond its shallow boundary are missing and were not scanned."
+			: "",
+		commits > maxCommits
+			? `Only the newest ${maxCommits} of ${commits} commits were scanned (settings["${ID}"].maxCommits).`
+			: "",
+	].filter(Boolean);
+	if (reasons.length === 0) return [];
+	return [
+		{
+			ruleId: `${ID}/incomplete-history`,
+			title: "Git history scan is incomplete",
+			severity: "info",
+			category: "security",
+			message: `${reasons.join(" ")} Secrets in the unscanned commits are not reported.`,
+			remediation: shallow
+				? "Scan a full clone (`git fetch --unshallow`, or `fetch-depth: 0` in actions/checkout)."
+				: `Raise settings["${ID}"].maxCommits to cover the whole history.`,
+			confidence: "high",
+		},
+	];
+};
+
 /* -------------------------------------------------------------------------- */
 /*                                  Auditor                                   */
 /* -------------------------------------------------------------------------- */
@@ -217,7 +391,7 @@ export const secretsHistory = defineAuditor({
 	id: ID,
 	title: "gitleaks git-history secret scan",
 	description:
-		"Scans the full git history (all refs, newest settings[\"code.secrets-history\"].maxCommits, default 5000) with gitleaks for secrets that were committed and later removed. The repository is first copied into a bare mirror in a temp dir and scanned there with git config, hooks, attributes and textconv/fsmonitor drivers neutralised, so a hostile .git/config cannot execute code. The target's own .gitleaks.toml, .gitleaksignore and inline gitleaks:allow comments are deliberately ignored (a repository must not be able to allow-list its own leaks); gitleaks' built-in rules apply. Slow on large histories, so opt-in.",
+		"Scans the full git history (all refs, newest settings[\"code.secrets-history\"].maxCommits, default 5000) with gitleaks for secrets that were committed and later removed. The repository is first copied into a bare mirror in a temp dir and scanned there with git config, hooks, attributes and textconv/fsmonitor drivers neutralised, so a hostile .git/config cannot execute code. Repositories whose git data reaches outside the target (an outside gitfile or commondir, alternates, symlinks in .git) are refused; replace refs, grafts and hidden refs cannot hide commits, and shallow or truncated history is reported as incomplete. The target's own .gitleaks.toml, .gitleaksignore and inline gitleaks:allow comments are deliberately ignored (a repository must not be able to allow-list its own leaks); gitleaks' built-in rules apply. Slow on large histories, so opt-in.",
 	categories: ["security"],
 	targets: ["codebase"],
 	engine: "external",
@@ -226,8 +400,14 @@ export const secretsHistory = defineAuditor({
 	run: (ctx) =>
 		Effect.gen(function* () {
 			const ws = yield* requireWorkspace(ctx);
-			if (!existsSync(join(ws.root, ".git")))
-				return yield* skip("Target is not the root of a git repository");
+			const confined = yield* Effect.tryPromise({
+				try: () => confineGitDir(ws.root),
+				catch: (cause) =>
+					new AuditorError({
+						message: `Could not inspect the git directory: ${cause instanceof Error ? cause.message : String(cause)}`,
+					}),
+			});
+			if ("refused" in confined) return yield* skip(confined.refused);
 			const bin = yield* requireTool(
 				ctx,
 				"gitleaks",
@@ -246,14 +426,23 @@ export const secretsHistory = defineAuditor({
 				const reportPath = join(tmp, "report.json");
 				yield* Effect.promise(() => Promise.all([mkdir(home), mkdir(empty)]));
 
-				const cloned = yield* ctx.exec.run(cloneArgs(git, ws.root, clone), {
-					cwd: tmp,
-					env: cloneEnv(home),
-					timeoutMs: 10 * 60_000,
-				});
+				const cloned = yield* ctx.exec.run(
+					cloneArgs(git, confined.gitDir, clone),
+					{ cwd: tmp, env: cloneEnv(home), timeoutMs: 10 * 60_000 },
+				);
 				if (cloned.code !== 0) return yield* fail("git clone", cloned);
 
-				const env = gitHardeningEnv(home);
+				const env = scanEnv(home, clone);
+				const counted = yield* ctx.exec.run(
+					[git, "rev-list", "--all", "--count"],
+					{ cwd: tmp, env, timeoutMs: 5 * 60_000 },
+				);
+				if (counted.code !== 0) return yield* fail("git rev-list", counted);
+				const incomplete = incompleteHistory(
+					existsSync(join(clone, "shallow")),
+					Number(counted.stdout.trim()),
+					maxCommits,
+				);
 				const scan = yield* ctx.exec.run(
 					[
 						bin,
@@ -271,7 +460,7 @@ export const secretsHistory = defineAuditor({
 						"--gitleaks-ignore-path",
 						empty,
 						"--log-opts",
-						`--no-textconv --no-ext-diff --full-history --all -n ${maxCommits}`,
+						`--no-textconv --no-ext-diff --no-mailmap --full-history --all -n ${maxCommits}`,
 					],
 					{ cwd: tmp, env, timeoutMs: 15 * 60_000 },
 				);
@@ -322,7 +511,7 @@ export const secretsHistory = defineAuditor({
 							);
 					}
 				}
-				return parseSecretsHistory(json, stillAtHead);
+				return [...parseSecretsHistory(json, stillAtHead), ...incomplete];
 			}).pipe(
 				Effect.ensuring(
 					Effect.promise(() => rm(tmp, { recursive: true, force: true })),
