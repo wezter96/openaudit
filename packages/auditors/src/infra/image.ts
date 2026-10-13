@@ -293,6 +293,10 @@ export const image = defineAuditor({
 						"--quiet",
 						"--scanners",
 						"vuln,secret",
+						// Set for remote (HTTP) clients: never read the local daemon or paths.
+						...(ctx.options.settings?.["container.image"]?.registryOnly === true
+							? ["--image-src", "remote"]
+							: []),
 						...(ctx.options.offline
 							? ["--skip-db-update", "--offline-scan"]
 							: []),
@@ -316,6 +320,15 @@ export const image = defineAuditor({
 				}
 				trivyError = res.stderr.trim().split("\n").slice(-3).join(" ");
 			}
+
+			if (ctx.options.settings?.["container.image"]?.registryOnly === true)
+				return yield* trivyError
+					? Effect.fail(
+							new AuditorError({ message: `trivy failed: ${trivyError}` }),
+						)
+					: skip(
+							"Remote image scans need Trivy; the local docker daemon is not used for remote clients.",
+						);
 
 			const docker = yield* ctx.exec.which("docker");
 			if (!docker)

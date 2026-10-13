@@ -1,4 +1,18 @@
 export {
+	DEFAULT_HTTP_HOST,
+	DEFAULT_HTTP_PORT,
+	defaultTokenFile,
+	type HttpServerHandle,
+	type HttpServerOptions,
+	isLoopbackHost,
+	isRegistryImageRef,
+	makeTargetPolicy,
+	registryHost,
+	startHttpServer,
+	tokenMatches,
+	writeTokenFile,
+} from "./http";
+export {
 	breaches,
 	diffReports,
 	isReportId,

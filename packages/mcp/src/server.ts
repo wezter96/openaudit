@@ -12,16 +12,25 @@ import {
 	type AuditEvent,
 	type AuditOptions,
 	type Auditor,
+	AuditorError,
 	type Category,
 	CoreLive,
 	changedFilesSince,
+	DEFAULT_GUARDED_LIMITS,
+	Exec,
 	type FindingInput,
+	type GuardOptions,
+	guardedHttpLayer,
+	type Http,
+	isPinnableUrlAuditor,
 	limitToChangedFiles,
 	makeWorkspace,
 	type Report,
+	resolvePublicUrl,
 	resolveTarget,
 	runAudit,
 	type Severity,
+	SsrfError,
 	selectAuditors,
 	type TargetKind,
 	toCsv,
@@ -30,8 +39,9 @@ import {
 	toMarkdown,
 	toSarif,
 	VERSION,
+	Workspaces,
 } from "@openaudit/core";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { z } from "zod";
 
 import {
@@ -56,6 +66,20 @@ export interface ServerOptions {
 	readonly store?: ReportStore;
 	/** Base directory for relative targets. Defaults to `process.cwd()`. */
 	readonly cwd?: string;
+	/**
+	 * Maps a client-supplied target to what gets audited, or throws to refuse it.
+	 * Stdio leaves this unset (local trust); the HTTP transport confines paths to roots.
+	 */
+	readonly resolveInput?: (target: string) => Promise<string>;
+	/** Set false where the server owner pays for agentic auditors (HTTP). Default true. */
+	readonly allowAgentic?: boolean;
+	/**
+	 * When set, URL targets must resolve to public addresses and every request
+	 * the audit makes is pinned to the validated IP. Only pinnable auditors run.
+	 */
+	readonly urlGuard?: GuardOptions;
+	/** Make image scanners pull from the registry only (never the local daemon). */
+	readonly registryImagesOnly?: boolean;
 }
 
 /** Free-form playbook so host agents can submit issues found outside a playbook. */
@@ -184,20 +208,31 @@ const run = <A, E extends { readonly message: string }>(
 	);
 
 export const createServer = (options: ServerOptions = {}): McpServer => {
-	const auditors = options.auditors ?? [
-		...builtinAuditors,
-		...Agent.agenticAuditors,
-	];
+	const allowAgentic = options.allowAgentic ?? true;
+	const auditors = (
+		options.auditors ?? [...builtinAuditors, ...Agent.agenticAuditors]
+	).filter((a) => allowAgentic || a.engine !== "agentic");
+	const refuseAgentic = (agentic: boolean | undefined) => {
+		if (agentic && !allowAgentic)
+			throw new Error(
+				"agentic auditors are disabled on this server because they spend the server owner's API key (start it with --allow-agentic)",
+			);
+	};
+	const guard = options.urlGuard;
+	const registryOnly = options.registryImagesOnly ?? false;
+	const isUrl = (t: string) => /^https?:\/\//i.test(t);
 	const playbooks = [
 		...(options.playbooks ?? Agent.playbooks),
 		MANUAL_PLAYBOOK,
 	];
 	const store = options.store ?? new ReportStore();
 	const cwd = options.cwd ?? process.cwd();
-	const resolveInput = (target: string) =>
-		/^https?:\/\/|^image:|^cloud:/i.test(target)
-			? target
-			: resolve(cwd, target);
+	const resolveInput: (target: string) => Promise<string> =
+		options.resolveInput ??
+		(async (target) =>
+			/^https?:\/\/|^image:|^cloud:/i.test(target)
+				? target
+				: resolve(cwd, target));
 
 	const server = new McpServer(
 		{ name: "openaudit", title: "openaudit", version: VERSION },
@@ -266,9 +301,10 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 			annotations: { readOnlyHint: true, openWorldHint: false },
 		},
 		async ({ target, browser, agentic }) => {
+			refuseAgentic(agentic);
 			const opts: AuditOptions = { browser, agentic };
 			const res = await run(
-				resolveTarget(resolveInput(target), opts, makeWorkspace),
+				resolveTarget(await resolveInput(target), opts, makeWorkspace),
 			);
 			if (!res.ok) return errorResult(res.error);
 			const info = res.value.info;
@@ -370,7 +406,9 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 			},
 		},
 		async (args, extra) => {
+			refuseAgentic(args.agentic);
 			const progressToken = extra._meta?.progressToken;
+			let runAuditors: ReadonlyArray<Auditor> = auditors;
 			let total = 0;
 			let done = 0;
 			const notify = (message: string) => {
@@ -382,7 +420,7 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 					})
 					.catch(() => {});
 			};
-			const options: AuditOptions = {
+			let options: AuditOptions = {
 				offline: args.offline,
 				browser: args.browser,
 				maxPages: args.maxPages,
@@ -398,7 +436,7 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 			const onEvent = (event: AuditEvent) => {
 				if (event.type === "target") {
 					total = selectAuditors(
-						auditors,
+						runAuditors,
 						event.target.kinds,
 						selection,
 						options,
@@ -411,7 +449,52 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 					);
 				}
 			};
-			const target = resolveInput(args.target);
+			const target = await resolveInput(args.target);
+			// Guarded URL audits: validate and pin the target, run only auditors whose
+			// traffic goes through the guarded Http service, and allow no subprocesses.
+			if (registryOnly && /^image:/i.test(target))
+				options = {
+					...options,
+					settings: {
+						...options.settings,
+						"container.image": { registryOnly: true },
+					},
+				};
+			let infra: Layer.Layer<Http | Exec | Workspaces> = CoreLive;
+			if (guard && isUrl(target)) {
+				if (args.browser)
+					return errorResult(
+						"browser audits are disabled for URL targets on this server (start it with --allow-private-targets to lift URL restrictions)",
+					);
+				try {
+					const { address } = await resolvePublicUrl(target, guard);
+					options = {
+						...options,
+						browser: false,
+						settings: address
+							? { "web.tls": { connectHost: address } }
+							: undefined,
+					};
+				} catch (error) {
+					if (error instanceof SsrfError) return errorResult(error.message);
+					throw error;
+				}
+				runAuditors = auditors.filter(isPinnableUrlAuditor);
+				infra = Layer.mergeAll(
+					guardedHttpLayer(guard, DEFAULT_GUARDED_LIMITS),
+					Layer.succeed(Exec, {
+						which: () => Effect.succeed(undefined),
+						run: () =>
+							Effect.fail(
+								new AuditorError({
+									message:
+										"External tools are disabled for guarded URL targets",
+								}),
+							),
+					}),
+					Workspaces.layer,
+				);
+			}
 			let changed: string[] | undefined;
 			if (args.diffBase !== undefined) {
 				try {
@@ -425,14 +508,14 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 			const res = await run(
 				runAudit({
 					target,
-					auditors,
+					auditors: runAuditors,
 					options,
 					selection,
 					// Our own saved reports must not be audited on the next run.
 					suppress: { paths: [".openaudit/**"] },
 					concurrency: args.concurrency,
 					onEvent,
-				}).pipe(Effect.provide(CoreLive)),
+				}).pipe(Effect.provide(infra)),
 			);
 			if (!res.ok) return errorResult(res.error);
 			const report =
@@ -693,7 +776,7 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 				: undefined;
 			if (!info && target) {
 				const res = await run(
-					resolveTarget(resolveInput(target), {}, makeWorkspace),
+					resolveTarget(await resolveInput(target), {}, makeWorkspace),
 				);
 				if (res.ok) info = res.value.info;
 			}
@@ -751,7 +834,7 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 			if (id) base = getReport(id);
 			else if (target) {
 				const res = await run(
-					runAudit({ target: resolveInput(target), auditors: [] }).pipe(
+					runAudit({ target: await resolveInput(target), auditors: [] }).pipe(
 						Effect.provide(CoreLive),
 					),
 				);

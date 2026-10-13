@@ -165,8 +165,12 @@ describe("html document", () => {
 		expect(html).toContain("prefers-color-scheme:dark");
 		expect(html).toContain("@media print");
 		expect(markup.match(/<h1[\s>]/g)).toHaveLength(1);
-		// No external resources, no inline handlers.
-		expect(html).not.toMatch(/<(link|img|iframe)\b/);
+		// No external resources, no inline handlers. The one <link> is the
+		// favicon, inlined as a data: URI.
+		expect(html).not.toMatch(/<(img|iframe)\b/);
+		const links = html.match(/<link\b[^>]*>/g) ?? [];
+		expect(links).toHaveLength(1);
+		expect(links[0]).toContain('rel="icon" href="data:image/svg+xml,');
 		expect(html).not.toMatch(/\s(src)=["']https?:/);
 		expect(markup).not.toMatch(/<[^>]*\son[a-z]+=/i);
 		expect(html).toContain("default-src 'none'");

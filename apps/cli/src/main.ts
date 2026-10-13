@@ -256,15 +256,133 @@ export const main = async (argv: ReadonlyArray<string>): Promise<number> => {
 			exit(initCommand({ force: p.force, dir: Option.getOrUndefined(p.dir) })),
 	).pipe(Command.withDescription("Create openaudit.config.json"));
 
-	const mcp = Command.make("mcp", {}, () =>
-		Effect.promise(async () => {
-			const { startStdioServer } = await import("@openaudit/mcp");
-			await startStdioServer();
-			code = -1; // keep the process alive while the client is connected
-		}),
+	const mcp = Command.make(
+		"mcp",
+		{
+			http: bool(
+				"http",
+				"Serve MCP over Streamable HTTP instead of stdio (loopback by default)",
+			),
+			host: opt(Flag.String("host"), "HTTP bind address (default 127.0.0.1)"),
+			port: opt(Flag.Int("port"), "HTTP port (default 7337)"),
+			token: opt(
+				Flag.String("token"),
+				"HTTP bearer token (or OPENAUDIT_MCP_TOKEN); generated on loopback if omitted, required off loopback",
+			),
+			root: list(
+				"root",
+				"HTTP: directory that local targets must resolve inside (repeatable)",
+			),
+			allowOrigin: list(
+				"allow-origin",
+				"HTTP: browser Origin allowed to connect (repeatable)",
+			),
+			allowHost: list(
+				"allow-host",
+				"HTTP: extra Host header value accepted (repeatable)",
+			),
+			allowCloud: bool(
+				"allow-cloud",
+				"HTTP: accept cloud:<provider> targets (uses the server's credentials)",
+			),
+			allowImages: bool(
+				"allow-images",
+				"HTTP: accept image:<ref> targets on non-loopback binds (registry host is still checked)",
+			),
+			allowAgentic: bool(
+				"allow-agentic",
+				"HTTP: let clients run agentic auditors (spends the server's ANTHROPIC_API_KEY)",
+			),
+			allowPrivateTargets: bool(
+				"allow-private-targets",
+				"HTTP: allow URL targets on private/loopback/metadata addresses (non-loopback binds only block them by default)",
+			),
+		},
+		(p) =>
+			Effect.promise(async () => {
+				const mcpModule = await import("@openaudit/mcp");
+				const httpOnly =
+					Option.isSome(p.host) ||
+					Option.isSome(p.port) ||
+					Option.isSome(p.token);
+				if (!p.http) {
+					if (
+						httpOnly ||
+						p.root.length ||
+						p.allowOrigin.length ||
+						p.allowHost.length ||
+						p.allowCloud ||
+						p.allowImages ||
+						p.allowAgentic ||
+						p.allowPrivateTargets
+					) {
+						process.stderr.write(
+							"These options need --http (stdio has no network settings).\n",
+						);
+						code = EXIT.usage;
+						return;
+					}
+					await mcpModule.startStdioServer();
+					code = -1; // keep the process alive while the client is connected
+					return;
+				}
+				const port = Option.getOrUndefined(p.port);
+				if (port !== undefined && !(port >= 0 && port <= 65535)) {
+					process.stderr.write("--port must be between 0 and 65535.\n");
+					code = EXIT.usage;
+					return;
+				}
+				try {
+					const handle = await mcpModule.startHttpServer({
+						host: Option.getOrUndefined(p.host),
+						port,
+						token:
+							Option.getOrUndefined(p.token) ?? process.env.OPENAUDIT_MCP_TOKEN,
+						roots: p.root,
+						allowOrigins: p.allowOrigin,
+						allowHosts: p.allowHost,
+						allowCloud: p.allowCloud,
+						allowImages: p.allowImages,
+						allowAgentic: p.allowAgentic,
+						allowPrivateTargets: p.allowPrivateTargets,
+					});
+					// Never print the token.
+					process.stderr.write(
+						`openaudit MCP listening on ${handle.url}\n${
+							handle.roots.length
+								? `Local targets allowed in: ${handle.roots.join(", ")}`
+								: "Local paths disabled (no --root); URL and image: targets only."
+						}\n`,
+					);
+					if (handle.generatedToken) {
+						// Shown once; the file lets clients read it later.
+						const token = handle.generatedToken;
+						let where: string;
+						try {
+							where = `Saved to ${await mcpModule.writeTokenFile(token)} (readable by you only).`;
+						} catch (error) {
+							where = `Could not save it to a file (${error instanceof Error ? error.message : String(error)}).`;
+						}
+						process.stderr.write(
+							`No token was given, so one was generated: ${token}\n${where}\nClaude Code: claude mcp add --transport http openaudit ${handle.url} --header "Authorization: Bearer ${token}"\nOther clients: send the header Authorization: Bearer <token>.\n`,
+						);
+					}
+					const shutdown = () => {
+						void handle.close().finally(() => process.exit(0));
+					};
+					process.once("SIGINT", shutdown);
+					process.once("SIGTERM", shutdown);
+					code = -1;
+				} catch (error) {
+					process.stderr.write(
+						`${error instanceof Error ? error.message : String(error)}\n`,
+					);
+					code = EXIT.usage;
+				}
+			}),
 	).pipe(
 		Command.withDescription(
-			"Start the MCP server on stdio (for Claude Code, Cursor, Codex, ...)",
+			"Start the MCP server: stdio by default (Claude Code, Cursor, Codex, ...), or --http for remote agents",
 		),
 	);
 

@@ -8,4 +8,5 @@ export * from "./model";
 export * from "./reporters";
 export * from "./scoring";
 export * from "./services";
+export * from "./ssrf";
 export * from "./target";
