@@ -49,5 +49,8 @@
 		"typescript": "catalog:",
 		"varlock": "catalog:"
 	},
+	"engines": {
+		"bun": ">=1.4"
+	},
 	"packageManager": "bun@1.4.2"
 }
