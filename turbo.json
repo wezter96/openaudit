@@ -1,61 +1,42 @@
 {
-  "$schema": "https://turbo.build/schema.json",
-  "ui": "tui",
-  "tasks": {
-    "build": {
-      "dependsOn": [
-        "^build"
-      ],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        ".env*"
-      ],
-      "outputs": [
-        "dist/**"
-      ]
-    },
-    "lint": {
-      "dependsOn": [
-        "^lint"
-      ]
-    },
-    "check-types": {
-      "dependsOn": [
-        "^check-types"
-      ],
-      "outputs": [
-        "dist/**"
-      ]
-    },
-    "dev": {
-      "cache": false,
-      "persistent": true
-    },
-    "test": {
-      "dependsOn": [
-        "^check-types"
-      ],
-      "outputs": []
-    }
-  },
-  "globalEnv": [
-    "CI",
-    "CORS_ORIGIN",
-    "NODE_ENV",
-    "VERCEL",
-    "VERCEL_ENV",
-    "VERCEL_PROJECT_PRODUCTION_URL",
-    "VERCEL_URL",
-    "VITE_SERVER_URL",
-    "_VARLOCK_ENV_KEY",
-    "ALLOW_PRIVATE_TARGETS",
-    "TRUST_PROXY",
-    "ANTHROPIC_API_KEY",
-    "OPENAUDIT_MODEL"
-  ],
-  "globalDependencies": [
-    ".env*",
-    "apps/*/.env*",
-    "packages/*/.env*"
-  ]
+	"$schema": "https://turbo.build/schema.json",
+	"ui": "tui",
+	"tasks": {
+		"build": {
+			"dependsOn": ["^build"],
+			"inputs": ["$TURBO_DEFAULT$", ".env*"],
+			"outputs": ["dist/**"]
+		},
+		"lint": {
+			"dependsOn": ["^lint"]
+		},
+		"check-types": {
+			"dependsOn": ["^check-types"],
+			"outputs": ["dist/**"]
+		},
+		"dev": {
+			"cache": false,
+			"persistent": true
+		},
+		"test": {
+			"dependsOn": ["^check-types"],
+			"outputs": []
+		}
+	},
+	"globalEnv": [
+		"CI",
+		"CORS_ORIGIN",
+		"NODE_ENV",
+		"VERCEL",
+		"VERCEL_ENV",
+		"VERCEL_PROJECT_PRODUCTION_URL",
+		"VERCEL_URL",
+		"VITE_SERVER_URL",
+		"_VARLOCK_ENV_KEY",
+		"ALLOW_PRIVATE_TARGETS",
+		"TRUST_PROXY",
+		"ANTHROPIC_API_KEY",
+		"OPENAUDIT_MODEL"
+	],
+	"globalDependencies": [".env*", "apps/*/.env*", "packages/*/.env*"]
 }

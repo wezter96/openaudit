@@ -84,7 +84,7 @@ describe("browser origin guard", async () => {
 	test.skipIf(!browser)(
 		"blocks other origins, including via redirects and subresources",
 		async () => {
-			const context = await browser!.newContext({
+			const context = await browser.newContext({
 				permissions: ["local-network-access"],
 			});
 			await installOriginGuard(context, origin);
@@ -123,7 +123,7 @@ describe("browser origin guard", async () => {
 			const mod = (await import(browserGuardFiles().initPage)) as {
 				default: (arg: { page: unknown }) => Promise<void>;
 			};
-			const context = await browser!.newContext({
+			const context = await browser.newContext({
 				permissions: ["local-network-access"],
 			});
 			const page = await context.newPage();

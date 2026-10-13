@@ -337,9 +337,10 @@ describe("agentic auditor (web)", () => {
 				OPENAUDIT_ALLOWED_ORIGIN: "https://app.example.com",
 			}),
 		});
-		expect(
-			(input?.options.mcpServers?.playwright as { env: object }).env,
-		).not.toHaveProperty("ANTHROPIC_API_KEY");
+		const playwright = input?.options.mcpServers?.playwright as
+			| { env?: object }
+			| undefined;
+		expect(playwright?.env).not.toHaveProperty("ANTHROPIC_API_KEY");
 	});
 });
 
