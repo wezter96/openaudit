@@ -19,6 +19,11 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
+      - name: Install Chromium for the browser tests
+        # The tests otherwise fall back to the runner's system Chrome.
+        # Run from the package that pins playwright-core, so the browser matches it.
+        working-directory: packages/auditors
+        run: bunx playwright-core install --with-deps chromium
       - run: bunx biome ci .
       - run: bun run check-types
         env:

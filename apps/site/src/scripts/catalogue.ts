@@ -46,7 +46,10 @@ if (form) {
 			if (ok) shown++;
 		}
 		if (count) {
-			count.innerHTML = `<b class="num">${shown}</b> of ${items.length} auditors`;
+			const num = document.createElement("b");
+			num.className = "num";
+			num.textContent = String(shown);
+			count.replaceChildren(num, ` of ${items.length} auditors`);
 		}
 		if (empty) empty.hidden = shown > 0;
 		const active =

@@ -25,6 +25,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # Build-time settings the web app and API validate (see .env.schema).
+      VITE_SERVER_URL: http://localhost:3000
+      CORS_ORIGIN: http://localhost:3001
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -33,6 +37,11 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
+      - name: Generate types
+        # Creates the generated files (env typings, Astro and router types,
+        # project-reference declarations) so the self-audit's type check sees
+        # the same project a developer does.
+        run: bun run check-types
       - name: Audit this repository
         # The page is published whatever the result; CI is where the gate lives.
         run: bun apps/cli/src/bin.ts . --format html,json,sarif,markdown --out apps/site/public/report --fail-on none --quiet
