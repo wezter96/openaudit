@@ -33,7 +33,12 @@ export const allAuditors = (): ReadonlyArray<Auditor> => [
 	...Agent.agenticAuditors,
 ];
 
-export const EXIT = { ok: 0, findings: 1, usage: 2 } as const;
+/**
+ * 3 = `--fail-on` was set but an auditor errored or timed out, so the gate
+ * could not be evaluated fully. Failing closed stops a target from passing CI
+ * by crashing the auditor that would have flagged it.
+ */
+export const EXIT = { ok: 0, findings: 1, usage: 2, incomplete: 3 } as const;
 
 export class UsageError extends Error {}
 
@@ -60,6 +65,7 @@ export interface AuditFlags {
 	readonly config?: string;
 	/** Ignore `openaudit.config.json` in the target. */
 	readonly noConfig?: boolean;
+	readonly allowErrors?: boolean;
 }
 
 export interface Io {
@@ -175,6 +181,17 @@ const audit = async (
 		cwd: io.cwd,
 	});
 	const opts = config.options ?? {};
+	const narrowing = [
+		config.only?.length ? `only: ${config.only.join(", ")}` : "",
+		config.exclude?.length ? `exclude: ${config.exclude.join(", ")}` : "",
+		config.categories?.length
+			? `categories: ${config.categories.join(", ")}`
+			: "",
+	].filter(Boolean);
+	if (narrowing.length && configPath && !flags.quiet)
+		io.stderr(
+			`openaudit: ${sanitizeText(`${configPath} narrows the audit (${narrowing.join("; ")})`)}\n`,
+		);
 	if (ignored.length && !flags.quiet)
 		io.stderr(
 			`openaudit: ignoring ${ignored.join(", ")} in ${configPath}: a config inside the audited target cannot enable settings that send data, cost money or add credentials. Use flags or --config <path> instead.\n`,
@@ -334,6 +351,14 @@ const audit = async (
 					`openaudit: ${breached.length} finding(s) at or above "${failOn}" (exit 1)\n`,
 				);
 			return EXIT.findings;
+		}
+		const errored = report.results.filter((r) => r.status === "error");
+		if (errored.length && !flags.allowErrors) {
+			if (!machine && !flags.quiet)
+				io.stderr(
+					`openaudit: ${sanitizeText(errored.map((r) => r.auditor).join(", "))} errored, so --fail-on could not be fully checked (exit 3; --allow-errors to ignore)\n`,
+				);
+			return EXIT.incomplete;
 		}
 	}
 	return EXIT.ok;

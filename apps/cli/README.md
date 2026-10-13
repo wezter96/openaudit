@@ -51,14 +51,15 @@ Other commands:
 | `0` | Audit completed and no finding reached `--fail-on` |
 | `1` | At least one finding at or above `--fail-on` |
 | `2` | Usage error, invalid config, or the target could not be resolved |
+| `3` | `--fail-on` was set but an auditor errored or timed out, so the gate could not be fully checked |
 
-An auditor that errors or is skipped does not change the exit code. Its status and reason are recorded in the report.
+Exit code 3 fails closed, so a target cannot pass CI by crashing the auditor that would have flagged it. Pass `--allow-errors` to accept partial results. Skipped auditors (missing tool, offline) never change the exit code; their status and reason are recorded in the report.
 
 ### Configuration
 
 `openaudit init` writes `openaudit.config.json`. Flags on the command line take precedence over it.
 
-A config found in the audited target is written by whoever controls the target, so it is only partly trusted. From there, openaudit honours `only`, `exclude`, `categories`, `failOn`, `ignore` and `options.maxPages`. Settings that send data, cost money or add credentials (`options.agentic`, `ai`, `model`, `headers`, `settings`, `browser`, ...) are ignored with a warning. Those settings are accepted only from flags or from a file passed explicitly with `--config <path>`. Every report states how many findings each config or baseline suppressed. Use `--no-config` to ignore the target's config entirely.
+A config found in the audited target is written by whoever controls the target, so it is only partly trusted. From there, openaudit honours `only`, `exclude`, `categories`, `failOn` (except `"none"`), `ignore` and `options.maxPages`, and prints a notice when the config narrows which auditors run. Settings that send data, cost money or add credentials (`options.agentic`, `ai`, `model`, `headers`, `settings`, `browser`, ...) are ignored with a warning. Those settings are accepted only from flags or from a file passed explicitly with `--config <path>`. Every report states how many findings each config or baseline suppressed. Use `--no-config` to ignore the target's config entirely. **When CI audits untrusted changes (pull requests from forks), pass `--fail-on` and `--no-config` explicitly**, because the change itself can edit the config.
 
 ```json
 {

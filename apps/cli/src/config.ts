@@ -112,18 +112,23 @@ export interface LoadedConfig {
 /**
  * A config inside the audited target is written by whoever controls the
  * target. It may narrow the audit and suppress findings (both disclosed in the
- * output), but nothing that sends data, costs money or adds credentials.
+ * output), but nothing that sends data, costs money, adds credentials or turns
+ * off `failOn`. CI on untrusted changes should pass `--fail-on` and
+ * `--no-config` explicitly.
  */
 export const restrictUntrusted = (
 	config: Config,
 ): { config: Config; ignored: string[] } => {
-	const { options, $schema: _, ...rest } = config;
+	const { options, $schema: _, failOn, ...rest } = config;
 	const ignored = Object.keys(options ?? {})
 		.filter((k) => k !== "maxPages")
 		.map((k) => `options.${k}`);
+	// The target may tighten the CI gate but never switch it off.
+	if (failOn === "none") ignored.push("failOn: none");
 	return {
 		config: {
 			...rest,
+			...(failOn !== undefined && failOn !== "none" ? { failOn } : {}),
 			...(options?.maxPages !== undefined
 				? { options: { maxPages: options.maxPages } }
 				: {}),

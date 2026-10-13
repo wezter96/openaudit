@@ -131,6 +131,10 @@ const auditParams = {
 		"Trusted config file. Without it, openaudit.config.json in the target is read with restrictions",
 	),
 	noConfig: bool("no-config", "Ignore openaudit.config.json in the target"),
+	allowErrors: bool(
+		"allow-errors",
+		"With --fail-on, do not fail when an auditor errors or times out",
+	),
 };
 
 type ParsedAudit = {
@@ -163,6 +167,7 @@ const toAuditFlags = (p: ParsedAudit): AuditFlags => ({
 	verbose: p.verbose,
 	config: Option.getOrUndefined(p.config),
 	noConfig: p.noConfig,
+	allowErrors: p.allowErrors,
 });
 
 const EXAMPLES = [

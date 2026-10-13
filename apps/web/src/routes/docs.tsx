@@ -105,7 +105,12 @@ const FLAGS: ReadonlyArray<readonly [string, string]> = [
 	["--verbose", "Terminal output lists every finding with details."],
 	[
 		"--config <path>",
-		"Config file; default openaudit.config.json in the target directory.",
+		"Trusted config file. Without it, openaudit.config.json in the target is read with restrictions.",
+	],
+	["--no-config", "Ignore openaudit.config.json in the target."],
+	[
+		"--allow-errors",
+		"With --fail-on, accept results even if an auditor errored (otherwise exit 3).",
 	],
 ];
 
@@ -311,7 +316,9 @@ function DocsPage() {
 				<p>
 					Exit codes: <code>0</code> when nothing reaches the{" "}
 					<code>--fail-on</code> threshold, <code>1</code> when something does,{" "}
-					<code>2</code> for usage or target errors.
+					<code>2</code> for usage or target errors, <code>3</code> when{" "}
+					<code>--fail-on</code> is set but an auditor errored (fails closed;{" "}
+					<code>--allow-errors</code> accepts partial results).
 				</p>
 
 				<h2 id="config">Configuration</h2>
