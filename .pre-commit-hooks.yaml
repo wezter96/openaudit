@@ -1,0 +1,25 @@
+# Hooks for https://pre-commit.com. See integrations/README.md.
+#
+# Staged changes: openaudit's scanners read the working tree, so staged files are
+# audited. `--diff <ref>` is not used by default because it compares commits
+# (`<ref>...HEAD`); staged changes are not commits yet, so `--diff HEAD` would
+# report nothing. The hooks therefore audit the whole repository, offline (no
+# advisory-database or registry traffic) so a commit stays quick. Run
+# `openaudit .` or CI for the network-backed dependency checks.
+- id: openaudit
+  name: openaudit
+  description: Audit the repository for secrets, vulnerable patterns and misconfigurations (needs Bun).
+  entry: bunx openaudit
+  language: system
+  args: [".", "--offline", "--fail-on", "high", "--quiet"]
+  pass_filenames: false
+  always_run: true
+
+- id: openaudit-docker
+  name: openaudit (docker)
+  description: Same audit from the openaudit image, with the free scanners preinstalled (needs Docker).
+  entry: ghcr.io/wezter96/openaudit:latest
+  language: docker_image
+  args: [".", "--offline", "--fail-on", "high", "--quiet"]
+  pass_filenames: false
+  always_run: true

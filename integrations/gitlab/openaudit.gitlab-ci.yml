@@ -1,0 +1,86 @@
+# openaudit for GitLab CI. Include it from your .gitlab-ci.yml:
+#
+#   include:
+#     - remote: https://raw.githubusercontent.com/wezter96/openaudit/main/integrations/gitlab/openaudit.gitlab-ci.yml
+#
+# On merge requests it audits only the files the MR changes (--diff against the
+# target branch). Elsewhere (default branch, schedules) it audits everything.
+# Artifacts: openaudit-report/ (HTML, SARIF, JSON, Markdown; linked from the MR as
+# "openaudit report") and a Code Quality report that GitLab shows in the MR widget.
+#
+# GitLab's `reports:sast` needs GitLab's own schema, not SARIF, so SARIF is kept as
+# a plain artifact. Findings reach the MR as Code Quality instead (converted below).
+#
+# Override variables in your own file or in the project's CI/CD settings:
+#   OPENAUDIT_IMAGE    image to run (pin a version tag or digest for reproducible runs)
+#   OPENAUDIT_FAIL_ON  critical | high | medium | low | info | none (default: high)
+#   OPENAUDIT_ARGS     extra CLI flags, e.g. "--only code,iac --exclude code.scorecard"
+#
+# Customise the job by extending the hidden template:
+#   openaudit:
+#     extends: .openaudit
+
+variables:
+  OPENAUDIT_IMAGE: ghcr.io/wezter96/openaudit:latest
+  OPENAUDIT_FAIL_ON: high
+  OPENAUDIT_ARGS: ""
+
+.openaudit:
+  stage: test
+  image:
+    name: $OPENAUDIT_IMAGE
+    entrypoint: [""]
+    # The image runs as uid 1000; the docker executor clones as root, so run as root
+    # to write the reports into the project directory, and so git's ownership check
+    # passes (the checkout is root-owned too).
+    docker:
+      user: root
+  variables:
+    # Diff mode needs the merge base, so fetch full history.
+    GIT_DEPTH: "0"
+  script:
+    - |
+      set -u
+      args="--format html,json,sarif,markdown --out openaudit-report --fail-on $OPENAUDIT_FAIL_ON --quiet"
+      if [ -n "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" ]; then
+        git fetch --no-tags --quiet origin "+refs/heads/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}:refs/remotes/origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
+        args="$args --diff origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
+      fi
+      rc=0
+      # shellcheck disable=SC2086  # OPENAUDIT_ARGS is a flag list, split on purpose
+      openaudit . $args $OPENAUDIT_ARGS || rc=$?
+
+      # Findings -> GitLab Code Quality (Code Climate) format.
+      if [ -f openaudit-report/openaudit-report.json ]; then
+        cat > /tmp/codequality.js <<'JS'
+      const report = await Bun.file(process.argv[2]).json();
+      const severity = { critical: "blocker", high: "critical", medium: "major", low: "minor", info: "info" };
+      const issues = report.results.flatMap((r) => r.findings ?? [])
+        .filter((f) => f.location?.file)
+        .map((f) => ({
+          description: `${f.title}: ${f.message}`,
+          check_name: f.ruleId,
+          fingerprint: f.fingerprint,
+          severity: severity[f.severity] ?? "info",
+          location: { path: f.location.file, lines: { begin: f.location.line ?? 1 } },
+        }));
+      await Bun.write(process.argv[3], JSON.stringify(issues));
+      JS
+        bun /tmp/codequality.js openaudit-report/openaudit-report.json gl-code-quality-report.json
+      fi
+      exit "$rc"
+  artifacts:
+    when: always
+    expire_in: 30 days
+    expose_as: openaudit report
+    paths:
+      - openaudit-report/
+    reports:
+      codequality: gl-code-quality-report.json
+
+openaudit:
+  extends: .openaudit
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "schedule"

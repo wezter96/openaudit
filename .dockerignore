@@ -1,0 +1,13 @@
+# Build context: only what the image needs. Dependencies are installed in the image.
+**/node_modules
+**/dist
+**/build
+**/.turbo
+**/.output
+.git
+.github
+.env
+.env.*
+openaudit-report
+reports
+docs
