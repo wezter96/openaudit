@@ -47,6 +47,11 @@ export interface HttpServerOptions {
 	/** Let clients run agentic auditors, which spend the server's ANTHROPIC_API_KEY. */
 	readonly allowAgentic?: boolean;
 	/**
+	 * Save reports under `<root>/.openaudit/reports` as stdio does. Off by
+	 * default over HTTP: remote clients should not write into served roots.
+	 */
+	readonly persistReports?: boolean;
+	/**
 	 * Skip the private-address guard for URL targets. The guard only applies to
 	 * non-loopback binds, where clients are remote; on loopback the user is
 	 * auditing their own machine.
@@ -58,7 +63,12 @@ export interface HttpServerOptions {
 	/** Options for each per-session MCP server (auditors, playbooks, ...). */
 	readonly server?: Omit<
 		ServerOptions,
-		"resolveInput" | "allowAgentic" | "urlGuard" | "registryImagesOnly"
+		| "resolveInput"
+		| "allowAgentic"
+		| "urlGuard"
+		| "registryImagesOnly"
+		| "store"
+		| "persistReports"
 	>;
 }
 
@@ -264,6 +274,9 @@ export const startHttpServer = async (
 	// Loopback is reachable by other local users too: always require a token.
 	const token = supplied ?? randomBytes(32).toString("base64url");
 	const loopback = isLoopbackHost(host);
+	// The Authorization check matches a whitespace-free token exactly.
+	if (supplied && /\s/.test(supplied))
+		throw new Error("The bearer token must not contain whitespace.");
 	if (!loopback) {
 		if (!supplied)
 			throw new Error(
@@ -311,8 +324,8 @@ export const startHttpServer = async (
 	};
 
 	const authorized = (req: Request): boolean => {
-		const m = /^Bearer\s+(.+)$/i.exec(req.headers.get("authorization") ?? "");
-		return m?.[1] !== undefined && tokenMatches(m[1].trim(), token);
+		const m = /^Bearer ([^\s]+)$/i.exec(req.headers.get("authorization") ?? "");
+		return m?.[1] !== undefined && tokenMatches(m[1], token);
 	};
 
 	const dropSession = (id: string) => {
@@ -353,8 +366,11 @@ export const startHttpServer = async (
 		const server = createServer({
 			...options.server,
 			resolveInput,
+			// Reports are per session: never share a store between clients.
+			store: undefined,
 			allowAgentic: options.allowAgentic ?? false,
 			registryImagesOnly: true,
+			persistReports: options.persistReports ?? false,
 			urlGuard,
 		});
 		const transport = new WebStandardStreamableHTTPServerTransport({
@@ -437,7 +453,12 @@ export const startHttpServer = async (
 			const origin = req.headers.get("origin");
 			if (origin !== null && !allowOrigins.has(origin))
 				return json(403, { error: "Origin not allowed" });
-			const path = new URL(req.url).pathname;
+			let path: string;
+			try {
+				path = new URL(req.url).pathname;
+			} catch {
+				return json(400, { error: "Bad request" });
+			}
 			if (path === "/health" && req.method === "GET")
 				return json(200, { status: "ok" });
 			if (path !== MCP_PATH) return json(404, { error: "Not found" });

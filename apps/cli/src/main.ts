@@ -281,6 +281,10 @@ export const main = async (argv: ReadonlyArray<string>): Promise<number> => {
 				"allow-host",
 				"HTTP: extra Host header value accepted (repeatable)",
 			),
+			persistReports: bool(
+				"persist-reports",
+				"HTTP: save reports under <root>/.openaudit/reports (off by default over HTTP)",
+			),
 			allowCloud: bool(
 				"allow-cloud",
 				"HTTP: accept cloud:<provider> targets (uses the server's credentials)",
@@ -312,6 +316,7 @@ export const main = async (argv: ReadonlyArray<string>): Promise<number> => {
 						p.allowOrigin.length ||
 						p.allowHost.length ||
 						p.allowCloud ||
+						p.persistReports ||
 						p.allowImages ||
 						p.allowAgentic ||
 						p.allowPrivateTargets
@@ -342,6 +347,7 @@ export const main = async (argv: ReadonlyArray<string>): Promise<number> => {
 						allowOrigins: p.allowOrigin,
 						allowHosts: p.allowHost,
 						allowCloud: p.allowCloud,
+						persistReports: p.persistReports,
 						allowImages: p.allowImages,
 						allowAgentic: p.allowAgentic,
 						allowPrivateTargets: p.allowPrivateTargets,

@@ -28,7 +28,10 @@ export class ReportStore {
 	private readonly reports = new Map<string, Report>();
 	private readonly paths = new Map<string, string>();
 
-	constructor(private readonly capacity = 20) {}
+	constructor(
+		private readonly capacity = 20,
+		private readonly writeToDisk = true,
+	) {}
 
 	/** Sortable, unguessable id: `20261013t005800-<12 random hex>`. */
 	static newId(): string {
@@ -72,7 +75,7 @@ export class ReportStore {
 			this.reports.delete(oldest);
 			this.paths.delete(oldest);
 		}
-		if (!reportsRoot(report)) return undefined;
+		if (!this.writeToDisk || !reportsRoot(report)) return undefined;
 		const result = await persist(id, report, "json", toJson(report));
 		if (result.saved) this.paths.set(id, result.path);
 		else this.paths.delete(id);

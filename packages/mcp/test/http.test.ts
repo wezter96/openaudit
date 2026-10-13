@@ -456,6 +456,241 @@ describe("mcp over http", () => {
 		expect(registryHost("ghcr.io/o/r")).toBe("ghcr.io");
 	});
 
+	test("reports are scoped to the session that created them", async () => {
+		const h = await start();
+		const a = await connect(h);
+		const b = await connect(h);
+		const res = await audit(a, join(root, "proj"));
+		const id = res.structuredContent?.reportId ?? "";
+		const fp = (
+			res.structuredContent as unknown as {
+				report: {
+					results: Array<{ findings: Array<{ fingerprint: string }> }>;
+				};
+			}
+		).report.results.flatMap((r) => r.findings)[0]?.fingerprint;
+		expect(fp).toBeDefined();
+		const theirs = [
+			["get_report", { reportId: id }],
+			["get_finding", { reportId: id, fingerprint: fp }],
+			["compare_reports", { baseReportId: id, headReportId: id }],
+			[
+				"submit_findings",
+				{ playbookId: "agent.manual", reportId: id, findings: [] },
+			],
+		] as const;
+		for (const [name, args] of theirs) {
+			const r = await b.callTool({ name, arguments: { ...args } });
+			expect(r.isError).toBe(true);
+			expect(JSON.stringify(r.content)).toContain("Unknown reportId");
+		}
+		// The owner is unaffected.
+		expect(
+			(await a.callTool({ name: "get_report", arguments: { reportId: id } }))
+				.isError,
+		).toBeFalsy();
+		await a.close();
+		await b.close();
+	});
+
+	test("a shared store cannot be injected into HTTP sessions", async () => {
+		const { ReportStore } = await import("../src");
+		const shared = new ReportStore();
+		const h = await start({
+			server: { auditors: [fixtureAuditor], playbooks: [], store: shared },
+		} as HttpServerOptions);
+		const a = await connect(h);
+		const b = await connect(h);
+		const id = (await audit(a, join(root, "proj"))).structuredContent?.reportId;
+		const r = await b.callTool({
+			name: "get_report",
+			arguments: { reportId: id ?? "" },
+		});
+		expect(r.isError).toBe(true);
+		await a.close();
+		await b.close();
+	});
+
+	test("get_finding never reads outside the report root", async () => {
+		const h = await start();
+		const c = await connect(h);
+		await writeFile(join(outside, "secret.txt"), "TOP SECRET\n");
+		await symlink(join(outside, "secret.txt"), join(root, "proj", "leak.txt"));
+		const first = await audit(c, join(root, "proj"));
+		const id = first.structuredContent?.reportId ?? "";
+		const files = [
+			"../../outside/secret.txt",
+			join(outside, "secret.txt"),
+			"leak.txt", // symlink out of the root
+			"../outside/secret.txt",
+		];
+		for (const file of files) {
+			const sub = (await c.callTool({
+				name: "submit_findings",
+				arguments: {
+					playbookId: "agent.manual",
+					reportId: id,
+					findings: [
+						{
+							ruleId: "x",
+							title: `probe ${file}`,
+							severity: "low",
+							category: "security",
+							message: "probe",
+							location: { file, line: 1 },
+						},
+					],
+				},
+			})) as { structuredContent?: { reportId?: string } };
+			const rid = sub.structuredContent?.reportId ?? id;
+			const rep = (await c.callTool({
+				name: "get_report",
+				arguments: { reportId: rid, format: "json" },
+			})) as unknown as {
+				structuredContent: {
+					content: string;
+				};
+			};
+			const parsed = JSON.parse(rep.structuredContent.content) as {
+				results: Array<{
+					findings: Array<{ title: string; fingerprint: string }>;
+				}>;
+			};
+			const f = parsed.results
+				.flatMap((r) => r.findings)
+				.find((x) => x.title === `probe ${file}`);
+			expect(f).toBeDefined();
+			const got = await c.callTool({
+				name: "get_finding",
+				arguments: { reportId: rid, fingerprint: f?.fingerprint ?? "" },
+			});
+			expect(JSON.stringify(got)).not.toContain("TOP SECRET");
+		}
+		await c.close();
+	});
+
+	test("submit_findings cannot start a report outside --root", async () => {
+		const h = await start();
+		const c = await connect(h);
+		for (const target of [outside, join(root, "link"), join(root, "..")]) {
+			const r = await c.callTool({
+				name: "submit_findings",
+				arguments: { playbookId: "agent.manual", target, findings: [] },
+			});
+			expect(r.isError).toBe(true);
+			expect(JSON.stringify(r.content)).toContain("allowed root");
+		}
+		await c.close();
+	});
+
+	test("does not write reports into roots unless --persist-reports", async () => {
+		const h = await start();
+		const c = await connect(h);
+		const res = await audit(c, join(root, "proj"));
+		expect(res.isError).toBeFalsy();
+		expect(await Bun.file(join(root, "proj", ".openaudit")).exists()).toBe(
+			false,
+		);
+		const { existsSync } = await import("node:fs");
+		expect(existsSync(join(root, "proj", ".openaudit"))).toBe(false);
+		// html comes back inline instead of as a server-side path
+		const html = (await c.callTool({
+			name: "get_report",
+			arguments: {
+				reportId: res.structuredContent?.reportId ?? "",
+				format: "html",
+			},
+		})) as { structuredContent: { content?: string; path?: string } };
+		expect(html.structuredContent.path).toBeUndefined();
+		expect(html.structuredContent.content).toContain("<html");
+		await c.close();
+
+		// Opt in: persisted, but a planted .openaudit symlink is not followed.
+		await mkdir(join(base, "p2"));
+		await writeFile(join(base, "p2", "app.ts"), "// TODO\n");
+		const root2 = join(base, "p2");
+		const sink = join(base, "sink");
+		await mkdir(sink);
+		await symlink(sink, join(root2, ".openaudit"));
+		const h2 = await start({ roots: [root2], persistReports: true });
+		const c2 = await connect(h2);
+		const r2 = await audit(c2, root2);
+		expect(r2.isError).toBeFalsy();
+		const { readdirSync } = await import("node:fs");
+		expect(readdirSync(sink)).toEqual([]);
+		await c2.close();
+		const h3 = await start({ persistReports: true });
+		const c3 = await connect(h3);
+		const r3 = await audit(c3, join(root, "proj"));
+		expect(
+			(r3.structuredContent as unknown as { reportPath?: string }).reportPath,
+		).toContain(join(root, "proj", ".openaudit", "reports"));
+		await c3.close();
+	});
+
+	test("checks operate on what the SDK and Bun will use", async () => {
+		const h = await start({ allowOrigins: ["https://app.example"] });
+		const ok = { authorization: `Bearer ${TOKEN}` };
+		// Origin: null, duplicate, empty and differently-cased origins are not allow-listed.
+		for (const origin of [
+			"null",
+			"HTTPS://APP.EXAMPLE",
+			"https://app.example, https://evil.example",
+			"https://app.example/",
+		])
+			expect((await post(h, INIT, { origin })).status).toBe(403);
+		// Host: trailing dot, userinfo, other ports, brackets without port.
+		for (const host of [
+			`localhost.:${h.port}`,
+			`127.0.0.1.:${h.port}`,
+			`127.0.0.1:${h.port + 1}`,
+			`user@127.0.0.1:${h.port}`,
+			"127.0.0.1",
+			`[::1]x:${h.port}`,
+			`127.0.0.1:${h.port}, evil.example`,
+		])
+			expect((await post(h, INIT, { host })).status).toBe(403);
+		expect((await post(h, INIT, { host: `[::1]:${h.port}` })).status).toBe(200);
+		// Authorization: wrong scheme, extra words, duplicates (merged by Headers), padding.
+		for (const authorization of [
+			TOKEN,
+			`Basic ${TOKEN}`,
+			`Bearer ${TOKEN} extra`,
+			`Bearer ${TOKEN}, Bearer ${TOKEN}`,
+			`Bearer ${TOKEN.slice(0, -1)}`,
+			"Bearer ",
+			"Bearer",
+		])
+			expect((await post(h, INIT, { authorization })).status).toBe(401);
+		expect(
+			(await post(h, INIT, { authorization: `bearer ${TOKEN}` })).status,
+		).toBe(200);
+		void ok;
+		// Token with whitespace can never match, so the server refuses to start with one.
+		await expect(
+			startHttpServer({ port: 0, token: " padded-token-value " }),
+		).rejects.toThrow(/whitespace/);
+		// Paths are matched exactly.
+		for (const path of ["/mcp/", "/%6dcp", "/mcp%2f", "/MCP"]) {
+			const r = await fetch(`http://127.0.0.1:${h.port}${path}`, {
+				method: "POST",
+				headers: { ...MCP_HEADERS, ...ok },
+				body: JSON.stringify(INIT),
+			});
+			expect(r.status).toBe(404);
+		}
+		// The SDK never re-reads the body: a batch mixing initialize with other
+		// calls is rejected without leaving a session behind.
+		const before = h.sessionCount();
+		const batch = await post(h, [
+			INIT,
+			{ jsonrpc: "2.0", id: 2, method: "tools/list" },
+		]);
+		expect(batch.status).toBeGreaterThanOrEqual(400);
+		await batch.text();
+		expect(h.sessionCount()).toBe(before);
+	});
+
 	test("DELETE closes a session and unknown sessions get 404", async () => {
 		const h = await start();
 		const init = await post(h, INIT);

@@ -1,6 +1,6 @@
-import { mkdtemp, realpath, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { join, resolve } from "node:path";
 import {
 	McpServer,
 	ResourceTemplate,
@@ -43,7 +43,21 @@ import {
 } from "@openaudit/core";
 import { Effect, Layer } from "effect";
 import { z } from "zod";
-
+import {
+	auditorInfo,
+	errorResult,
+	findingExample,
+	playbookInfo,
+	playbookText,
+	run,
+	sourceContext,
+	textResult,
+} from "./helpers";
+import {
+	auditProjectPrompt,
+	MANUAL_PLAYBOOK,
+	SERVER_INSTRUCTIONS,
+} from "./instructions";
 import {
 	breaches,
 	diffReports,
@@ -57,6 +71,8 @@ import * as S from "./schemas";
 import { countsText, findingLine, reportSummaryText } from "./text";
 
 type Playbook = Agent.Playbook;
+
+export { MANUAL_PLAYBOOK, SERVER_INSTRUCTIONS };
 
 export interface ServerOptions {
 	/** Auditors available to `run_audit`. Defaults to built-in + agentic. */
@@ -80,132 +96,9 @@ export interface ServerOptions {
 	readonly urlGuard?: GuardOptions;
 	/** Make image scanners pull from the registry only (never the local daemon). */
 	readonly registryImagesOnly?: boolean;
+	/** Save reports under the target's `.openaudit/reports` (default true; false over HTTP). */
+	readonly persistReports?: boolean;
 }
-
-/** Free-form playbook so host agents can submit issues found outside a playbook. */
-export const MANUAL_PLAYBOOK: Playbook = {
-	id: "agent.manual",
-	title: "Manual review",
-	summary:
-		"Free-form findings the host agent discovered while reviewing the target.",
-	categories: [
-		"security",
-		"accessibility",
-		"performance",
-		"seo",
-		"privacy",
-		"best-practices",
-		"reliability",
-		"maintainability",
-		"supply-chain",
-		"compliance",
-	],
-	targets: ["codebase", "url", "webapp", "container", "iac", "mobile"],
-	needs: ["code"],
-	instructions: [
-		"Record issues you verified yourself that no openaudit auditor reported.",
-		"Only submit issues you have evidence for: cite the file and line or URL and selector, and quote a short, redacted snippet as evidence.",
-		'Prefer one finding per root cause. Use `confidence: "low"` for suspicions you could not confirm.',
-	].join("\n\n"),
-	checklist: [
-		"Each finding has a precise location",
-		"Evidence is short and contains no secrets",
-		"Remediation is concrete and actionable",
-	],
-};
-
-export const SERVER_INSTRUCTIONS = `openaudit audits codebases, URLs, running web apps, containers, IaC and mobile builds (security, accessibility, performance, SEO, privacy, supply chain, ...).
-Recommended workflow:
-1. detect_target to see what will run, then run_audit (pass an absolute path or URL). Keep the returned reportId.
-2. Triage the most severe findings; use get_finding (reportId + fingerprint) for remediation and source context.
-3. For judgment-heavy checks (authz, business logic, UX accessibility), call list_playbooks / get_playbook, do the work with your own tools, then submit_findings into the same reportId.
-4. Fix issues, run_audit again, and compare_reports(base, head) to confirm what is fixed and that nothing new appeared.
-Use get_report for markdown (PR comments), SARIF (code scanning) or HTML. Never paste secrets from evidence into chat.`;
-
-const textResult = (
-	text: string,
-	structuredContent?: Record<string, unknown>,
-) => ({
-	content: [{ type: "text" as const, text }],
-	...(structuredContent ? { structuredContent } : {}),
-});
-
-const errorResult = (message: string) => ({
-	content: [{ type: "text" as const, text: message }],
-	isError: true,
-});
-
-const auditorInfo = (a: Auditor) => ({
-	id: a.id,
-	title: a.title,
-	description: a.description,
-	engine: a.engine,
-	categories: [...a.categories],
-	targets: [...a.targets],
-	...(a.tool ? { tool: a.tool } : {}),
-	network: a.network === true,
-	defaultEnabled: a.engine === "agentic" ? false : a.defaultEnabled !== false,
-});
-
-const playbookInfo = (p: Playbook) => ({
-	id: p.id,
-	title: p.title,
-	summary: p.summary,
-	categories: [...p.categories],
-	targets: [...p.targets],
-	needs: [...p.needs],
-});
-
-const findingExample = (p: Playbook) => ({
-	ruleId: `${p.id}/short-kebab-rule`,
-	title: "Order API returns other users' orders",
-	severity: "high",
-	category: p.categories[0] ?? "security",
-	message:
-		"GET /api/orders/:id does not check that the order belongs to the session user.",
-	location: { file: "src/routes/orders.ts", line: 42 },
-	evidence: "const order = await db.order.find(params.id)",
-	remediation: "Scope the query by the authenticated user id.",
-	references: ["https://cwe.mitre.org/data/definitions/639.html"],
-	confidence: "high",
-	tags: ["cwe-639"],
-});
-
-const playbookText = (
-	p: Playbook,
-	extra: { target?: string; reportId?: string },
-) =>
-	[
-		`# Playbook ${p.id}: ${p.title}`,
-		p.summary,
-		extra.target ? `\nTarget: ${extra.target}` : "",
-		`Needs: ${p.needs.join(", ")} | Categories: ${p.categories.join(", ")}`,
-		"",
-		"## Instructions",
-		p.instructions,
-		"",
-		"## Checklist",
-		...p.checklist.map((c) => `- [ ] ${c}`),
-		"",
-		"## Submitting",
-		`Call submit_findings with playbookId "${p.id}"${extra.reportId ? `, reportId "${extra.reportId}"` : ", the reportId from run_audit (or a target)"} and a findings array. Each finding:`,
-		"```json",
-		JSON.stringify(findingExample(p), null, 2),
-		"```",
-		"Required: ruleId, title, severity (critical|high|medium|low|info), category, message. Submit an empty array when nothing was found, so the report records that the playbook ran.",
-	]
-		.filter((l) => l !== "")
-		.join("\n");
-
-/** Runs an Effect and returns its success, or the failure as an Error. */
-const run = <A, E extends { readonly message: string }>(
-	effect: Effect.Effect<A, E>,
-): Promise<{ ok: true; value: A } | { ok: false; error: string }> =>
-	Effect.runPromise(Effect.result(effect)).then((r) =>
-		r._tag === "Success"
-			? { ok: true as const, value: r.success }
-			: { ok: false as const, error: r.failure.message },
-	);
 
 export const createServer = (options: ServerOptions = {}): McpServer => {
 	const allowAgentic = options.allowAgentic ?? true;
@@ -225,7 +118,8 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 		...(options.playbooks ?? Agent.playbooks),
 		MANUAL_PLAYBOOK,
 	];
-	const store = options.store ?? new ReportStore();
+	const persistReports = options.persistReports ?? true;
+	const store = options.store ?? new ReportStore(20, persistReports);
 	const cwd = options.cwd ?? process.cwd();
 	const resolveInput: (target: string) => Promise<string> =
 		options.resolveInput ??
@@ -571,6 +465,11 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 		},
 		async ({ reportId, format }) => {
 			const report = getReport(reportId);
+			if (format === "html" && !persistReports) {
+				// No server-side files: hand the document to the client.
+				const content = toHtml(report);
+				return textResult(content, { reportId, format, content });
+			}
 			if (format === "html") {
 				const html = toHtml(report);
 				const saved = await persist(reportId, report, "html", html);
@@ -991,52 +890,6 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 
 	return server;
 };
-
-/** ±5 lines around a file finding, confined to the target root. */
-const sourceContext = async (
-	report: Report,
-	loc: { file?: string; line?: number } | undefined,
-) => {
-	if (!report.target.root || !loc?.file) return undefined;
-	// Findings come from untrusted targets: never follow paths or symlinks out of the root.
-	const root = await realpath(report.target.root).catch(() => undefined);
-	const abs = root
-		? await realpath(resolve(root, loc.file)).catch(() => undefined)
-		: undefined;
-	if (!root || !abs?.startsWith(root.endsWith(sep) ? root : root + sep))
-		return undefined;
-	const file = Bun.file(abs);
-	if (!(await file.exists()) || file.size > 2 * 1024 * 1024) return undefined;
-	const lines = (await file.text()).split(/\r?\n/);
-	const line = Math.max(1, loc.line ?? 1);
-	const startLine = Math.max(1, line - 5);
-	const endLine = Math.min(lines.length, line + 5);
-	const width = String(endLine).length;
-	const text = lines
-		.slice(startLine - 1, endLine)
-		.map(
-			(l, i) =>
-				`${startLine + i === loc.line ? ">" : " "} ${String(startLine + i).padStart(width)} | ${l}`,
-		)
-		.join("\n");
-	return { file: loc.file, startLine, endLine, text };
-};
-
-const auditProjectPrompt = (
-	target: string,
-	focus: string | undefined,
-	playbooks: ReadonlyArray<Playbook>,
-) => `Audit ${target} with the openaudit MCP tools${focus ? `, focusing on ${focus}` : ""}.
-
-1. Call detect_target with target "${target}" to see its kinds, technologies and which auditors will run.
-2. Call run_audit with that target${focus ? ` and categories that match "${focus}"` : ""}. Keep the reportId. If auditors were skipped for missing tools, mention how to install them, but do not install anything without asking.
-3. Triage: group findings by root cause, discard likely false positives (say why), and use get_finding for remediation and source context on anything critical or high.
-4. Judgment work: pick the relevant playbooks (${playbooks.map((p) => p.id).join(", ")}). For each, call get_playbook, follow its instructions and checklist with your own tools, then call submit_findings with the same reportId, even when you found nothing.
-5. Propose fixes, most severe first. Apply them only with the user's approval, keeping each change small and explained.
-6. Call run_audit again, then compare_reports(base, head) to show what was fixed and confirm nothing new appeared.
-7. Finish with a short summary: score before and after, what remains, and what needs a human decision. Use get_report with format markdown if the user wants a PR comment.
-
-Never print secrets from evidence; refer to them by file and line.`;
 
 /** Serves openaudit over stdio until the client disconnects. */
 export const startStdioServer = async (
