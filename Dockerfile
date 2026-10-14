@@ -11,6 +11,9 @@
 # the project publishes none (kube-linter, shellcheck, zizmor). Python and npm
 # packages are pinned by version; pip and bun verify registry hashes at download.
 #
+# `full` also carries the runtimes some scanners need: PHP for PHPStan and a JRE
+# for PMD.
+#
 # Not included: ZAP (needs Docker), Prowler (cloud credentials), gosec/staticcheck/
 # govulncheck/golangci-lint (need a Go toolchain), clippy/cargo-audit (Rust),
 # brakeman (Ruby), tsc/eslint/knip/mypy (need the target's own dependencies).
@@ -30,6 +33,12 @@ ARG HADOLINT_VERSION=2.15.1
 ARG ACTIONLINT_VERSION=1.7.12
 ARG SCORECARD_VERSION=5.6.0
 ARG UV_VERSION=0.13.0
+ARG KUBECONFORM_VERSION=0.8.0
+ARG TFLINT_VERSION=0.64.0
+# TFLint cloud rulesets, enabled by iac.tflint from /opt/tflint-plugins.
+ARG TFLINT_AWS_VERSION=0.49.0
+ARG TFLINT_AZURERM_VERSION=0.32.0
+ARG TFLINT_GOOGLE_VERSION=0.40.0
 # Projects that publish no checksum file: SHA-256 of the release archive per arch.
 ARG KUBE_LINTER_VERSION=0.8.3
 ARG KUBE_LINTER_SHA256_AMD64=1a6d8419b11971372971fdbc22682b684ebfb7cf1c39591662d1b6ca736c41df
@@ -40,6 +49,11 @@ ARG SHELLCHECK_SHA256_ARM64=12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261
 ARG ZIZMOR_VERSION=1.30.1
 ARG ZIZMOR_SHA256_AMD64=e65324f4430c2717591937edcec90ccbefaf14c174f8ec9415e03ca875b46e1a
 ARG ZIZMOR_SHA256_ARM64=7ff1dce33bdd18fd2a4affe63bdd47efcccca97b2cec1c1863ec26e9e2647540
+# Architecture-independent, `full` only.
+ARG PHPSTAN_VERSION=2.3.1
+ARG PHPSTAN_SHA256=85157dba3d95d77ca603d2b7303aa78a538f9e3b56ccad07dd794c53aa96d1ae
+ARG PMD_VERSION=7.28.0
+ARG PMD_SHA256=f974ba571f7bc01c73fffe11bade25fbc1f438698f9e9c00e416e8d65e9fbac2
 
 # Python tools (one isolated environment each, via uv).
 ARG SEMGREP_VERSION=1.180.0
@@ -48,6 +62,7 @@ ARG PIP_AUDIT_VERSION=2.10.1
 ARG CHECKOV_VERSION=3.3.29
 ARG RUFF_VERSION=0.17.0
 ARG MOBSFSCAN_VERSION=1.0.1
+ARG GUARDDOG_VERSION=3.2.0
 
 # Node tools (bun global installs).
 ARG SPECTRAL_VERSION=6.17.0
@@ -81,11 +96,20 @@ ARG SHELLCHECK_SHA256_ARM64
 ARG ZIZMOR_VERSION
 ARG ZIZMOR_SHA256_AMD64
 ARG ZIZMOR_SHA256_ARM64
+ARG KUBECONFORM_VERSION
+ARG TFLINT_VERSION
+ARG TFLINT_AWS_VERSION
+ARG TFLINT_AZURERM_VERSION
+ARG TFLINT_GOOGLE_VERSION
+ARG PHPSTAN_VERSION
+ARG PHPSTAN_SHA256
+ARG PMD_VERSION
+ARG PMD_SHA256
 
 USER 0
 # hadolint ignore=DL3008
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
+ && apt-get install -y --no-install-recommends ca-certificates curl unzip xz-utils \
  && rm -rf /var/lib/apt/lists/*
 
 # fetch <url> <sha256 | url of a checksum file> <out>
@@ -165,7 +189,31 @@ u=$(gh zizmorcore/zizmor "v$ZIZMOR_VERSION")
 fetch "$u/zizmor-$X-unknown-linux-gnu.tar.gz" "$ZZSHA" zizmor.tgz
 tar -xzf zizmor.tgz -C /out zizmor
 
-chmod 0755 /out/*
+u=$(gh yannh/kubeconform "v$KUBECONFORM_VERSION")
+fetch "$u/kubeconform-linux-$A.tar.gz" "$u/CHECKSUMS" kubeconform.tgz
+tar -xzf kubeconform.tgz -C /out kubeconform
+
+u=$(gh terraform-linters/tflint "v$TFLINT_VERSION")
+fetch "$u/tflint_linux_$A.zip" "$u/checksums.txt" tflint.zip
+unzip -q tflint.zip tflint -d /out
+
+# Cloud rulesets get their own dir; the bundled terraform ruleset stays in tflint.
+mkdir -p /out-tflint-plugins
+for r in "aws:$TFLINT_AWS_VERSION" "azurerm:$TFLINT_AZURERM_VERSION" "google:$TFLINT_GOOGLE_VERSION"; do
+  name=${r%%:*}
+  u=$(gh "terraform-linters/tflint-ruleset-$name" "v${r#*:}")
+  fetch "$u/tflint-ruleset-${name}_linux_$A.zip" "$u/checksums.txt" "ruleset-$name.zip"
+  unzip -q "ruleset-$name.zip" "tflint-ruleset-$name" -d /out-tflint-plugins
+done
+
+chmod 0755 /out/* /out-tflint-plugins/*
+
+# full only: PHPStan (runs on the PHP CLI) and PMD (runs on the JRE).
+mkdir -p /out-full
+fetch "https://github.com/phpstan/phpstan/releases/download/$PHPSTAN_VERSION/phpstan.phar" "$PHPSTAN_SHA256" /out-full/phpstan.phar
+fetch "https://github.com/pmd/pmd/releases/download/pmd_releases%2F$PMD_VERSION/pmd-dist-$PMD_VERSION-bin.zip" "$PMD_SHA256" pmd.zip
+unzip -q pmd.zip -d /out-full
+mv "/out-full/pmd-bin-$PMD_VERSION" /out-full/pmd
 EOF
 
 USER 1000
@@ -180,6 +228,7 @@ ARG PIP_AUDIT_VERSION
 ARG CHECKOV_VERSION
 ARG RUFF_VERSION
 ARG MOBSFSCAN_VERSION
+ARG GUARDDOG_VERSION
 USER 0
 # hadolint ignore=DL3008
 RUN apt-get update \
@@ -194,7 +243,8 @@ ENV UV_TOOL_DIR=/opt/uv/tools \
     UV_NO_CACHE=1
 RUN set -eux; \
     for spec in "semgrep==$SEMGREP_VERSION" "bandit==$BANDIT_VERSION" "pip-audit==$PIP_AUDIT_VERSION" \
-                "checkov==$CHECKOV_VERSION" "ruff==$RUFF_VERSION" "mobsfscan==$MOBSFSCAN_VERSION"; do \
+                "checkov==$CHECKOV_VERSION" "ruff==$RUFF_VERSION" "mobsfscan==$MOBSFSCAN_VERSION" \
+                "guarddog==$GUARDDOG_VERSION"; do \
       uv tool install "$spec"; \
     done; \
     ls /opt/uv/bin
@@ -258,15 +308,22 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=fetch /out/ /usr/local/bin/
+COPY --from=fetch /out-tflint-plugins/ /opt/tflint-plugins/
 COPY --from=pytools /opt/uv/ /opt/uv/
 COPY --from=nodetools /opt/bun/ /opt/bun/
 COPY --from=app /app /app
 # HOME is writable for any uid (`docker run --user`, pre-commit) so scanners can cache.
+# GuardDog refreshes its popular-packages lists (typosquatting) in place, so they
+# get a writable copy there too.
 RUN ln -s /app/apps/cli/src/bin.ts /usr/local/bin/openaudit \
+ && mkdir -p /home/bun/.cache/guarddog \
+ && cp /opt/uv/tools/guarddog/lib/python3*/site-packages/guarddog/analyzer/metadata/resources/top_*.json /home/bun/.cache/guarddog/ \
+ && chmod -R a+rwX /home/bun/.cache \
  && chmod 1777 /home/bun
 
 ENV HOME=/home/bun \
-    PATH=/opt/uv/bin:/opt/bun/bin:$PATH
+    PATH=/opt/uv/bin:/opt/bun/bin:$PATH \
+    GUARDDOG_TOP_PACKAGES_CACHE_LOCATION=/home/bun/.cache/guarddog
 
 LABEL org.opencontainers.image.title="openaudit" \
       org.opencontainers.image.description="Audit code, sites, containers and IaC with free open-source scanners preinstalled." \
@@ -282,14 +339,19 @@ ENTRYPOINT ["openaudit"]
 CMD ["--help"]
 
 # --------------------------------------------------------------------------
-# full: adds Chromium, Lighthouse and pa11y for `--browser` and the web.* auditors.
+# full: adds Chromium, Lighthouse and pa11y for `--browser` and the web.* auditors,
+# plus PHP for PHPStan and a JRE for PMD.
 FROM runtime AS full
 USER 0
 # hadolint ignore=DL3008
 RUN apt-get update \
- && apt-get install -y --no-install-recommends chromium fonts-liberation \
+ && apt-get install -y --no-install-recommends chromium fonts-liberation php-cli default-jre-headless \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=browsertools /opt/bun-browser/ /opt/bun-browser/
+COPY --from=fetch /out-full/ /opt/
+RUN printf '#!/bin/sh\nexec php /opt/phpstan.phar "$@"\n' > /usr/local/bin/phpstan \
+ && chmod 0755 /usr/local/bin/phpstan \
+ && ln -s /opt/pmd/bin/pmd /usr/local/bin/pmd
 ENV PATH=/opt/bun-browser/bin:$PATH \
     CHROME_PATH=/usr/bin/chromium \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \

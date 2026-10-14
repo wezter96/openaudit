@@ -19,7 +19,7 @@
 
 </div>
 
-openaudit runs 32 built-in auditors and wraps 45 established open-source scanners, linters and type checkers when they're installed. Ten agent **playbooks** cover the judgment-heavy work no rule can do, such as authorisation review, keyboard and screen-reader journeys, and privacy data flows. Everything lands in one report with a 0–100 score and an A–F grade per area.
+openaudit runs 33 built-in auditors and wraps 50 established open-source scanners, linters and type checkers when they're installed. Ten agent **playbooks** cover the judgment-heavy work no rule can do, such as authorisation review, keyboard and screen-reader journeys, and privacy data flows. Everything lands in one report with a 0–100 score and an A–F grade per area.
 
 - **One issue, one finding.** When gitleaks, TruffleHog and the built-in secret scan all find the same key, you get one finding that says who confirmed it, scored once.
 - **A report people actually read.** A self-contained interactive HTML page with an overview, a tab per area and an OWASP Top 10 / CWE Top 25 view. It also comes as JSON, SARIF, Markdown and CSV.
@@ -63,13 +63,13 @@ Every finding belongs to one of ten areas, and each area gets its own score and 
 
 | Language | Security | Dependencies | Types, lint and quality |
 |---|---|---|---|
-| JavaScript / TypeScript | built-in rules, Semgrep | npm, pnpm, Yarn and Bun lockfiles via OSV.dev; npm / pnpm / bun audit | tsc, oxlint, Biome, ESLint\*, knip\*, strict `tsconfig` checks |
+| JavaScript / TypeScript | built-in rules, Semgrep | npm, pnpm, Yarn and Bun lockfiles via OSV.dev; npm / pnpm / bun audit | tsc, oxlint (with its React, jsx-a11y and Next.js rules when the project uses them), Biome, ESLint\*, knip\*, strict `tsconfig` checks |
 | Python | built-in rules, Semgrep, Bandit | `requirements*.txt`, `poetry.lock`; pip-audit | ruff, mypy\*, type-checker configuration |
 | Go | built-in rules, Semgrep, gosec | `go.mod`; govulncheck\* | staticcheck, golangci-lint\* |
 | Rust | Semgrep | `Cargo.lock`; cargo-audit | clippy\*, `[lints]` and `unsafe` policy checks |
 | Ruby | built-in rules, Semgrep, Brakeman (Rails) | `Gemfile.lock` | |
-| PHP | built-in rules, Semgrep | `composer.lock` | |
-| Java / Kotlin | built-in rules, Semgrep, mobsfscan (Android) | Maven and Gradle via osv-scanner and Trivy | |
+| PHP | built-in rules, Semgrep | `composer.lock` | PHPStan |
+| Java / Kotlin | built-in rules, Semgrep, mobsfscan (Android) | Maven and Gradle via osv-scanner and Trivy | PMD (Java) |
 | C# / .NET | built-in rules, Semgrep | NuGet via osv-scanner and Trivy | |
 | Swift / Objective-C | mobsfscan (iOS) | | |
 | Shell | | | ShellCheck, `set -euo pipefail` checks |
@@ -87,11 +87,11 @@ Every language also gets secret scanning (built-in, gitleaks, TruffleHog), dupli
 
 | Target | Built-in auditors | Wrapped tools (used when installed) |
 |---|---|---|
-| Codebase | secrets, static security (SAST), vulnerable dependencies (OSV.dev), API specs (OpenAPI, GraphQL), privacy (tracking SDKs, PII in logs), accessibility, performance, quality, language strictness, repo hygiene, dependency licence policy | **Secrets:** gitleaks, TruffleHog, git history\*. **SAST:** Semgrep, Bandit, gosec, Brakeman, mobsfscan. **Types and lint:** tsc, oxlint, Biome, ruff, staticcheck, ShellCheck, ESLint\*, clippy\*, mypy\*, golangci-lint\*. **APIs:** Spectral. **Dependencies:** osv-scanner, Trivy, npm/pnpm/bun audit, pip-audit, cargo-audit, govulncheck\*, Grype\*. **Supply chain:** OpenSSF Scorecard, Syft licences\*. **Quality and licences:** jscpd, knip\*, ScanCode\*. **AI review:** deepsec\* |
+| Codebase | secrets, static security (SAST), vulnerable dependencies (OSV.dev), API specs (OpenAPI, GraphQL), privacy (tracking SDKs, PII in logs), accessibility, performance, quality, language strictness, repo hygiene, dependency licence policy | **Secrets:** gitleaks, TruffleHog, git history\*. **SAST:** Semgrep, Bandit, gosec, Brakeman, mobsfscan. **Types and lint:** tsc, oxlint, Biome, ruff, staticcheck, PHPStan, PMD, ShellCheck, ESLint\*, clippy\*, mypy\*, golangci-lint\*. **APIs:** Spectral. **Dependencies:** osv-scanner, Trivy, npm/pnpm/bun audit, pip-audit, cargo-audit, govulncheck\*, Grype\*. **Supply chain:** OpenSSF Scorecard, GuardDog (malicious packages)\*, Syft licences\*. **Quality and licences:** jscpd, knip\*, ScanCode\*. **AI review:** deepsec\* |
 | URL | security headers, TLS, DNS and email (SPF, DMARC, CAA, MTA-STS, subdomain takeover), exposed APIs (OpenAPI, GraphQL introspection), SEO, accessibility, performance, reliability, exposed files, privacy and trackers | Lighthouse, pa11y, OWASP ZAP baseline\*, ZAP active scan\* (allow-listed hosts only), testssl.sh\* |
 | Running web app (`--browser`) | axe-core in Chromium, console errors, failed and mixed-content requests, Core Web Vitals, trackers and cookies set before consent | |
 | Containers | Dockerfile, Compose, image (root user, age, size, secrets) | Trivy, hadolint, Dockle\* |
-| Infrastructure as code | GitHub Actions, Kubernetes, Terraform | zizmor, actionlint, kube-linter, Checkov, KICS\*, Kubescape\* |
+| Infrastructure as code | GitHub Actions, Kubernetes, Terraform | zizmor, actionlint, kube-linter, kubeconform, TFLint, Checkov, KICS\*, Kubescape\* |
 | Mobile | Android manifest (incl. binary AXML in APKs), iOS Info.plist (incl. binary plists in IPAs), embedded secrets, bundled SDK versions checked against OSV, layout accessibility, size and performance | |
 | Cloud (`cloud:aws`, `azure`, `gcp`, `kubernetes`) | | Prowler\* |
 

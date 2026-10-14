@@ -24,7 +24,7 @@ docker run --rm ghcr.io/wezter96/openaudit:latest-full https://example.com --bro
 docker run --rm ghcr.io/wezter96/openaudit doctor
 ```
 
-Included: gitleaks, trufflehog, osv-scanner, Trivy, Grype, Syft, hadolint, actionlint, kube-linter, ShellCheck, zizmor, OpenSSF Scorecard, oxlint, Biome, Spectral, jscpd, Semgrep, Bandit, pip-audit, Checkov, Ruff, mobsfscan. The versions are the `ARG`s at the top of the [`Dockerfile`](../Dockerfile).
+Included: gitleaks, trufflehog, osv-scanner, Trivy, Grype, Syft, hadolint, actionlint, kube-linter, kubeconform, TFLint (with the AWS, Azure and Google rulesets), ShellCheck, zizmor, OpenSSF Scorecard, oxlint, Biome, Spectral, jscpd, Semgrep, Bandit, pip-audit, Checkov, Ruff, mobsfscan, GuardDog. The `-full` images add Chromium, Lighthouse and pa11y, plus PHPStan (with PHP) and PMD (with a Java runtime). The versions are the `ARG`s at the top of the [`Dockerfile`](../Dockerfile).
 
 Not included: ZAP (needs Docker), Prowler (needs cloud credentials), the Go, Rust and Ruby linters (gosec, staticcheck, govulncheck, golangci-lint, clippy, cargo-audit, brakeman need their language toolchain), and tsc, ESLint, knip and mypy (need the audited project's own dependencies). Those auditors report `skipped` with an install hint. Network-backed scanners (Trivy, OSV, Semgrep rules) need outbound access; add `--offline` to forbid it.
 
