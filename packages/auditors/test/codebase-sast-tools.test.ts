@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	type Auditor,
 	Exec,
@@ -258,17 +261,35 @@ describe("sast auditors", () => {
 		let cwd: string | undefined;
 		const report = await runWith(gosec, sast, present, async (cmd, dir) => {
 			cwd = dir;
-			expect(cmd.slice(1)).toEqual([
-				"-fmt",
-				"json",
-				"-quiet",
-				"-no-fail",
-				"./...",
-			]);
+			expect(cmd.slice(1)).toEqual(["-fmt", "json", "-no-fail", "./..."]);
 			return { code: 0, stdout: text("gosec.json"), stderr: "" };
 		});
 		expect(cwd).toBe(sast);
 		expect(report.results[0]?.findings).toHaveLength(5);
+	});
+
+	test("gosec fails when no package of a module loads", async () => {
+		// Without this, a module gosec cannot load (here go.mod asks for a newer
+		// Go) passed with no findings.
+		const report = await runWith(gosec, sast, present, async () => ({
+			code: 0,
+			stdout: text("gosec-load-error.json"),
+			stderr: "",
+		}));
+		expect(report.results[0]?.status).toBe("error");
+		expect(report.results[0]?.message).toContain("go.mod requires go >= 1.99");
+	});
+
+	test("brakeman skips a Rails app without app/", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "openaudit-brakeman-"));
+		try {
+			await Bun.write(join(dir, "Gemfile"), 'gem "rails"\n');
+			const report = await runWith(brakeman, dir, present, unreachable);
+			expect(report.results[0]?.status).toBe("skipped");
+			expect(report.results[0]?.message).toContain("app/");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
 	});
 
 	test("brakeman detects the Rails app", async () => {

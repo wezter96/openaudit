@@ -1,0 +1,19 @@
+{
+	"Golang errors": {
+		".": [
+			{
+				"line": 0,
+				"column": 0,
+				"error": "loading files from package \".\": err: exit status 1: stderr: go: go.mod requires go \u003e= 1.99 (running go 1.27.1; GOTOOLCHAIN=local)\n"
+			}
+		]
+	},
+	"Issues": [],
+	"Stats": {
+		"files": 0,
+		"lines": 0,
+		"nosec": 0,
+		"found": 0
+	},
+	"GosecVersion": "2.29.0"
+}

@@ -356,8 +356,10 @@ export const gosec = defineAuditor({
 			for (const dir of modules) {
 				// GOTOOLCHAIN=local: a target's go.mod `toolchain` line must not make
 				// go download and run another toolchain. No cgo: no C compiler runs.
+				// No -quiet: with it gosec prints nothing both for a clean module and
+				// for one it could not load, and only the JSON tells them apart.
 				const res = yield* ctx.exec.run(
-					[bin, "-fmt", "json", "-quiet", "-no-fail", "./..."],
+					[bin, "-fmt", "json", "-no-fail", "./..."],
 					{
 						cwd: ws.absolute(dir),
 						timeoutMs: 15 * 60_000,
@@ -371,13 +373,34 @@ export const gosec = defineAuditor({
 						}),
 					);
 				if (!res.stdout.trim()) continue;
-				findings.push(
-					...parseGosecReport(yield* parseJson(res.stdout, "gosec"), ws.root),
-				);
+				const json = yield* parseJson(res.stdout, "gosec");
+				const loadError = gosecLoadError(json);
+				if (loadError)
+					return yield* Effect.fail(
+						new AuditorError({
+							message: `gosec could not load the Go packages in ${dir === "." ? "the root module" : dir}: ${truncate(loadError, 300)}`,
+						}),
+					);
+				findings.push(...parseGosecReport(json, ws.root));
 			}
 			return findings;
 		}),
 });
+
+/**
+ * The first package-loading error when gosec analysed no file at all (for
+ * example go.mod needs a newer Go than the one installed), else undefined.
+ */
+export const gosecLoadError = (json: unknown): string | undefined => {
+	if (!isRecord(json)) return undefined;
+	const stats = isRecord(json.Stats) ? json.Stats : {};
+	if (stats.files !== 0) return undefined;
+	const errors = isRecord(json["Golang errors"]) ? json["Golang errors"] : {};
+	for (const list of Object.values(errors))
+		for (const e of arr(list))
+			if (isRecord(e) && typeof e.error === "string") return e.error.trim();
+	return undefined;
+};
 
 /* -------------------------------------------------------------------------- */
 /*                                  brakeman                                  */
@@ -479,6 +502,12 @@ export const brakeman = defineAuditor({
 			}
 			if (appDir === undefined)
 				return yield* skip("No Rails application found");
+			// Brakeman refuses (exit 4) a directory without app/.
+			const appPrefix = appDir === "." ? "app/" : `${appDir}/app/`;
+			if (!files.some((f) => f.startsWith(appPrefix)))
+				return yield* skip(
+					`The Rails app in ${appDir === "." ? "the root" : appDir} has no app/ directory, which Brakeman needs`,
+				);
 			const bin = yield* requireTool(
 				ctx,
 				"brakeman",

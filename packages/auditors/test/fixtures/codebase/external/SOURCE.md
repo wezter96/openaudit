@@ -52,3 +52,8 @@ Cross-checked against tool source, not recorded (the Rust toolchain is too big t
   beautifulsoup 3.2.2 trip source-code YARA rules. No known-malicious package
   was downloaded: the registries remove them, and the typosquats here are npm
   security placeholders or harmless.
+
+- `gosec-load-error.json`: gosec 2.29.0 (`-fmt json -no-fail ./...`, no
+  `-quiet`) in the openaudit full image (Go 1.27.1, `GOTOOLCHAIN=local`) on a
+  module whose go.mod says `go 1.99`: no package loads, so `Stats.files` is 0
+  and the reason is in `Golang errors`. With `-quiet` gosec prints nothing.
