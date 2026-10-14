@@ -1,6 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { isAbsolute, join, relative } from "node:path";
+import { isAbsolute, relative } from "node:path";
 import {
 	type AuditContext,
 	AuditorError,
@@ -10,6 +8,7 @@ import {
 } from "@openaudit/core";
 import { Effect } from "effect";
 
+import { withTempDir as withScratchDir } from "../../tool";
 import { truncate } from "../util";
 
 /* -------------------------------------------------------------------------- */
@@ -55,16 +54,7 @@ export const findFiles = (
 /** Runs `fn` with a scratch directory that is always removed afterwards. */
 export const withTempDir = <A, E>(
 	fn: (dir: string) => Effect.Effect<A, E>,
-): Effect.Effect<A, E | AuditorError> =>
-	Effect.acquireUseRelease(
-		Effect.tryPromise({
-			try: () => mkdtemp(join(tmpdir(), "openaudit-sc-")),
-			catch: (cause) =>
-				new AuditorError({ message: "Could not create temp dir", cause }),
-		}),
-		fn,
-		(dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })),
-	);
+): Effect.Effect<A, E | AuditorError> => withScratchDir("openaudit-sc-", fn);
 
 /** Runs a tool; fails with its stderr unless the exit code is in `okCodes`. */
 export const run = (

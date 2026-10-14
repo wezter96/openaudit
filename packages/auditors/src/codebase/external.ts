@@ -24,6 +24,7 @@ import {
 	runTool,
 	severityOf,
 	str,
+	withTempDir,
 } from "../tool";
 import { type OsvVuln, osvSeverity, severityFromScore } from "./dependencies";
 import { cweUrl, isRecord, kebab, scrubLine, truncate } from "./util";
@@ -442,6 +443,22 @@ export const parseTrivyReport = (
 	return findings;
 };
 
+/**
+ * trivy's misconfig scanners minus `terraform`, which clones remote modules
+ * (git URLs chosen by the target) with no switch to stop it. Checkov, TFLint
+ * and iac.terraform cover Terraform without fetching anything.
+ */
+const TRIVY_MISCONFIG_SCANNERS = [
+	"azure-arm",
+	"cloudformation",
+	"dockerfile",
+	"helm",
+	"kubernetes",
+	"terraformplan-json",
+	"terraformplan-snapshot",
+	"ansible",
+];
+
 export const trivyFs = defineAuditor({
 	id: "code.trivy-fs",
 	title: "Trivy filesystem scan",
@@ -461,21 +478,26 @@ export const trivyFs = defineAuditor({
 				"trivy",
 				"Install: brew install trivy (https://trivy.dev/latest/getting-started/installation/).",
 			);
-			const res = yield* runTool(
-				ctx,
-				[
-					bin,
-					"fs",
-					"--format",
-					"json",
-					"--scanners",
-					"vuln,secret,misconfig",
-					...DEFAULT_IGNORES.flatMap((d) => ["--skip-dirs", `**/${d}`]),
-					"--quiet",
-					ws.root,
-				],
-				ws.root,
-				[0],
+			// From a scratch dir: trivy reads trivy.yaml from its cwd.
+			const res = yield* withTempDir("openaudit-trivy-", (cwd) =>
+				runTool(
+					ctx,
+					[
+						bin,
+						"fs",
+						"--format",
+						"json",
+						"--scanners",
+						"vuln,secret,misconfig",
+						"--misconfig-scanners",
+						TRIVY_MISCONFIG_SCANNERS.join(","),
+						...DEFAULT_IGNORES.flatMap((d) => ["--skip-dirs", `**/${d}`]),
+						"--quiet",
+						ws.root,
+					],
+					cwd,
+					[0],
+				),
 			);
 			return parseTrivyReport(
 				yield* parseJson(res.stdout, "trivy"),

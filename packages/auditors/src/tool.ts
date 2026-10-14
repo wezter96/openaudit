@@ -1,4 +1,6 @@
-import { isAbsolute, relative } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { isAbsolute, join, relative } from "node:path";
 import {
 	type AuditContext,
 	AuditorError,
@@ -108,3 +110,21 @@ export const runTool = (
 /* -------------------------------------------------------------------------- */
 /*                                  gitleaks                                  */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * Runs `fn` with a scratch directory that is always removed afterwards. Use it
+ * as the cwd of tools that read config from their working directory.
+ */
+export const withTempDir = <A, E>(
+	prefix: string,
+	fn: (dir: string) => Effect.Effect<A, E>,
+): Effect.Effect<A, E | AuditorError> =>
+	Effect.acquireUseRelease(
+		Effect.tryPromise({
+			try: () => mkdtemp(join(tmpdir(), prefix)),
+			catch: (cause) =>
+				new AuditorError({ message: "Could not create temp dir", cause }),
+		}),
+		fn,
+		(dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })),
+	);

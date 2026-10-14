@@ -1,6 +1,3 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import {
 	type AuditContext,
 	AuditorError,
@@ -8,7 +5,7 @@ import {
 } from "@openaudit/core";
 import { Effect } from "effect";
 
-import { relPath } from "../../tool";
+import { relPath, withTempDir as withScratchDir } from "../../tool";
 import { baseName, truncate } from "../util";
 
 const MODULE_LIMIT = 10;
@@ -67,16 +64,7 @@ export const run = (
 /** Runs `fn` with a scratch directory that is always removed afterwards. */
 export const withTempDir = <A, E>(
 	fn: (dir: string) => Effect.Effect<A, E>,
-): Effect.Effect<A, E | AuditorError> =>
-	Effect.acquireUseRelease(
-		Effect.tryPromise({
-			try: () => mkdtemp(join(tmpdir(), "openaudit-lint-")),
-			catch: (cause) =>
-				new AuditorError({ message: "Could not create temp dir", cause }),
-		}),
-		fn,
-		(dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })),
-	);
+): Effect.Effect<A, E | AuditorError> => withScratchDir("openaudit-lint-", fn);
 
 /** Directories of the given manifest files, outermost only. */
 export const manifestDirs = (

@@ -119,7 +119,10 @@ describe("external tool parsers", () => {
 const runWithExec = (
 	auditor: Auditor,
 	which: (bin: string) => string | undefined,
-	run: (cmd: ReadonlyArray<string>) => Promise<ExecResult>,
+	run: (
+		cmd: ReadonlyArray<string>,
+		opts?: { cwd?: string },
+	) => Promise<ExecResult>,
 ): Promise<Report> =>
 	Effect.runPromise(
 		runAudit({
@@ -133,7 +136,8 @@ const runWithExec = (
 					Http.layer,
 					Layer.succeed(Exec, {
 						which: (bin: string) => Effect.succeed(which(bin)),
-						run: (cmd: ReadonlyArray<string>) => Effect.promise(() => run(cmd)),
+						run: (cmd: ReadonlyArray<string>, opts?: { cwd?: string }) =>
+							Effect.promise(() => run(cmd, opts)),
 					}),
 				),
 			),
@@ -226,11 +230,13 @@ describe("external tool auditors", () => {
 			],
 		});
 		let args: ReadonlyArray<string> = [];
+		let cwd: string | undefined;
 		const report = await runWithExec(
 			trivyFs,
 			(bin) => `/usr/local/bin/${bin}`,
-			async (cmd) => {
+			async (cmd, opts) => {
 				args = cmd;
+				cwd = opts?.cwd;
 				return {
 					code: 0,
 					stdout: JSON.stringify({
@@ -244,6 +250,15 @@ describe("external tool auditors", () => {
 			},
 		);
 		expect(args).toContain("**/node_modules");
+		// Not from the target: trivy reads trivy.yaml from its working directory.
+		expect(cwd).toBeDefined();
+		expect(cwd).not.toBe(fixture("codebase", "external"));
+		expect(cwd?.startsWith(fixture("codebase", "external"))).toBe(false);
+		// Its Terraform scanner clones remote modules (target-chosen git URLs)
+		// and has no switch to stop it; Checkov and TFLint cover Terraform.
+		const scanners = args[args.indexOf("--misconfig-scanners") + 1] ?? "";
+		expect(scanners.split(",")).toContain("dockerfile");
+		expect(scanners.split(",")).not.toContain("terraform");
 		expect(report.results[0]?.findings.map((f) => f.location?.file)).toEqual([
 			"Dockerfile",
 		]);
