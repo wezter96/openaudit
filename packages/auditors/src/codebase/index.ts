@@ -17,6 +17,7 @@ import {
 	shellcheck,
 	staticcheck,
 } from "./lint-langs";
+import { lockfiles } from "./lockfiles";
 import { mobsfscan } from "./mobsfscan";
 import { performanceAuditor } from "./performance";
 import { privacy as codePrivacy } from "./privacy";
@@ -36,6 +37,7 @@ export const codebaseAuditors: ReadonlyArray<Auditor> = [
 	security,
 	dependencies,
 	licenses,
+	lockfiles,
 	accessibility,
 	performanceAuditor,
 	quality,
