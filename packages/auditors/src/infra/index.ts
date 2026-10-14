@@ -10,9 +10,11 @@ import { hadolint } from "./hadolint";
 import { image } from "./image";
 import { kics } from "./kics";
 import { kubeLinter } from "./kube-linter";
+import { kubeconform } from "./kubeconform";
 import { kubernetes } from "./kubernetes";
 import { kubescape } from "./kubescape";
 import { terraform } from "./terraform";
+import { tflint } from "./tflint";
 import { zizmor } from "./zizmor";
 
 export const infraAuditors: ReadonlyArray<Auditor> = [
@@ -27,7 +29,9 @@ export const infraAuditors: ReadonlyArray<Auditor> = [
 	kubernetes,
 	kubeLinter,
 	kubescape,
+	kubeconform,
 	terraform,
+	tflint,
 	checkov,
 	kics,
 ];

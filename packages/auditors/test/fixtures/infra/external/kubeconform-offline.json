@@ -1,0 +1,26 @@
+{
+  "resources": [
+    {
+      "filename": "./deploy/crds.yaml",
+      "kind": "Certificate",
+      "name": "site",
+      "version": "cert-manager.io/v1",
+      "status": "statusError",
+      "msg": "failed downloading schema at https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/certificate-cert-manager-v1.json: Get \"https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/certificate-cert-manager-v1.json\": GET https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/certificate-cert-manager-v1.json giving up after 3 attempt(s): Get \"https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/certificate-cert-manager-v1.json\": proxyconnect tcp: dial tcp 127.0.0.1:9: connect: connection refused"
+    },
+    {
+      "filename": "./deploy/crds.yaml",
+      "kind": "Widget",
+      "name": "gizmo",
+      "version": "widgets.example.com/v1",
+      "status": "statusError",
+      "msg": "failed downloading schema at https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/widget-widgets-v1.json: Get \"https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/widget-widgets-v1.json\": GET https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/widget-widgets-v1.json giving up after 3 attempt(s): Get \"https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/widget-widgets-v1.json\": proxyconnect tcp: dial tcp 127.0.0.1:9: connect: connection refused"
+    }
+  ],
+  "summary": {
+    "valid": 0,
+    "invalid": 0,
+    "errors": 2,
+    "skipped": 0
+  }
+}

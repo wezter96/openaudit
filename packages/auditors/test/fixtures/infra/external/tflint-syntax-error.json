@@ -1,0 +1,1 @@
+{"issues":[],"errors":[{"summary":"Invalid expression","message":"Expected the start of an expression, but found an invalid expression token.","severity":"error","range":{"filename":"broken/main.tf","start":{"line":2,"column":9},"end":{"line":3,"column":1}}}]}
