@@ -370,6 +370,11 @@ code {
 	font-size: 0.86em;
 }
 
+/* An inline path or flag may break anywhere rather than widen a phone screen. */
+:not(pre) > code {
+	overflow-wrap: anywhere;
+}
+
 [hidden] {
 	/* biome-ignore lint/complexity/noImportantStyles: hidden must win over any display rule */
 	display: none !important;

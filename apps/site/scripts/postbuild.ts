@@ -22,6 +22,7 @@ import { dirname, join, relative } from "node:path";
 import { Resvg } from "@resvg/resvg-js";
 import { capPoint, clamp, segments, ticks } from "../src/lib/dial";
 import { writeAgentFiles } from "./agents";
+import { withSiteBar } from "./site-bar";
 
 const site = join(import.meta.dir, "..");
 const repo = join(site, "..", "..");
@@ -88,6 +89,8 @@ const GRADE: Record<string, string> = {
 	D: "#b4380f",
 	F: "#a1123a",
 };
+const sha = (s: string) =>
+	`'sha256-${createHash("sha256").update(s).digest("base64")}'`;
 const esc = (s: string) =>
 	s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -215,8 +218,10 @@ const decodeEntities = (s: string) =>
 		.replace(/&amp;/g, "&");
 
 /**
- * The copied pages get the same head links and social tags as Astro's pages.
- * Only <link> and <meta> tags are added, so their CSP hashes still hold.
+ * The copied pages get the same head links and social tags as Astro's pages,
+ * and the site's navigation bar (scripts/site-bar.ts). The bar's stylesheet
+ * is hashed into the report's own CSP; the architecture page's policy is
+ * built from its inline styles further down, so it includes the bar's.
  */
 const COPIED: Record<
 	string,
@@ -260,6 +265,11 @@ for (const f of html.filter(copied)) {
 		'<meta name="twitter:card" content="summary_large_image">',
 	].join("\n");
 	page = page.replace("</head>", `${tags}\n</head>`);
+	const bar = withSiteBar(page, { base: BASE, current: info.path });
+	page = bar.page.replace(
+		/(<meta http-equiv="Content-Security-Policy" content="[^"]*style-src )/,
+		`$1${sha(bar.style)} `,
+	);
 	await Bun.write(f, page);
 }
 
@@ -333,8 +343,6 @@ if (process.env.CUSTOM_DOMAIN) {
 
 /* ---------------------------------------------------------------- headers */
 
-const sha = (s: string) =>
-	`'sha256-${createHash("sha256").update(s).digest("base64")}'`;
 const scriptHashes = new Set<string>();
 const styleHashes = new Set<string>();
 const policy = (scripts: Iterable<string>, styles: Iterable<string>) =>

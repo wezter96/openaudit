@@ -3,7 +3,7 @@ import "../styles/global.css";
 import Icon from "../components/Icon.astro";
 import Logo from "../components/Logo.astro";
 import { clamp } from "../lib/dial";
-import { BLOB, markdownPath, NAV, OPENSVERIGE, ogName, pageUrl, REPO, self, u, unbase } from "../lib/site";
+import { AUTHOR, BLOB, markdownPath, NAV, OPENSVERIGE, ogName, pageUrl, REPO, self, u, unbase } from "../lib/site";
 
 interface Props {
 	readonly title: string;
@@ -147,6 +147,7 @@ const grade = self.grade ?? "";
 							<li><a href={`${BLOB}/SECURITY.md`}>Security policy</a></li>
 							<li><a href={`${BLOB}/LICENSE`}>Licence (MIT)</a></li>
 							<li><a href={OPENSVERIGE}>OpenSverige</a></li>
+							<li><a href={AUTHOR.url}>{AUTHOR.name}</a></li>
 						</ul>
 					</div>
 				</div>

@@ -1,5 +1,6 @@
 import registry from "../generated/registry.json";
 import selfAudit from "../generated/self-audit.json";
+import { NAV, REPO } from "./nav";
 
 /** The deployment origin and base path, from astro.config.ts. */
 export const SITE = import.meta.env.SITE.replace(/\/$/, "");
@@ -11,19 +12,13 @@ export const unbase = (pathname: string) =>
 	BASE && pathname.startsWith(BASE)
 		? pathname.slice(BASE.length) || "/"
 		: pathname;
-export const REPO = "https://github.com/wezter96/openaudit";
+export { NAV, REPO };
 export const BLOB = `${REPO}/blob/main`;
 export const OPENSVERIGE = "https://opensverige.se/";
+export const AUTHOR = { name: "Anton Wester", url: "https://antonwester.se/" };
 export const IMAGE = "ghcr.io/wezter96/openaudit";
 
 export const PITCH = "One scored audit of everything you ship.";
-
-export const NAV = [
-	{ href: "/docs/", label: "Docs" },
-	{ href: "/auditors/", label: "Auditors" },
-	{ href: "/report/", label: "Live report" },
-	{ href: "/architecture/", label: "Architecture" },
-] as const;
 
 /** The docs pages, in reading order; titles and descriptions live here only. */
 export const DOCS = [
