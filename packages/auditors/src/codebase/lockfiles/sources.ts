@@ -1,6 +1,7 @@
 import { redact } from "@openaudit/core";
 
 import { truncate } from "../util";
+import { scrubText } from "./scrub";
 
 /**
  * Hosts of the public npm registry. Registries where anyone can publish
@@ -283,12 +284,6 @@ const lenientUserinfo = (raw: string): string => {
 	return scheme !== -1 || /^[^:@]+:[^@]+$/.test(userinfo) ? userinfo : "";
 };
 
-/** Parameters (`?a=b`, `#a=b&c=d`); linear, as names stop at delimiters. */
-const PARAM = /([?#&;])([^=?#&;]*)=([^?#&;]*)/g;
-
-/** Parameter names whose value is likely a credential. */
-const SECRET_NAME = /token|auth|key|secret|passw|pwd|sig|credential/i;
-
 /**
  * A URL without credentials or query string, safe to show as evidence.
  * Userinfo is dropped up to the last `@`, however a parser splits it.
@@ -303,7 +298,10 @@ export const displayUrl = (input: string): string => {
 	try {
 		const url = new URL(raw);
 		if (url.protocol === "http:" || url.protocol === "https:")
-			return truncate(`${url.protocol}//${url.host}${url.pathname}`, 120);
+			return truncate(
+				scrubText(`${url.protocol}//${url.host}${url.pathname}`),
+				120,
+			);
 	} catch {
 		// Not a URL: git shorthands and scp-like `git@host:path` specs.
 	}
@@ -315,11 +313,7 @@ export const displayUrl = (input: string): string => {
 			: raw;
 	const q = withoutUser.indexOf("?");
 	return truncate(
-		(q === -1 ? withoutUser : withoutUser.slice(0, q)).replace(
-			PARAM,
-			(param, sep: string, name: string, value: string) =>
-				SECRET_NAME.test(name) ? `${sep}${name}=${redact(value)}` : param,
-		),
+		scrubText(q === -1 ? withoutUser : withoutUser.slice(0, q)),
 		120,
 	);
 };

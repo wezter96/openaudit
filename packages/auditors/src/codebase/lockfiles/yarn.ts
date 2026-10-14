@@ -301,10 +301,17 @@ export const parseYarnLock = (file: SourceFile): Lockfile | undefined => {
 					const isPath = /^(file|link|portal):/.test(bare);
 					// npm: packages outside the registry's usual tarball path
 					// are downloaded from the URL in their locator.
-					const archiveUrl =
+					// Several values: which one Yarn uses is not modelled.
+					const archiveUrls =
 						params === -1
-							? null
-							: new URLSearchParams(spec.slice(params + 2)).get("__archiveUrl");
+							? []
+							: new URLSearchParams(spec.slice(params + 2)).getAll(
+									"__archiveUrl",
+								);
+					const archiveUrl =
+						archiveUrls.length > 1
+							? "(several __archiveUrl values)"
+							: archiveUrls[0];
 					const checksum = scalar(value.checksum);
 					packages.push({
 						name,

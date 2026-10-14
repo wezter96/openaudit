@@ -1,6 +1,6 @@
 import type { Severity } from "@openaudit/core";
 
-import { isRecord, lineLocator, parseJsonc, truncate } from "../util";
+import { isRecord, lineLocator, parseJsonc } from "../util";
 
 export const LOCKFILES_ID = "code.lockfiles";
 
@@ -98,7 +98,9 @@ export const versionProblem = (
 	known: ReadonlyArray<number>,
 ): Problem[] => {
 	const v = Number.parseInt(String(version ?? ""), 10);
-	const shown = truncate(String(version ?? "none"), 20);
+	// Only a version number is echoed; anything else is file content.
+	const raw = String(version ?? "none");
+	const shown = /^\d{1,6}(\.\d{1,6})?$/.test(raw) ? raw : "not a number";
 	return known.includes(v)
 		? []
 		: [

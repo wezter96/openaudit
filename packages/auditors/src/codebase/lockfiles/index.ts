@@ -14,6 +14,7 @@ import { uncheckedFinding, unparsedConfigFinding } from "./findings";
 import { configFindings, lockfileFindings } from "./npm-findings";
 import { LOCKFILE_PARSERS, parseLockfile } from "./parse";
 import { pipfileFindings, requirementsFindings } from "./pip";
+import { scrubFinding } from "./scrub";
 import { dirOf, LOCKFILES_ID, MAX_LOCKFILE_BYTES } from "./shared";
 import { resolveInRepo } from "./sources";
 
@@ -26,6 +27,7 @@ export { lockfileFindings } from "./npm-findings";
 export { conflictSides, parseLockfile } from "./parse";
 export { pipfileFindings, requirementsFindings } from "./pip";
 export { parsePnpmLock } from "./pnpm";
+export { scrubFinding, scrubText } from "./scrub";
 export {
 	LOCKFILES_ID,
 	type LockedPackage,
@@ -77,11 +79,14 @@ export { parseYarnLock } from "./yarn";
  *   empties it, Yarn uses the fallback); a registry only the environment
  *   decides is reported but not checked. bunfig.toml expansion is not modelled.
  *
- * Findings never echo userinfo (up to the last `@`, however a parser splits
- * it) or token-like query and fragment parameters. A host WHATWG takes from
- * what another parser reads as userinfo is masked, so such a finding may
- * not name the host that is fetched. Tokens in a URL path (some hosted
- * registries put them there) are not recognised.
+ * Every finding passes through scrubFinding (scrub.ts) on the way out:
+ * userinfo (also scp-like, after a backslash or as `%40`), credential-named
+ * query, fragment and path parameters, JWTs, basic auth, well-known token
+ * prefixes and long mixed-case alphanumeric runs are masked with `redact`.
+ * A secret that looks like none of these (a short or lower-case token in a
+ * path segment with an ordinary name) can still be shown, and a host WHATWG
+ * takes from what another parser reads as userinfo is masked, so such a
+ * finding may not name the host that is fetched.
  */
 
 const isRequirements = (path: string) =>
@@ -281,6 +286,7 @@ export const lockfiles = defineAuditor({
 					...lockfileFindings(lock, configsFor(configs, lock), manifests),
 				);
 			}
-			return findings;
+			// Defence in depth: whatever the builders quoted, no credential leaves.
+			return findings.map(scrubFinding);
 		}),
 });

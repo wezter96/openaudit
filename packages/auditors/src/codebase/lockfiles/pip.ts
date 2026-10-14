@@ -12,6 +12,7 @@ import {
 	rule,
 	tlsFinding,
 } from "./findings";
+import { scrubText } from "./scrub";
 import { dirOf, stripBom, unquote } from "./shared";
 import {
 	displayHost,
@@ -158,7 +159,9 @@ const pipDirectReference = (
 			what,
 			evidence,
 			ref !== undefined && /^[0-9a-f]{40}$/i.test(ref),
-			ref ? `${displayUrl(url)} at "${truncate(ref, 60)}"` : displayUrl(url),
+			ref
+				? `${displayUrl(url)} at "${truncate(scrubText(ref), 60)}"`
+				: displayUrl(url),
 			host,
 		);
 	}
