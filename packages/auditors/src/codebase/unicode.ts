@@ -12,14 +12,15 @@ import {
 	baseName,
 	cweUrl,
 	extOf,
-	fullLineAt,
+	isBinaryPath,
 	isFixturePath,
 	isGeneratedPath,
 	isLockfile,
+	isMinifiedPath,
 	languageOf,
-	lineLocator,
+	looksMinified,
+	MAX_SCAN_BYTES,
 	nonCodeMask,
-	readTextFiles,
 	type SourceFile,
 	scrubLine,
 	truncate,
@@ -257,32 +258,129 @@ const escapeChar = (ch: string): string => {
 const label = (cp: number) =>
 	`${NAMES.get(cp) ?? "CHARACTER"} (U+${cp.toString(16).toUpperCase().padStart(4, "0")})`;
 
+/** Hidden payloads are decoded only this far, so huge runs stay cheap. */
+const MAX_DECODE = 200;
+
 /** ASCII hidden in tag characters (U+E0020-U+E007E). */
-const decodeTags = (run: string): string =>
-	[...run]
-		.map((ch) => (ch.codePointAt(0) ?? 0) - 0xe0000)
+const decodeTags = (cps: ReadonlyArray<number>): string =>
+	cps
+		.map((cp) => cp - 0xe0000)
 		.filter((c) => c >= 0x20 && c <= 0x7e)
 		.map((c) => String.fromCharCode(c))
 		.join("");
 
 /** Subdivision flags such as England: U+1F3F4, tag letters, CANCEL TAG. */
-const isFlagSequence = (run: string, before: string): boolean =>
+const isFlagSequence = (cps: ReadonlyArray<number>, before: string): boolean =>
 	before === "\u{1F3F4}" &&
-	/^[\u{E0030}-\u{E0039}\u{E0061}-\u{E007A}]{2,6}\u{E007F}$/u.test(run);
+	cps.length >= 3 &&
+	cps.length <= 7 &&
+	cps.at(-1) === 0xe007f &&
+	cps
+		.slice(0, -1)
+		.every(
+			(cp) =>
+				(cp >= 0xe0030 && cp <= 0xe0039) || (cp >= 0xe0061 && cp <= 0xe007a),
+		);
 
 /**
  * Bytes hidden in variation selectors, one selector per byte (U+FE00-FE0F for
  * 0-15, U+E0100-E01EF for 16-255). Returns printable text or undefined.
  */
-const decodeSelectors = (run: string): string | undefined => {
-	const bytes = [...run].map((ch) => {
-		const cp = ch.codePointAt(0) ?? 0;
-		return cp <= 0xfe0f ? cp - 0xfe00 : cp - 0xe0100 + 16;
-	});
+const decodeSelectors = (cps: ReadonlyArray<number>): string | undefined => {
+	const bytes = cps.map((cp) =>
+		cp <= 0xfe0f ? cp - 0xfe00 : cp - 0xe0100 + 16,
+	);
 	const text = new TextDecoder().decode(new Uint8Array(bytes));
 	const printable = [...text].filter((c) => /[\x20-\x7E]/.test(c)).length;
 	return printable / Math.max(1, [...text].length) >= 0.7 ? text : undefined;
 };
+
+/** Line starts of a text, for line numbers and bounded evidence windows. */
+interface Lines {
+	readonly lineOf: (index: number) => number;
+	readonly startOf: (line: number) => number;
+	readonly endOf: (line: number) => number;
+}
+
+const indexLines = (text: string): Lines => {
+	let count = 1;
+	for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1))
+		count++;
+	const starts = new Int32Array(count);
+	let k = 1;
+	for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1))
+		starts[k++] = i + 1;
+	return {
+		lineOf: (index) => {
+			let lo = 0;
+			let hi = count - 1;
+			while (lo < hi) {
+				const mid = (lo + hi + 1) >> 1;
+				if ((starts[mid] ?? 0) <= index) lo = mid;
+				else hi = mid - 1;
+			}
+			return lo + 1;
+		},
+		startOf: (line) => starts[line - 1] ?? 0,
+		endOf: (line) => (line < count ? (starts[line] ?? 1) - 1 : text.length),
+	};
+};
+
+/** Lines up to this long are quoted whole, as fingerprints were before. */
+const EVIDENCE_LINE = 2000;
+/** On longer lines, raw characters kept before a hit (each may grow to 9 escaped). */
+const EVIDENCE_BEFORE = 24;
+const EVIDENCE_AFTER = 200;
+
+/**
+ * The escaped text around `index` on its line, scrubbed of secrets. Long
+ * lines are cut to a window before escaping, so evidence stays cheap on
+ * megabyte-long lines. Non-ASCII characters inside `reveal` are escaped too
+ * (homoglyphs).
+ */
+const evidenceAt = (
+	text: string,
+	lines: Lines,
+	index: number,
+	reveal?: readonly [number, number],
+): string => {
+	const line = lines.lineOf(index);
+	const lineStart = lines.startOf(line);
+	const lineEnd = lines.endOf(line);
+	const part = (a: number, b: number) =>
+		a < b ? escapeHidden(text.slice(a, b)) : "";
+	const escaped = (from: number, to: number) => {
+		if (!reveal) return part(from, to);
+		const a = Math.min(Math.max(reveal[0], from), to);
+		const b = Math.min(Math.max(reveal[1], from), to);
+		const revealed = [...text.slice(a, b)]
+			.map((c) => (/[\x20-\x7E]/.test(c) ? c : escapeChar(c)))
+			.join("");
+		return part(from, a) + revealed + part(b, to);
+	};
+	if (lineEnd - lineStart <= EVIDENCE_LINE) {
+		const whole = escaped(lineStart, lineEnd);
+		const col = part(lineStart, index).length;
+		const from = whole.length > 160 ? Math.max(0, col - 60) : 0;
+		return truncate(
+			scrubLine((from > 0 ? "…" : "") + whole.slice(from, from + 160)),
+		);
+	}
+	let from = Math.max(lineStart, index - EVIDENCE_BEFORE);
+	if (/[\uDC00-\uDFFF]/.test(text[from] ?? "")) from--;
+	let to = Math.min(lineEnd, index + EVIDENCE_AFTER);
+	if (/[\uD800-\uDBFF]/.test(text[to - 1] ?? "")) to++;
+	return truncate(
+		scrubLine(
+			(from > lineStart ? "…" : "") +
+				escaped(from, to) +
+				(to < lineEnd ? "…" : ""),
+		),
+	);
+};
+
+const charList = (cps: Iterable<number>) =>
+	[...new Set(cps)].map(label).join(", ");
 
 /* ------------------------------- homoglyphs ------------------------------- */
 
@@ -349,7 +447,7 @@ const isLatinLetter = (ch: string | undefined) =>
 
 interface Homoglyph {
 	readonly start: number;
-	readonly identifier: string;
+	readonly end: number;
 	readonly lookalike: string;
 	readonly mixed: boolean;
 }
@@ -359,40 +457,52 @@ interface Homoglyph {
  * to Latin letters (`sayHello` with a Cyrillic H), or an identifier made only
  * of look-alikes whose Latin twin appears in the same file (a Cyrillic `cop`
  * next to the Latin one). A cheap stand-in for UTS #39 confusable detection.
+ * Each identifier is visited once and the twins come from one pass over the
+ * file, so the work is linear in the text.
  */
-const findHomoglyphs = (text: string, mask: Uint8Array): Homoglyph[] => {
+const findHomoglyphs = (
+	text: string,
+	isCode: (index: number) => boolean,
+): Homoglyph[] => {
 	const out: Homoglyph[] = [];
-	const seen = new Set<number>();
+	let asciiIdentifiers: Set<string> | undefined;
+	let lastEnd = 0;
 	for (const m of text.matchAll(GREEK_OR_CYRILLIC)) {
-		let start = m.index ?? 0;
-		while (start > 0 && ID_PART.test(text[start - 1] ?? "")) start--;
-		if (seen.has(start) || mask[start]) continue;
-		seen.add(start);
-		let end = (m.index ?? 0) + 1;
+		const at = m.index ?? 0;
+		if (at < lastEnd) continue; // inside an identifier already checked
+		let start = at;
+		while (start > lastEnd && ID_PART.test(text[start - 1] ?? "")) start--;
+		let end = at + 1;
 		while (end < text.length && ID_PART.test(text[end] ?? "")) end++;
+		lastEnd = end;
+		if (!isCode(start)) continue;
 		const chars = [...text.slice(start, end)];
-		const identifier = chars.join("");
-		const lookalike = chars.map((c) => LATIN_LOOKALIKE[c] ?? c).join("");
 		const hasLatin = chars.some(isLatinLetter);
 		let mixed = false;
 		for (let i = 0; i < chars.length && hasLatin && !mixed; i++) {
 			if (!isGreekOrCyrillic(chars[i])) continue;
 			let j = i;
 			while (j < chars.length && isGreekOrCyrillic(chars[j])) j++;
-			const run = chars.slice(i, j);
+			let lookalikes = true;
+			for (let k = i; k < j && lookalikes; k++)
+				lookalikes = LATIN_LOOKALIKE[chars[k] ?? ""] !== undefined;
 			mixed =
-				run.every((c) => LATIN_LOOKALIKE[c] !== undefined) &&
-				(isLatinLetter(chars[i - 1]) || isLatinLetter(chars[j]));
+				lookalikes && (isLatinLetter(chars[i - 1]) || isLatinLetter(chars[j]));
 			i = j;
 		}
-		const wholeScript =
+		const lookalike = chars.map((c) => LATIN_LOOKALIKE[c] ?? c).join("");
+		let wholeScript = false;
+		if (
+			!mixed &&
 			!hasLatin &&
-			chars.filter((c) => /\p{L}/u.test(c)).length >= 2 &&
 			/^[\w$]+$/.test(lookalike) &&
-			new RegExp(
-				`(?<![\\w$])${lookalike.replaceAll("$", "\\$")}(?![\\w$])`,
-			).test(text);
-		if (mixed || wholeScript) out.push({ start, identifier, lookalike, mixed });
+			chars.filter((c) => /\p{L}/u.test(c)).length >= 2
+		) {
+			asciiIdentifiers ??= new Set(text.match(/[A-Za-z_$][\w$]*/g) ?? []);
+			wholeScript = asciiIdentifiers.has(lookalike);
+		}
+		if (mixed || wholeScript)
+			out.push({ start, end, lookalike: truncate(lookalike, 80), mixed });
 	}
 	return out;
 };
@@ -467,113 +577,6 @@ const RULES: Readonly<Record<RuleId, Rule>> = {
 	},
 };
 
-/** Findings per rule per file; the last one counts the rest. */
-const MAX_PER_RULE = 20;
-
-interface Hit {
-	readonly rule: RuleId;
-	readonly index: number;
-	readonly severity: Severity;
-	readonly confidence: Confidence;
-	/** Reported code points; merged per line before `message` renders them. */
-	readonly chars: ReadonlyArray<number>;
-	readonly message: (chars: string) => string;
-	readonly evidence?: string;
-}
-
-/** The escaped line around `index`, scrubbed of secrets. */
-const evidenceAt = (text: string, index: number, raw?: string): string => {
-	const lineStart = text.lastIndexOf("\n", index - 1) + 1;
-	const line = raw ?? escapeHidden(fullLineAt(text, index));
-	const col = escapeHidden(text.slice(lineStart, index)).length;
-	const from = line.length > 160 ? Math.max(0, col - 60) : 0;
-	const snippet = (from > 0 ? "…" : "") + line.slice(from, from + 160);
-	return truncate(scrubLine(snippet));
-};
-
-const charList = (cps: ReadonlyArray<number>) =>
-	[...new Set(cps)].map(label).join(", ");
-
-/** Scans one file. Exported for unit tests. */
-export const scanUnicode = (file: SourceFile): FindingInput[] => {
-	const { path, text } = file;
-	const kind = kindOf(path);
-	if (!kind || !/[^\p{ASCII}]/u.test(text)) return [];
-	const lang = kind === "code" ? languageOf(path) : undefined;
-	let mask: Uint8Array | undefined;
-	const maskOf = () => {
-		if (lang) mask ??= nonCodeMask(text, lang);
-		return mask;
-	};
-	// The mask fills comments from their opening delimiter but strings from
-	// after the quote, so a masked span that starts like a comment is one.
-	const regionAt = (index: number): Region => {
-		const m = maskOf();
-		if (!m?.[index]) return "code";
-		let start = index;
-		while (start > 0 && m[start - 1]) start--;
-		return /^(\/\/|\/\*|#)/.test(text.slice(start, start + 2))
-			? "comment"
-			: "string";
-	};
-	const hits: Hit[] = [];
-
-	for (const m of text.matchAll(HIDDEN)) {
-		// Split the run into segments of one group each.
-		const chars = [...m[0]];
-		let index = m.index ?? 0;
-		for (let k = 0; k < chars.length; ) {
-			const group = groupOf(chars[k]?.codePointAt(0) ?? 0);
-			let j = k;
-			while (
-				j < chars.length &&
-				groupOf(chars[j]?.codePointAt(0) ?? 0) === group
-			)
-				j++;
-			const segment = chars.slice(k, j).join("");
-			const hit = classify(group, segment, index, {
-				kind,
-				path,
-				prev: charBefore(text, index),
-				next: charAt(text, index + segment.length),
-				regionAt,
-			});
-			if (hit) hits.push(hit);
-			index += segment.length;
-			k = j;
-		}
-	}
-
-	if (lang && /[\u0370-\u03FF\u0400-\u052F]/.test(text)) {
-		const m = maskOf() ?? new Uint8Array(text.length);
-		for (const h of findHomoglyphs(text, m)) {
-			const lineStart = text.lastIndexOf("\n", h.start - 1) + 1;
-			const line = fullLineAt(text, h.start);
-			const col = h.start - lineStart;
-			const raw =
-				escapeHidden(line.slice(0, col)) +
-				[...h.identifier]
-					.map((c) => (/[\x20-\x7E]/.test(c) ? c : escapeChar(c)))
-					.join("") +
-				escapeHidden(line.slice(col + h.identifier.length));
-			hits.push({
-				rule: "mixed-script-identifier",
-				index: h.start,
-				severity: "medium",
-				confidence: "low",
-				chars: [],
-				message: () =>
-					h.mixed
-						? `Identifier mixes Latin letters with Cyrillic or Greek look-alikes and renders like "${h.lookalike}". Homoglyph identifiers can shadow or impersonate real ones (CVE-2021-42694).`
-						: `Identifier is spelled entirely with Cyrillic or Greek look-alikes of "${h.lookalike}", which also appears in this file. Homoglyph identifiers can shadow or impersonate real ones (CVE-2021-42694).`,
-				evidence: evidenceAt(text, h.start, raw),
-			});
-		}
-	}
-
-	return toFindings(path, text, hits);
-};
-
 const charBefore = (text: string, i: number): string => {
 	const low = text.charCodeAt(i - 1);
 	return i >= 2 && low >= 0xdc00 && low <= 0xdfff
@@ -599,15 +602,10 @@ interface Context {
 	readonly regionAt: (index: number) => Region;
 }
 
-const classify = (
-	group: Group,
-	segment: string,
-	index: number,
-	ctx: Context,
-): Hit | undefined => {
+const classify = (seg: Segment, ctx: Context): Hit | undefined => {
 	const { kind } = ctx;
-	const cps = [...segment].map((c) => c.codePointAt(0) ?? 0);
-	switch (group) {
+	const { cps, start: index } = seg;
+	switch (seg.group) {
 		case "bidi":
 			return {
 				rule: "bidi-control",
@@ -634,8 +632,8 @@ const classify = (
 					`Contains ${list}. Directional marks are invisible and can change how neighbouring code is displayed (Trojan Source, CVE-2021-42574).`,
 			};
 		case "tag": {
-			if (isFlagSequence(segment, ctx.prev)) return undefined;
-			const hidden = decodeTags(segment);
+			if (isFlagSequence(seg.head, ctx.prev)) return undefined;
+			const hidden = decodeTags(seg.head);
 			return {
 				rule: "tag-characters",
 				index,
@@ -649,9 +647,9 @@ const classify = (
 			};
 		}
 		case "selector": {
-			if (cps.length < 2 || cps.every((c) => c === 0xfe0e || c === 0xfe0f))
+			if (seg.count < 2 || cps.every((c) => c === 0xfe0e || c === 0xfe0f))
 				return undefined;
-			const decoded = decodeSelectors(segment);
+			const decoded = decodeSelectors(seg.head);
 			return {
 				rule: "variation-selector-run",
 				index,
@@ -659,12 +657,11 @@ const classify = (
 				confidence: "medium",
 				chars: cps,
 				message: () =>
-					`A run of ${cps.length} variation selectors follows one character. Each selector can encode a byte, so this is a known way to hide payloads in code and prompts${decoded ? `; it decodes to "${truncate(scrubLine(decoded), 120)}"` : ""}.`,
+					`A run of ${seg.count} variation selectors follows one character. Each selector can encode a byte, so this is a known way to hide payloads in code and prompts${decoded ? `; it decodes to "${truncate(scrubLine(decoded), 120)}"` : ""}.`,
 			};
 		}
 		case "invisible": {
-			if (index === 0 && cps[0] === 0xfeff && cps.length === 1)
-				return undefined;
+			if (index === 0 && cps[0] === 0xfeff && seg.count === 1) return undefined;
 			const reported = cps.filter(
 				(cp) =>
 					!legitimateInvisible(cp, ctx.prev, ctx.next) &&
@@ -729,41 +726,184 @@ const classify = (
 	}
 };
 
-const toFindings = (
-	path: string,
-	text: string,
-	hits: ReadonlyArray<Hit>,
+/** Findings per rule per file; the last one counts the rest. */
+const MAX_PER_RULE = 20;
+
+interface Hit {
+	readonly rule: RuleId;
+	readonly index: number;
+	readonly severity: Severity;
+	readonly confidence: Confidence;
+	/** Reported code points; merged per line before `message` renders them. */
+	readonly chars: ReadonlyArray<number>;
+	readonly message: (chars: string) => string;
+	/** Characters to reveal in evidence (homoglyph identifiers). */
+	readonly reveal?: readonly [number, number];
+}
+
+interface Kept extends Hit {
+	readonly line: number;
+	readonly allChars: Set<number>;
+}
+
+/**
+ * Groups hits into one finding per rule and line, keeping at most
+ * MAX_PER_RULE lines per rule and counting the rest, so memory stays bounded
+ * however many hits a hostile file produces. Hits arrive in text order.
+ */
+const collector = (lines: Lines) => {
+	const rules = new Map<
+		RuleId,
+		{ kept: Map<number, Kept>; more: number; lastMore: number }
+	>();
+	return {
+		add: (hit: Hit) => {
+			const line = lines.lineOf(hit.index);
+			let rule = rules.get(hit.rule);
+			if (!rule) {
+				rule = { kept: new Map(), more: 0, lastMore: 0 };
+				rules.set(hit.rule, rule);
+			}
+			const prior = rule.kept.get(line);
+			if (prior) {
+				for (const cp of hit.chars) prior.allChars.add(cp);
+				if (severityRank(hit.severity) < severityRank(prior.severity))
+					rule.kept.set(line, {
+						...hit,
+						index: prior.index,
+						reveal: prior.reveal,
+						line,
+						allChars: prior.allChars,
+					});
+			} else if (rule.kept.size < MAX_PER_RULE)
+				rule.kept.set(line, { ...hit, line, allChars: new Set(hit.chars) });
+			else if (line !== rule.lastMore) {
+				rule.more++;
+				rule.lastMore = line;
+			}
+		},
+		results: () => rules,
+	};
+};
+
+type Mode = "thorough" | "quick";
+
+export interface ScanOptions {
+	/**
+	 * `quick` runs only the rules attackers rely on (bidi controls, tag
+	 * characters, variation-selector payloads). The default picks `quick` for
+	 * files whose noisier rules would mostly report third-party text:
+	 * minified, generated, fixture and lock files, and files over 1 MB.
+	 */
+	readonly mode?: Mode;
+	/** Overrides the kind derived from the path (e.g. shebang scripts). */
+	readonly kind?: Kind;
+}
+
+/** Paths whose content is usually generated or third-party text. */
+const isNoisyPath = (path: string) =>
+	isMinifiedPath(path) ||
+	isFixturePath(path) ||
+	isGeneratedPath(path) ||
+	isLockfile(path);
+
+const modeOf = (file: SourceFile): Mode =>
+	isNoisyPath(file.path) ||
+	file.text.length > MAX_SCAN_BYTES ||
+	looksMinified(file.text)
+		? "quick"
+		: "thorough";
+
+interface Segment {
+	readonly group: Group;
+	readonly start: number;
+	readonly end: number;
+	readonly count: number;
+	/** Distinct code points in the segment. */
+	readonly cps: ReadonlyArray<number>;
+	/** The first MAX_DECODE code points, for decoding payloads. */
+	readonly head: ReadonlyArray<number>;
+}
+
+/** Scans one file. Linear in the text; exported for unit tests. */
+export const scanUnicode = (
+	file: SourceFile,
+	options: ScanOptions = {},
 ): FindingInput[] => {
-	const lineOf = lineLocator(text);
-	// One finding per rule and line, keeping the most severe hit.
-	const byKey = new Map<string, Hit & { line: number }>();
-	for (const hit of [...hits].sort((a, b) => a.index - b.index)) {
-		const line = lineOf(hit.index);
-		const key = `${hit.rule}:${line}`;
-		const prior = byKey.get(key);
-		if (!prior) byKey.set(key, { ...hit, line });
-		else {
-			const worse = severityRank(hit.severity) < severityRank(prior.severity);
-			byKey.set(key, {
-				...(worse ? hit : prior),
-				index: prior.index,
-				evidence: prior.evidence,
-				chars: [...prior.chars, ...hit.chars],
-				line,
-			});
+	const { path, text } = file;
+	const kind = options.kind ?? kindOf(path) ?? "text";
+	if (!/[^\p{ASCII}]/u.test(text)) return [];
+	const mode = options.mode ?? modeOf(file);
+	const lang = kind === "code" ? languageOf(path) : undefined;
+	let regions: Uint8Array | undefined;
+	let regionsDone = false;
+	// 0 code, 1 string, 2 comment. The mask fills comments from their opening
+	// delimiter but strings from after the quote, so one pass tells them apart.
+	const regionAt = (index: number): Region => {
+		if (!regionsDone) {
+			regionsDone = true;
+			regions = lang ? regionMap(text, lang) : undefined;
+		}
+		const r = regions?.[index] ?? 0;
+		return r === 0 ? "code" : r === 1 ? "string" : "comment";
+	};
+	const lines = indexLines(text);
+	const found = collector(lines);
+
+	for (const m of text.matchAll(HIDDEN)) {
+		const runEnd = (m.index ?? 0) + m[0].length;
+		// Split the run into segments of one group each.
+		for (let i = m.index ?? 0; i < runEnd; ) {
+			const start = i;
+			const group = groupOf(text.codePointAt(i) ?? 0);
+			const cps = new Set<number>();
+			const head: number[] = [];
+			let count = 0;
+			while (i < runEnd) {
+				const cp = text.codePointAt(i) ?? 0;
+				if (groupOf(cp) !== group) break;
+				cps.add(cp);
+				if (head.length < MAX_DECODE) head.push(cp);
+				count++;
+				i += cp > 0xffff ? 2 : 1;
+			}
+			if (mode === "quick" && (group === "mark" || group === "invisible"))
+				continue;
+			const hit = classify(
+				{ group, start, end: i, count, cps: [...cps], head },
+				{
+					kind,
+					path,
+					prev: charBefore(text, start),
+					next: charAt(text, i),
+					regionAt,
+				},
+			);
+			if (hit) found.add(hit);
 		}
 	}
-	const perRule = new Map<RuleId, Array<Hit & { line: number }>>();
-	for (const hit of byKey.values())
-		perRule.set(hit.rule, [...(perRule.get(hit.rule) ?? []), hit]);
+
+	if (mode === "thorough" && lang && /[\u0370-\u052F]/.test(text))
+		for (const h of findHomoglyphs(text, (i) => regionAt(i) === "code"))
+			found.add({
+				rule: "mixed-script-identifier",
+				index: h.start,
+				severity: "medium",
+				confidence: "low",
+				chars: [],
+				reveal: [h.start, h.end],
+				message: () =>
+					h.mixed
+						? `Identifier mixes Latin letters with Cyrillic or Greek look-alikes and renders like "${h.lookalike}". Homoglyph identifiers can shadow or impersonate real ones (CVE-2021-42694).`
+						: `Identifier is spelled entirely with Cyrillic or Greek look-alikes of "${h.lookalike}", which also appears in this file. Homoglyph identifiers can shadow or impersonate real ones (CVE-2021-42694).`,
+			});
+
 	const findings: Array<FindingInput & { index: number }> = [];
-	for (const [ruleId, list] of perRule) {
+	for (const [ruleId, { kept, more }] of found.results()) {
 		const rule = RULES[ruleId];
-		const kept = list.slice(0, MAX_PER_RULE);
-		const more = list.length - kept.length;
-		kept.forEach((hit, i) => {
-			const lineStart = text.lastIndexOf("\n", hit.index - 1) + 1;
-			const message = hit.message(charList(hit.chars));
+		const list = [...kept.values()];
+		list.forEach((hit, i) => {
+			const message = hit.message(charList(hit.allChars));
 			findings.push({
 				index: hit.index,
 				ruleId: `${AUDITOR}/${ruleId}`,
@@ -771,15 +911,15 @@ const toFindings = (
 				severity: hit.severity,
 				category: "security",
 				message:
-					more > 0 && i === kept.length - 1
+					more > 0 && i === list.length - 1
 						? `${message} (and ${more} more lines in this file)`
 						: message,
 				location: {
 					file: path,
 					line: hit.line,
-					column: hit.index - lineStart + 1,
+					column: hit.index - lines.startOf(hit.line) + 1,
 				},
-				evidence: hit.evidence ?? evidenceAt(text, hit.index),
+				evidence: evidenceAt(text, lines, hit.index, hit.reveal),
 				remediation: rule.remediation,
 				references: [...rule.references],
 				confidence: hit.confidence,
@@ -792,11 +932,71 @@ const toFindings = (
 		.map(({ index: _, ...f }) => f);
 };
 
-const shouldScan = (path: string) =>
-	kindOf(path) !== undefined &&
-	!isLockfile(path) &&
-	!isFixturePath(path) &&
-	!isGeneratedPath(path);
+/** Code/string/comment map from the lexer; undefined if it cannot lex. */
+const regionMap = (text: string, lang: string): Uint8Array | undefined => {
+	let mask: Uint8Array;
+	try {
+		mask = nonCodeMask(text, lang);
+	} catch {
+		return undefined; // treat everything as code: the stricter reading
+	}
+	const regions = new Uint8Array(text.length);
+	for (let i = 0; i < text.length; i++) {
+		if (!mask[i]) continue;
+		regions[i] =
+			i > 0 && mask[i - 1]
+				? (regions[i - 1] ?? 1)
+				: /^(\/\/|\/\*|#)/.test(text.slice(i, i + 2))
+					? 2
+					: 1;
+	}
+	return regions;
+};
+
+/* ---------------------------------- run ----------------------------------- */
+
+/** Files read per audit; beyond this the scan reports itself incomplete. */
+const MAX_FILES = 20_000;
+/** Largest file scanned (quick mode above MAX_SCAN_BYTES). */
+const MAX_FILE_BYTES = 16 * 1024 * 1024;
+/** Total bytes read per audit. */
+const MAX_TOTAL_BYTES = 512 * 1024 * 1024;
+
+/**
+ * Decodes file bytes. UTF-16 (with a BOM, or detected from the NUL pattern of
+ * mostly-ASCII text) is decoded as such, because compilers such as tsc and
+ * csc read it. Returns undefined for binary content when `sniff` is set; for
+ * known text kinds a NUL never hides the file.
+ */
+export const decodeText = (
+	bytes: Uint8Array,
+	sniff: boolean,
+): string | undefined => {
+	if (bytes[0] === 0xff && bytes[1] === 0xfe)
+		return new TextDecoder("utf-16le").decode(bytes);
+	if (bytes[0] === 0xfe && bytes[1] === 0xff)
+		return new TextDecoder("utf-16be").decode(bytes);
+	const head = bytes.subarray(0, 4096);
+	let even = 0;
+	let odd = 0;
+	for (let i = 0; i < head.length; i++)
+		if (head[i] === 0) {
+			if (i % 2) odd++;
+			else even++;
+		}
+	if (even + odd > 0) {
+		const half = head.length / 2;
+		if (odd > half * 0.6 && even < half * 0.1)
+			return new TextDecoder("utf-16le").decode(bytes);
+		if (even > half * 0.6 && odd < half * 0.1)
+			return new TextDecoder("utf-16be").decode(bytes);
+		if (sniff) return undefined;
+	}
+	return new TextDecoder().decode(bytes);
+};
+
+/** Agent files first, so caps never push them out of the scan. */
+const PRIORITY: Readonly<Record<Kind, number>> = { agent: 0, code: 1, text: 2 };
 
 export const unicode = defineAuditor({
 	id: AUDITOR,
@@ -809,7 +1009,84 @@ export const unicode = defineAuditor({
 	run: (ctx) =>
 		Effect.gen(function* () {
 			const ws = yield* requireWorkspace(ctx);
-			const files = yield* readTextFiles(ws, shouldScan);
-			return files.flatMap(scanUnicode);
+			// Every listed file is a candidate: skip heuristics such as
+			// minified, generated or fixture paths only quieten the noisier rules,
+			// since attackers control file names. Ignored directories and the
+			// user's disclosed ignore paths still apply.
+			const candidates = (yield* ws.files)
+				.map((path) => ({ path, kind: kindOf(path) }))
+				.sort(
+					(a, b) =>
+						(a.kind ? PRIORITY[a.kind] : 3) - (b.kind ? PRIORITY[b.kind] : 3),
+				);
+			const tooLarge: string[] = [];
+			let unread = Math.max(0, candidates.length - MAX_FILES);
+			let budget = MAX_TOTAL_BYTES;
+			const results = yield* Effect.forEach(
+				candidates.slice(0, MAX_FILES),
+				({ path, kind }) =>
+					Effect.gen(function* () {
+						const binary = isBinaryPath(path);
+						const size = yield* ws.size(path);
+						if (size === 0) return [];
+						// Binary formats are only sniffed when small enough to be text.
+						if (binary && size > MAX_SCAN_BYTES) return [];
+						if (size > MAX_FILE_BYTES) {
+							if (kind) tooLarge.push(path);
+							return [];
+						}
+						if (size > budget) {
+							unread++;
+							return [];
+						}
+						budget -= size;
+						const text = decodeText(yield* ws.readBytes(path), !kind);
+						if (text === undefined) return [];
+						return scanUnicode(
+							{ path, text },
+							{
+								kind: kind ?? (text.startsWith("#!") ? "code" : "text"),
+								mode: binary ? "quick" : undefined,
+							},
+						);
+					}).pipe(
+						Effect.orElseSucceed(() => {
+							unread++;
+							return [];
+						}),
+					),
+				{ concurrency: 16 },
+			);
+			const findings = results.flat();
+			if (tooLarge.length || unread)
+				findings.push(incomplete(tooLarge.sort(), unread));
+			return findings;
 		}),
 });
+
+const incomplete = (
+	tooLarge: ReadonlyArray<string>,
+	unread: number,
+): FindingInput => {
+	const parts: string[] = [];
+	if (tooLarge.length)
+		parts.push(
+			`${tooLarge.length} larger than 16 MB (${tooLarge.slice(0, 5).join(", ")}${tooLarge.length > 5 ? ", ..." : ""})`,
+		);
+	if (unread)
+		parts.push(
+			`${unread} beyond the ${MAX_FILES}-file / 512 MB budget or unreadable`,
+		);
+	return {
+		ruleId: `${AUDITOR}/scan-incomplete`,
+		title: "Some files were not scanned for hidden Unicode",
+		severity: "info",
+		category: "security",
+		message: `Files not scanned: ${parts.join("; ")}. Hidden characters in them would go unreported.`,
+		remediation:
+			"Audit the skipped paths separately (e.g. point openaudit at their directory), or remove oversized generated files from the repository.",
+		...(tooLarge.length === 1 ? { location: { file: tooLarge[0] } } : {}),
+		confidence: "high",
+		tags: ["hidden-unicode"],
+	};
+};
