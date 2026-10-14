@@ -1,6 +1,7 @@
 import { Resolver as NodeResolver } from "node:dns/promises";
 import {
 	type AuditContext,
+	AuditorError,
 	defineAuditor,
 	type FindingInput,
 	type HttpResponse,
@@ -437,6 +438,17 @@ export const makeDnsAuditor = (resolver: Resolver) =>
 
 				if (scope.kind !== "domain") return findings;
 				const domain = scope.domain;
+
+				// Every lookup on a nonexistent domain answers "no records", which
+				// would read as missing CAA, SPF and so on. Unknown (lookup failed)
+				// is not proof of absence, so only a definite NXDOMAIN stops here.
+				const exists = yield* attempt(() => resolver.nameExists(domain));
+				if (exists === false)
+					return yield* Effect.fail(
+						new AuditorError({
+							message: `${domain} does not exist in DNS (NXDOMAIN). Check the spelling of the target URL.`,
+						}),
+					);
 
 				const [mx, txt, dmarcTxt, caaCount, mtaStsTxt, tlsRptTxt] =
 					yield* Effect.all(
