@@ -59,6 +59,6 @@ export const jsonSchemaOf = (
 /** JSON Schema of the report that `--json` / `run_audit` emit. */
 export const reportJsonSchema = (): Record<string, unknown> =>
 	jsonSchemaOf(Report, {
-		$id: "https://openaudit.dev/schema/report-v1.json",
+		$id: "https://openaudit.se/schema/report-v1.json",
 		title: "openaudit report",
 	});

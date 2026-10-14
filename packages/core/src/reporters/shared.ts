@@ -1,4 +1,4 @@
-import type { Finding, Location, Report } from "../model";
+import type { Finding, Location, Report, SuppressionEntry } from "../model";
 import { severityRank } from "../model";
 
 /**
@@ -118,13 +118,29 @@ export interface SuppressionSummary {
 	readonly rules: number;
 	readonly paths: number;
 	readonly fingerprints: number;
+	/** Entries with a reason or expiry that removed findings. */
+	readonly entries?: ReadonlyArray<
+		SuppressionEntry & { readonly count: number }
+	>;
+	/** Entries past their `until` date, which no longer apply. */
+	readonly expired?: ReadonlyArray<SuppressionEntry>;
 }
 
 export const suppressedTotal = (s: SuppressionSummary): number =>
 	s.rules + s.paths + s.fingerprints;
 
-/** "12 findings suppressed by ./openaudit.config.json (10 by rule, 2 by path)". */
+/** True when a source removed findings or has expired entries to report. */
+export const hasSuppressionNotice = (s: SuppressionSummary): boolean =>
+	suppressedTotal(s) > 0 || (s.expired?.length ?? 0) > 0;
+
+/**
+ * "12 findings suppressed by ./openaudit.config.json (10 by rule, 2 by path)",
+ * plus how many of its entries expired.
+ */
 export const suppressionLine = (s: SuppressionSummary): string => {
+	const expired = s.expired?.length ?? 0;
+	if (suppressedTotal(s) === 0)
+		return `${plural(expired, "suppression")} in ${s.source} expired and no longer apply`;
 	const parts = (
 		[
 			["rule", s.rules],
@@ -134,8 +150,29 @@ export const suppressionLine = (s: SuppressionSummary): string => {
 	)
 		.filter(([, n]) => n > 0)
 		.map(([k, n]) => `${n} by ${k}`);
-	return `${plural(suppressedTotal(s), "finding")} suppressed by ${s.source} (${parts.join(", ")})`;
+	return `${plural(suppressedTotal(s), "finding")} suppressed by ${s.source} (${parts.join(", ")})${expired ? `; ${plural(expired, "suppression")} expired` : ""}`;
 };
+
+/** Reasons are written by whoever controls the config, so keep them short. */
+const clip = (text: string, max = 200) =>
+	text.length > max ? `${text.slice(0, max - 1)}…` : text;
+
+/**
+ * One line per entry with a reason or expiry that removed findings, and one
+ * per expired entry: "3 by path test/fixtures/**: intentionally vulnerable".
+ */
+export const suppressionDetails = (s: SuppressionSummary): string[] => [
+	...(s.entries ?? [])
+		.filter((e) => e.count > 0)
+		.map(
+			(e) =>
+				`${e.count} by ${e.kind} ${e.value}${e.until ? ` (until ${e.until})` : ""}${e.reason ? `: ${clip(e.reason)}` : ""}`,
+		),
+	...(s.expired ?? []).map(
+		(e) =>
+			`Expired ${e.until ?? ""}, no longer applied: ${e.kind} ${e.value}${e.reason ? ` (${clip(e.reason)})` : ""}`,
+	),
+];
 
 /**
  * JSON that is safe inside `<script type="application/json">`: `<`, `>` and

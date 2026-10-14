@@ -277,42 +277,7 @@ export const shannonEntropy = (s: string): number => {
 	return h;
 };
 
-/**
- * Parses JSON with comments and trailing commas (tsconfig, bun.lock).
- * Returns undefined when the text is not valid JSONC.
- */
-export const parseJsonc = (text: string): unknown => {
-	let out = "";
-	let i = 0;
-	const n = text.length;
-	while (i < n) {
-		const ch = text[i];
-		if (ch === '"') {
-			let j = i + 1;
-			while (j < n && text[j] !== '"') j += text[j] === "\\" ? 2 : 1;
-			out += text.slice(i, j + 1);
-			i = j + 1;
-		} else if (ch === "/" && text[i + 1] === "/") {
-			while (i < n && text[i] !== "\n") i++;
-		} else if (ch === "/" && text[i + 1] === "*") {
-			const end = text.indexOf("*/", i + 2);
-			i = end === -1 ? n : end + 2;
-		} else if (ch === ",") {
-			let j = i + 1;
-			while (j < n && /\s/.test(text[j] ?? "")) j++;
-			if (text[j] !== "}" && text[j] !== "]") out += ch;
-			i++;
-		} else {
-			out += ch;
-			i++;
-		}
-	}
-	try {
-		return JSON.parse(out);
-	} catch {
-		return undefined;
-	}
-};
+export { parseJsonc } from "@openaudit/core";
 
 export const isRecord = (v: unknown): v is Record<string, unknown> =>
 	typeof v === "object" && v !== null && !Array.isArray(v);

@@ -148,9 +148,9 @@ Elsewhere, run the CLI: `bunx @openaudit/cli . --diff origin/main -f html,sarif 
 
 ## Configuration
 
-`bunx @openaudit/cli init` writes an `openaudit.config.json` with suppressions (`ignore.rules`, `ignore.paths`, `ignore.fingerprints`), auditor selection and per-auditor settings, such as a dependency licence policy (`settings["code.licenses"]` with `deny` and `allow` lists of SPDX ids). Every report discloses how many findings each config or baseline suppressed.
+`bunx @openaudit/cli init` looks at the project and writes a commented `openaudit.config.jsonc`: a `$schema` for editor completion, `failOn`, suppressions for the test fixtures it finds, and the opt-in auditors that fit the stack. Suppressions (`ignore.rules`, `ignore.paths`, `ignore.fingerprints`) can carry a `reason` and an `until` date, after which they stop applying and openaudit warns. Every report discloses what each config or baseline suppressed, and why. Per-auditor settings include a dependency licence policy (`settings["code.licenses"]` with `deny` and `allow` lists of SPDX ids).
 
-A config found inside the audited target is written by whoever controls the target, so it can only narrow an audit or add its own licence policy. It cannot enable opt-in auditors, add credentials or switch off the `--fail-on` gate. Settings like that come only from flags or from a file passed with `--config <path>`. See [`apps/cli/README.md`](apps/cli/README.md#configuration).
+A config found inside the audited target is written by whoever controls the target, so it can only narrow an audit or add its own licence policy. It cannot enable opt-in auditors, add credentials or switch off the `--fail-on` gate. Settings like that come only from flags or from a file passed with `--config <path>`. In CI, pass the repository's own config with `--config` only where it has been reviewed, such as on pushes to the default branch, never on pull requests. See [`apps/cli/README.md`](apps/cli/README.md#configuration).
 
 ## Safety
 

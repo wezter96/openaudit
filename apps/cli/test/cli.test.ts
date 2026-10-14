@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Report, VERSION } from "@openaudit/core";
 import { Schema } from "effect";
+
+import { parseConfig } from "../src/config";
 
 const BIN = join(import.meta.dir, "..", "src", "bin.ts");
 
@@ -209,24 +211,52 @@ describe("--diff", () => {
 });
 
 describe("openaudit init + config", () => {
-	test("writes a config that the audit command honours", async () => {
+	test("writes a commented config that the audit command honours", async () => {
 		const project = await mkdtemp(join(tmpdir(), "openaudit-init-"));
 		await writeFile(join(project, "package.json"), "{}");
+		await mkdir(join(project, "test", "fixtures"), { recursive: true });
+		await writeFile(join(project, "test", "fixtures", "leak.js"), "x\n");
+
+		const printed = await cli(["init", "--print"], project);
+		expect(printed.code).toBe(0);
+		expect(printed.stdout).toContain(
+			'"$schema": "https://openaudit.se/schema/config.json"',
+		);
+		expect(
+			await Bun.file(join(project, "openaudit.config.jsonc")).exists(),
+		).toBe(false);
+
 		const init = await cli(["init"], project);
 		expect(init.code).toBe(0);
-		const configPath = join(project, "openaudit.config.json");
-		const config = JSON.parse(await Bun.file(configPath).text());
-		expect(config.failOn).toBe("high");
-		expect(config.ignore.rules).toEqual([]);
-		expect((await cli(["init"], project)).code).toBe(2);
+		const configPath = join(project, "openaudit.config.jsonc");
+		const text = await Bun.file(configPath).text();
+		expect(text).toBe(printed.stdout);
+		expect(text).toContain(
+			'{ "path": "**/test/fixtures/**", "reason": "Test fixtures: deliberately broken or vulnerable inputs" }',
+		);
+		const again = await cli(["init"], project);
+		expect(again.code).toBe(2);
+		expect(again.stderr).toContain("already exists (use --force to overwrite");
+		expect((await cli(["init", "--force"], project)).code).toBe(0);
 
-		config.failOn = "medium";
-		config.only = ["code.hygiene"];
-		await writeFile(configPath, JSON.stringify(config));
+		// The generated file is used as is, with no warnings.
+		const first = await cli(["--json", "--only", "code.hygiene"], project);
+		expect(first.stderr).toBe("");
+		expect(JSON.parse(first.stdout).results).toHaveLength(1);
+
+		const config = parseConfig(text, configPath);
+		const edited = {
+			...config,
+			failOn: "medium",
+			only: ["code.hygiene"],
+		};
+		await writeFile(configPath, JSON.stringify(edited));
 		expect((await cli(["--json"], project)).code).toBe(1);
 
-		config.ignore.rules = ["code.hygiene/*"];
-		await writeFile(configPath, JSON.stringify(config));
+		await writeFile(
+			configPath,
+			JSON.stringify({ ...edited, ignore: { rules: ["code.hygiene/*"] } }),
+		);
 		const ignored = await cli(["--json"], project);
 		expect(ignored.code).toBe(0);
 		expect(JSON.parse(ignored.stdout).summary.counts.medium).toBe(0);
@@ -234,7 +264,12 @@ describe("openaudit init + config", () => {
 		await writeFile(configPath, JSON.stringify({ failOn: "sometimes" }));
 		const invalid = await cli(["--json"], project);
 		expect(invalid.code).toBe(2);
-		expect(invalid.stderr).toContain("openaudit.config.json is invalid");
+		expect(invalid.stderr).toContain("openaudit.config.jsonc is invalid");
+
+		await writeFile(join(project, "openaudit.config.json"), "{}");
+		const both = await cli(["--json"], project);
+		expect(both.code).toBe(2);
+		expect(both.stderr).toContain("Keep one");
 		await rm(project, { recursive: true, force: true });
 	});
 });
@@ -332,7 +367,7 @@ describe("untrusted target config", () => {
 		await rm(root, { recursive: true, force: true });
 	});
 
-	test("discloses suppressions and --no-config bypasses them", async () => {
+	test("discloses suppressions", async () => {
 		const root = await project({
 			only: ["code.hygiene"],
 			ignore: {
@@ -356,6 +391,73 @@ describe("untrusted target config", () => {
 			{ source: "openaudit.config.json", rules: 1, paths: 1, fingerprints: 0 },
 		]);
 
+		await rm(root, { recursive: true, force: true });
+	});
+
+	test("discloses reasons, and expired suppressions stop applying", async () => {
+		const root = await project({
+			only: ["code.hygiene"],
+			ignore: {
+				paths: [
+					{ path: ".gitignore", reason: "Generated", until: "2999-12-31" },
+				],
+				rules: [
+					{
+						rule: "code.hygiene/lockfile-missing",
+						reason: "No dependencies yet",
+						until: "2000-01-01",
+					},
+				],
+			},
+		});
+		const json = await cli(["--json", "--fail-on", "medium"], root);
+		expect(json.stderr).toContain(
+			'1 suppression(s) expired and no longer apply: rule code.hygiene/lockfile-missing (until 2000-01-01). Fix the findings, or remove the entries or move their "until" dates.',
+		);
+		// The lockfile finding is back and trips the gate.
+		expect(json.code).toBe(1);
+		const report = JSON.parse(json.stdout);
+		const rules = report.results[0].findings.map(
+			(f: { ruleId: string }) => f.ruleId,
+		);
+		expect(rules).toContain("code.hygiene/lockfile-missing");
+		expect(report.suppressed).toEqual([
+			{
+				source: "openaudit.config.json",
+				rules: 0,
+				paths: 1,
+				fingerprints: 0,
+				entries: [
+					{
+						kind: "path",
+						value: ".gitignore",
+						reason: "Generated",
+						until: "2999-12-31",
+						count: 1,
+					},
+				],
+				expired: [
+					{
+						kind: "rule",
+						value: "code.hygiene/lockfile-missing",
+						reason: "No dependencies yet",
+						until: "2000-01-01",
+					},
+				],
+			},
+		]);
+		const terminal = await cli([], root);
+		expect(terminal.stdout).toContain(
+			"1 by path .gitignore (until 2999-12-31): Generated",
+		);
+		await rm(root, { recursive: true, force: true });
+	});
+
+	test("--no-config bypasses suppressions", async () => {
+		const root = await project({
+			only: ["code.hygiene"],
+			ignore: { rules: ["code.hygiene/lockfile-missing"] },
+		});
 		const bypass = await cli(
 			[
 				"--json",

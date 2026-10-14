@@ -2,6 +2,7 @@
 import config from "../../generated/config.json";
 import Docs from "../../layouts/Docs.astro";
 import { codeIn, inline, paragraphsIn, readRepo, render, section } from "../../lib/markdown";
+import { u } from "../../lib/site";
 
 const CLI = "apps/cli/README.md";
 const AGENT = "packages/agent/README.md";
@@ -11,13 +12,24 @@ const trust = paragraphsIn("README.md", "Configuration")[1] ?? "";
 
 interface Prop {
 	readonly type?: string;
+	readonly description?: string;
 	readonly enum?: ReadonlyArray<string>;
 	readonly items?: Prop;
+	readonly anyOf?: ReadonlyArray<Prop>;
 	readonly properties?: Record<string, Prop>;
+	readonly required?: ReadonlyArray<string>;
 	readonly additionalProperties?: boolean | Prop;
 }
-const typeOf = (p: Prop): string =>
-	p.enum ? p.enum.map((v) => `"${v}"`).join(" | ") : p.type === "array" && p.items ? `${typeOf(p.items)}[]` : (p.type ?? "any");
+const typeOf = (p: Prop): string => {
+	if (p.enum) return p.enum.map((v) => `"${v}"`).join(" | ");
+	if (p.anyOf) return `(${p.anyOf.map(typeOf).join(" | ")})`;
+	if (p.type === "array" && p.items) return `${typeOf(p.items)}[]`;
+	if (p.type === "object" && p.properties)
+		return `{ ${Object.keys(p.properties)
+			.map((k) => (p.required?.includes(k) ? k : `${k}?`))
+			.join(", ")} }`;
+	return p.type ?? "any";
+};
 
 const defaults = config.defaults as Record<string, unknown>;
 const defaultOf = (path: string[]): string => {
@@ -40,7 +52,7 @@ const walk = (props: Record<string, Prop>, path: string[]) => {
 			type: typeOf(p),
 			def: defaultOf(full),
 			trusted: config.trustedOnly.includes(key),
-			note: (config.comments as Record<string, string>)[k] ?? "",
+			note: p.description ?? "",
 		});
 	}
 };
@@ -90,7 +102,9 @@ const settingsText = paragraphsIn(AGENT, HEADLESS).find((p) => p.startsWith("The
 	{settingsCode && <Fragment set:html={render(`\`\`\`${settingsCode.lang ?? ""}\n${settingsCode.text}\n\`\`\``, AGENT)} />}
 	<p set:html={inline(settingsText, AGENT)} />
 	<h2 id="schema">JSON Schema</h2>
-	<p>Point your editor at it for completion and validation: <code>openaudit schema config &gt; openaudit.schema.json</code>.</p>
+	<p>
+		Published at <code>{config.schemaUrl}</code> (<a href={u("/schema/config.json")}>this site's copy</a>). <code>openaudit init</code> sets it as <code>$schema</code>, so editors complete keys, show these notes on hover and flag mistakes. Offline, <code>openaudit schema config</code> prints the same schema.
+	</p>
 	<details>
 		<summary>Show the schema</summary>
 		<pre>{JSON.stringify(config.schema, null, 2)}</pre>

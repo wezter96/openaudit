@@ -32,7 +32,7 @@ openaudit [target] [flags]          # same as: openaudit audit [target]
 | `-H, --header "Name: value"` | Extra header for the target origin only, e.g. an auth cookie for staging. Repeatable. |
 | `--agentic`, `--model <id>` | Run the LLM-driven auditors. Needs `ANTHROPIC_API_KEY` or Claude Code auth. |
 | `--ai` | Attach an AI-prioritised summary to the report. If this fails, openaudit prints a warning and continues. |
-| `--config <path>`, `--no-config` | Use a trusted config file, or ignore the target's `openaudit.config.json`. |
+| `--config <path>`, `--no-config` | Use a trusted config file, or ignore the target's `openaudit.config.json(c)`. |
 | `--concurrency <n>`, `-q/--quiet`, `--verbose` | |
 
 Other commands:
@@ -41,7 +41,7 @@ Other commands:
 | --- | --- |
 | `openaudit list [--json] [--target-kind url]` | Auditors (id, engine, categories, targets, external tool, on/off by default) and playbooks |
 | `openaudit doctor [--json]` | Bun version, external tools on PATH, Playwright/Chromium, AI credentials |
-| `openaudit init [--force]` | Write `openaudit.config.json` |
+| `openaudit init [--force] [--print]` | Write an `openaudit.config.jsonc` tailored to the project (`--print` shows it instead) |
 | `openaudit schema [report\|config]` | JSON Schema (draft 2020-12) of the report or the config file |
 | `openaudit mcp [--http]` | Start the MCP server on stdio, or over Streamable HTTP with `--http` |
 
@@ -58,24 +58,40 @@ Exit code 3 fails closed, so a target cannot pass CI by crashing the auditor tha
 
 ### Configuration
 
-`openaudit init` writes `openaudit.config.json`. Flags on the command line take precedence over it.
+`openaudit init` looks at the project with the same detection an audit uses and writes `openaudit.config.jsonc`: a `$schema` for editor completion and hover help, `failOn`, `ignore.paths` for the test fixture and third-party directories it finds (each with a reason), a commented licence policy, and the opt-in auditors that fit the stack. It refuses to overwrite an existing config without `--force`. The file may be named `openaudit.config.json` or `openaudit.config.jsonc` (not both), and either may hold comments and trailing commas. Flags on the command line take precedence over it. The schema is published at `https://openaudit.se/schema/config.json`; `openaudit schema config` prints it offline.
 
-A config found in the audited target is written by whoever controls the target, so it is only partly trusted. From there, openaudit honours `only` (which can only narrow the default set: it never enables opt-in or agentic auditors), `exclude`, `categories`, `failOn` (except `"none"`), `ignore`, `options.maxPages` and the licence policy in `options.settings["code.licenses"]` (it only adds findings), and prints a notice when the config narrows which auditors run. Settings that send data, cost money or add credentials (`options.agentic`, `ai`, `model`, `headers`, other auditors' `settings`, `browser`, ...) are ignored with a warning. Those settings are accepted only from flags or from a file passed explicitly with `--config <path>`. Every report states how many findings each config or baseline suppressed. Use `--no-config` to ignore the target's config entirely. **When CI audits untrusted changes (pull requests from forks), pass `--fail-on` and `--no-config` explicitly**, because the change itself can edit the config.
+A config found in the audited target is written by whoever controls the target, so it is only partly trusted. From there, openaudit honours `only` (which can only narrow the default set: it never enables opt-in or agentic auditors), `exclude`, `categories`, `failOn` (except `"none"`), `ignore`, `options.maxPages` and the licence policy in `options.settings["code.licenses"]` (it only adds findings), and prints a notice when the config narrows which auditors run. Settings that send data, cost money or add credentials (`options.agentic`, `ai`, `model`, `headers`, other auditors' `settings`, `browser`, ...) are ignored with a warning. Those settings are accepted only from flags or from a file passed explicitly with `--config <path>`. Every report states how many findings each config or baseline suppressed. Use `--no-config` to ignore the target's config entirely. **When CI audits untrusted changes (pull requests from forks), pass `--fail-on` and `--no-config` explicitly**, because the change itself can edit the config. See [CI](#ci-github-code-scanning) for when to trust the repository's own config.
 
-```json
+```jsonc
 {
-  "only": [],
+  "$schema": "https://openaudit.se/schema/config.json",
   "exclude": ["code.semgrep"],
-  "categories": [],
   "failOn": "high",
   "ignore": {
-    "rules": ["code.hygiene/ci-missing"],
-    "paths": ["test/fixtures/**"],
-    "fingerprints": []
+    "rules": [
+      { "rule": "code.hygiene/ci-missing", "reason": "CI lives in another repository" }
+    ],
+    "paths": [
+      "dist/**", // a plain string still works
+      { "path": "test/fixtures/**", "reason": "Deliberately vulnerable inputs" }
+    ],
+    "fingerprints": [
+      { "fingerprint": "0123456789abcdef", "reason": "Accepted until the API is retired", "until": "2026-12-31" }
+    ]
   },
   "options": { "maxPages": 10 }
 }
 ```
+
+#### Suppressions
+
+Each `ignore` entry is a string or an object with the pattern (`rule`, `path` or `fingerprint`) and optional `reason` and `until`:
+
+- `rule`: a rule id or pattern (`code.hygiene/ci-missing`, `web.seo/*`). `path`: a file glob relative to the target. `fingerprint`: a finding's `fingerprint` from a report.
+- `reason`: why it is suppressed. Reports list each entry that has a reason or expiry with the number of findings it removed.
+- `until`: the last day the entry applies (`YYYY-MM-DD`, UTC). After it the entry stops applying, its findings come back (and count towards `--fail-on`), openaudit warns on stderr, and the report lists it as expired. Use it for accepted risks that should be looked at again.
+
+Suppressed findings are never silently dropped: the terminal, Markdown and HTML reports and the JSON report's `suppressed` field show what each config, `--baseline` or `--diff` removed. Misspelt keys in an entry are rejected, so an `until` cannot be ignored by accident.
 
 #### Licence policy
 
@@ -211,6 +227,19 @@ Security model:
 ## CI: GitHub code scanning
 
 The simplest setup is the bundled GitHub Action (`action.yml` at the repository root). On pull requests it audits only the files the PR changed, uploads SARIF, attaches the reports (HTML, JSON, SARIF, Markdown) as an artifact, writes a job summary and fails on findings at or above `fail-on`. Inputs: `target`, `fail-on`, `diff` (defaults to the PR base; `none` audits everything), `only`, `exclude`, `config`, `upload-sarif`, `upload-report`. Outputs: `score`, `grade`, `report-dir`. Check out with `fetch-depth: 0` so the base branch's history is available. The job needs `security-events: write`.
+
+The repository's own config is found inside the target, so even in its own CI it is untrusted: it cannot turn on opt-in auditors or the settings that need `--config`. To use them, pass the file through the `config` input, but only on events where its content has been reviewed:
+
+```yaml
+- uses: wezter96/openaudit@<sha>
+  with:
+    fail-on: high
+    # Trusted on pushes, where the file is what was merged or pushed by someone
+    # with write access. On pull_request and pull_request_target the PR can edit it.
+    config: ${{ github.event_name == 'push' && 'openaudit.config.jsonc' || '' }}
+```
+
+On pull requests, either let the config stay untrusted (it can still narrow the audit and suppress findings, which the report discloses), or trust the base branch's copy, which the PR cannot change: run `git show "origin/$GITHUB_BASE_REF:openaudit.config.jsonc" > "$RUNNER_TEMP/openaudit.config.jsonc"` in a step before the Action and pass `config: ${{ runner.temp }}/openaudit.config.jsonc`. A PR's own changes to the config then take effect only after it is merged. There is deliberately no "trust the config" switch: one copied into a `pull_request` workflow would hand fork authors the trusted settings, while tying the path to the event keeps the decision visible.
 
 To run the CLI directly instead:
 

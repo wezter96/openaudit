@@ -18,10 +18,12 @@ export {
 	escapeHtml,
 	formatDuration,
 	formatLocation,
+	hasSuppressionNotice,
 	type SuppressionSummary,
 	sanitizeText,
 	sortedFindings,
 	suppressedTotal,
+	suppressionDetails,
 	suppressionLine,
 	targetLabel,
 } from "./shared";

@@ -10,7 +10,13 @@ import {
 } from "@openaudit/core";
 
 import { allAuditors, EXIT, type Io, processIo } from "./audit";
-import { CONFIG_FILE, configJsonSchema, DEFAULT_CONFIG } from "./config";
+import {
+	CONFIG_FILES,
+	ConfigError,
+	configJsonSchema,
+	findConfig,
+} from "./config";
+import { detectProject, initConfig } from "./init";
 
 const TARGET_KINDS: ReadonlyArray<TargetKind> = [
 	"codebase",
@@ -250,15 +256,39 @@ export const doctorCommand = (
 /* ---------------------------------- init ---------------------------------- */
 
 export const initCommand = async (
-	flags: { readonly force: boolean; readonly dir?: string },
+	flags: {
+		readonly force: boolean;
+		readonly dir?: string;
+		/** Print the config instead of writing it. */
+		readonly print?: boolean;
+	},
 	io: Io = processIo(),
+	auditors: ReadonlyArray<Auditor> = allAuditors(),
 ): Promise<number> => {
-	const path = resolve(io.cwd, flags.dir ?? ".", CONFIG_FILE);
-	if (!flags.force && (await Bun.file(path).exists())) {
-		io.stderr(`openaudit: ${path} already exists (use --force to overwrite)\n`);
+	const dir = resolve(io.cwd, flags.dir ?? ".");
+	let existing: string | undefined;
+	try {
+		existing = await findConfig(dir);
+	} catch (error) {
+		if (!(error instanceof ConfigError)) throw error;
+		io.stderr(`openaudit: ${error.message}\n`);
 		return EXIT.usage;
 	}
-	await Bun.write(path, json(DEFAULT_CONFIG));
+	if (existing && !flags.force && !flags.print) {
+		io.stderr(
+			`openaudit: ${existing} already exists (use --force to overwrite, or --print)\n`,
+		);
+		return EXIT.usage;
+	}
+	const text = initConfig(await detectProject(dir), auditors);
+	if (flags.print) {
+		io.stdout(text);
+		return EXIT.ok;
+	}
+	// With comments the file is JSONC; the .jsonc name keeps editors and
+	// linters from flagging them. An existing file keeps its name.
+	const path = existing ?? join(dir, CONFIG_FILES[1]);
+	await Bun.write(path, text);
 	io.stdout(`Created ${path}\n`);
 	return EXIT.ok;
 };

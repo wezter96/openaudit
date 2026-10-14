@@ -212,6 +212,17 @@ export const AiInsights = Schema.Struct({
 });
 export type AiInsights = typeof AiInsights.Type;
 
+/** One `ignore` entry of a config, as written there. */
+export const SuppressionEntry = Schema.Struct({
+	kind: Schema.Literals(["rule", "path", "fingerprint"]),
+	/** The rule pattern, path glob or fingerprint. */
+	value: Schema.String,
+	reason: Schema.optional(Schema.String),
+	/** Last day the entry applies (`YYYY-MM-DD`, UTC). */
+	until: Schema.optional(Schema.String),
+});
+export type SuppressionEntry = typeof SuppressionEntry.Type;
+
 /** Findings removed by one suppression source (config, baseline). */
 export const Suppression = Schema.Struct({
 	/** e.g. `./openaudit.config.json` or `--baseline report.json`. */
@@ -219,6 +230,20 @@ export const Suppression = Schema.Struct({
 	rules: Schema.Number,
 	paths: Schema.Number,
 	fingerprints: Schema.Number,
+	/**
+	 * Entries with a reason or an expiry date that removed findings, and how
+	 * many each removed. Added within schemaVersion 1; absent when none.
+	 */
+	entries: Schema.optional(
+		Schema.Array(
+			Schema.Struct({ ...SuppressionEntry.fields, count: Schema.Number }),
+		),
+	),
+	/**
+	 * Entries past their `until` date. They no longer suppress anything.
+	 * Added within schemaVersion 1; absent when none.
+	 */
+	expired: Schema.optional(Schema.Array(SuppressionEntry)),
 });
 export type Suppression = typeof Suppression.Type;
 
@@ -236,7 +261,10 @@ export const Report = Schema.Struct({
 	diff: Schema.optional(
 		Schema.Struct({ base: Schema.String, changedFiles: Schema.Number }),
 	),
-	/** Present when suppressions removed findings, so hidden results stay visible. */
+	/**
+	 * Present when suppressions removed findings or have expired, so hidden
+	 * results stay visible.
+	 */
 	suppressed: Schema.optional(Schema.Array(Suppression)),
 });
 export type Report = typeof Report.Type;

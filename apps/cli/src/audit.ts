@@ -11,6 +11,7 @@ import {
 	colorEnabled,
 	FORMAT_EXTENSIONS,
 	GitError,
+	hasSuppressionNotice,
 	isAtLeast,
 	isReportFormat,
 	limitToChangedFiles,
@@ -26,7 +27,13 @@ import {
 } from "@openaudit/core";
 import { Effect } from "effect";
 
-import { CONFIG_FILE, ConfigError, loadConfig } from "./config";
+import {
+	CONFIG_FILE,
+	ConfigError,
+	isoDay,
+	loadConfig,
+	resolveIgnores,
+} from "./config";
 import { createProgress } from "./progress";
 import { applySuppressions } from "./suppress";
 
@@ -71,6 +78,8 @@ export interface AuditFlags {
 	/** Ignore `openaudit.config.json` in the target. */
 	readonly noConfig?: boolean;
 	readonly allowErrors?: boolean;
+	/** Clock for `until` dates in suppressions; tests set it. */
+	readonly now?: Date;
 }
 
 export interface Io {
@@ -227,6 +236,14 @@ const audit = async (
 		io.stderr(
 			`openaudit: ignoring ${ignored.join(", ")} in ${configPath}: a config inside the audited target cannot enable settings that send data, cost money or add credentials. Use flags or --config <path> instead.\n`,
 		);
+	const ignores = resolveIgnores(
+		config.ignore,
+		isoDay(flags.now ?? new Date()),
+	);
+	if (ignores.expired.length && !flags.quiet)
+		io.stderr(
+			`openaudit: ${sanitizeText(`${configPath}: ${ignores.expired.length} suppression(s) expired and no longer apply: ${ignores.expired.map((e) => `${e.kind} ${e.value} (until ${e.until})`).join(", ")}. Fix the findings, or remove the entries or move their "until" dates.`)}\n`,
+		);
 
 	const formats = flags.json ? ["json"] : splitList(flags.format);
 	if (!formats.length) formats.push("terminal");
@@ -313,16 +330,18 @@ const audit = async (
 	const applied = applySuppressions(result.success, [
 		{
 			source: configPath ? shownPath(io.cwd, configPath) : CONFIG_FILE,
-			rules: config.ignore?.rules,
-			paths: config.ignore?.paths,
-			fingerprints: config.ignore?.fingerprints,
+			entries: ignores.active,
+			expired: ignores.expired,
 		},
 		{
 			source: `--baseline ${flags.baseline}`,
-			fingerprints: baseline,
+			entries: baseline.map((value) => ({
+				kind: "fingerprint" as const,
+				value,
+			})),
 		},
 	]);
-	let suppressed = applied.suppressed.filter((s) => suppressedTotal(s) > 0);
+	let suppressed = applied.suppressed.filter(hasSuppressionNotice);
 	let report: Report = suppressed.length
 		? { ...applied.report, suppressed }
 		: applied.report;
@@ -381,7 +400,8 @@ const audit = async (
 			: ["terminal", "markdown", "html"].includes(uniqueFormats[0] ?? ""));
 	if (!disclosedOnStdout && !flags.quiet)
 		for (const s of suppressed)
-			io.stderr(`openaudit: ${sanitizeText(suppressionLine(s))}\n`);
+			if (suppressedTotal(s) > 0)
+				io.stderr(`openaudit: ${sanitizeText(suppressionLine(s))}\n`);
 
 	if (failOn) {
 		const breached = report.results
