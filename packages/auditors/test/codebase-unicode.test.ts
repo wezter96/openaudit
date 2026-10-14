@@ -1,18 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import {
-	mkdirSync,
-	mkdtempSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { decodeTexts, scanUnicode, unicode } from "../src/codebase/unicode";
 import type { SourceFile } from "../src/codebase/util";
-import { fixture, runAuditor } from "./helpers";
-import { UNICODE_FIXTURES } from "./unicode-fixtures";
+import { runAuditor } from "./helpers";
+import { UNICODE_FIXTURES, writeUnicodeFixtures } from "./unicode-fixtures";
 
 const rule = (id: string) => `code.unicode/${id}`;
 
@@ -29,15 +23,13 @@ const byFile = (
 };
 
 describe("code.unicode", () => {
-	test("fixtures match their generator", () => {
-		for (const [path, text] of Object.entries(UNICODE_FIXTURES))
-			expect(readFileSync(fixture("codebase", "unicode", path), "utf8")).toBe(
-				text,
-			);
-	});
-
 	test("flags hidden Unicode and leaves legitimate text alone", async () => {
-		const report = await runAuditor(unicode, fixture("codebase", "unicode"));
+		const root = writeUnicodeFixtures(
+			mkdtempSync(join(tmpdir(), "openaudit-unicode-")),
+		);
+		const report = await runAuditor(unicode, root).finally(() =>
+			rmSync(root, { recursive: true, force: true }),
+		);
 		expect(report.results[0]?.status).toBe("failed");
 		const findings = report.results.flatMap((r) => r.findings);
 		expect(byFile(findings)).toEqual({

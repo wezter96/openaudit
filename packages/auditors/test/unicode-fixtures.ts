@@ -2,11 +2,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 /*
- * Source of truth for fixtures/codebase/unicode. Those files contain real
- * invisible and bidirectional characters, which editors and diff views hide
- * or reorder, so they are generated from the escapes below rather than edited
- * by hand. Regenerate with `bun test/unicode-fixtures.ts` from
- * packages/auditors; codebase-unicode.test.ts fails if a file drifts.
+ * Fixtures for code.unicode, written to a temp dir by the tests. They contain
+ * real invisible and bidirectional characters, and the agent instruction files
+ * among them carry hidden prompt-injection text, so they are never committed:
+ * a coding agent working in the repository would load a real AGENTS.md as
+ * instructions.
  */
 
 const RLO = "\u202E";
@@ -154,10 +154,11 @@ export const UNICODE_FIXTURES: Readonly<Record<string, string>> = {
 	"src/vendor.min.js": `var a="${RLO}";\n`,
 };
 
-if (import.meta.main) {
-	const root = join(import.meta.dir, "fixtures", "codebase", "unicode");
+/** Writes the fixtures under `root` and returns it. */
+export const writeUnicodeFixtures = (root: string): string => {
 	for (const [path, text] of Object.entries(UNICODE_FIXTURES)) {
 		mkdirSync(dirname(join(root, path)), { recursive: true });
 		writeFileSync(join(root, path), text);
 	}
-}
+	return root;
+};
