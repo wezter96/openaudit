@@ -616,6 +616,27 @@ describe("output boundary: no credential in any finding", () => {
 		for (const s of secrets) expect(text).not.toContain(s.toLowerCase());
 	});
 
+	test("the scrub strips userinfo however WHATWG spells a special URL", () => {
+		// WHATWG accepts any run of / and \ (or none) after a special scheme
+		// and drops tabs and newlines, so all of these carry a password.
+		const t = "s3cr3tvalue";
+		for (const s of [
+			`https:\\\\u:${t}@host`,
+			`https:/u:${t}@host`,
+			`https:u:${t}@host`,
+			`HTTPS:\\\\u:${t}@host.example`,
+			`wss:\\/u:${t}@host`,
+			`registry "https:\\\\u:${t}@h"`,
+			`https://u:${t}\t@host`,
+			`https://u:${t}\n@host`,
+		]) {
+			expect(new URL(s.replace(/^registry "|"$/g, "")).password).toBe(t);
+			expect(scrubText(s)).not.toContain(t);
+		}
+		// Non-special schemes need // for an authority, as in WHATWG.
+		expect(scrubText("npm:u@1.0.0")).toBe("npm:u@1.0.0");
+	});
+
 	test("the scrub is bounded on hostile strings", () => {
 		const n = 2_000_000;
 		const start = performance.now();

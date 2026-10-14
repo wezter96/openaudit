@@ -12,26 +12,27 @@ import { isRecord } from "../util";
 /** Longer strings are cut first; findings never need more. */
 const MAX_SCRUBBED = 16_384;
 
-/** Characters that end a URL's authority (not `\`, which other parsers keep). */
-const AUTHORITY_END = new Set([
-	"/",
-	"?",
-	"#",
-	" ",
-	"\t",
-	"\n",
-	'"',
-	"'",
-	"<",
-	">",
-]);
+/**
+ * Characters that end a URL's authority. Not `\`, which other parsers keep,
+ * and not tab or newline, which WHATWG deletes from anywhere in a URL.
+ */
+const AUTHORITY_END = new Set(["/", "?", "#", " ", '"', "'", "<", ">"]);
 
-/** Drops `scheme://userinfo@`, up to the last `@` or `%40` of the authority. */
+/** WHATWG special schemes: any run of `/` and `\`, even none, precedes the authority. */
+const SPECIAL = new Set(["http", "https", "ws", "wss", "ftp", "file"]);
+const SCHEME = /([A-Za-z][A-Za-z0-9+.-]*):([\\/]*)/g;
+
+/** Drops a URL's userinfo, up to the last `@` or `%40` of the authority. */
 const stripUrlUserinfo = (s: string): string => {
 	let out = "";
 	let from = 0;
-	for (let i = s.indexOf("://"); i !== -1; i = s.indexOf("://", i + 3)) {
-		const start = i + 3;
+	SCHEME.lastIndex = 0;
+	for (let m = SCHEME.exec(s); m; m = SCHEME.exec(s)) {
+		const scheme = (m[1] ?? "").toLowerCase();
+		const slashes = m[2] ?? "";
+		// Other schemes only have an authority after exactly `//`.
+		if (!SPECIAL.has(scheme) && slashes !== "//") continue;
+		const start = m.index + m[0].length;
 		let end = start;
 		while (end < s.length && !AUTHORITY_END.has(s[end] as string)) end++;
 		const authority = s.slice(start, end);
@@ -43,7 +44,8 @@ const stripUrlUserinfo = (s: string): string => {
 			out += s.slice(from, start);
 			from = start + cut;
 		}
-		i = end - 3;
+		// Linear: never rescan the authority just passed.
+		SCHEME.lastIndex = Math.max(end, m.index + 1);
 	}
 	return out + s.slice(from);
 };

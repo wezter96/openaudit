@@ -80,11 +80,13 @@ export { parseYarnLock } from "./yarn";
  *   decides is reported but not checked. bunfig.toml expansion is not modelled.
  *
  * Every finding passes through scrubFinding (scrub.ts) on the way out:
- * userinfo (also scp-like, after a backslash or as `%40`), credential-named
+ * userinfo (after any run of `/` and `\` that WHATWG accepts for a special
+ * scheme, across tabs and newlines, scp-like, or as `%40`), credential-named
  * query, fragment and path parameters, JWTs, basic auth, well-known token
  * prefixes and long mixed-case alphanumeric runs are masked with `redact`.
  * A secret that looks like none of these (a short or lower-case token in a
- * path segment with an ordinary name) can still be shown, and a host WHATWG
+ * path segment with an ordinary name, or a URL password holding a literal
+ * space, which ends the authority here) can still be shown, and a host WHATWG
  * takes from what another parser reads as userinfo is masked, so such a
  * finding may not name the host that is fetched.
  */
