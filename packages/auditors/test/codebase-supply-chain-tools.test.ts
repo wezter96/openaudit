@@ -589,6 +589,10 @@ describe("auditor runs", () => {
 		);
 		expect(calls[0]?.cmd.slice(1, 4)).toEqual(["audit", "--json", "-f"]);
 		expect(calls[0]?.cmd[4]).toEndWith("supply/cargo/Cargo.lock");
+		// Not the project dir, whose .cargo/audit.toml could ignore advisories.
+		expect(calls[0]?.options?.cwd).toStartWith(
+			join(tmpdir(), "openaudit-cargo-audit-"),
+		);
 		expect(report.results[0]?.findings.length).toBe(4);
 		expect(report.results[0]?.findings[0]?.location?.file).toBe("Cargo.lock");
 	});
@@ -610,6 +614,7 @@ describe("auditor runs", () => {
 					"--json",
 					"--config.ignore-pnpmfile=true",
 					"--config.manage-package-manager-versions=false",
+					"--config.pm-on-fail=ignore",
 				],
 			],
 			[bunAudit, "bun", "bun-audit.json", ["audit", "--json"]],

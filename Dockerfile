@@ -3,21 +3,25 @@
 # openaudit with the free scanners preinstalled.
 #
 #   docker build -t openaudit .                       # slim (default): no browser
-#   docker build --target full -t openaudit:full .    # + Chromium, Lighthouse, pa11y
+#   docker build --target full -t openaudit:full .    # + browser and language toolchains
 #   docker run --rm -v "$PWD:/src" -w /src openaudit .
 #
 # Every scanner is pinned to an exact version. Release binaries are verified against
 # the checksum file the project publishes, or against the SHA-256 pinned below when
-# the project publishes none (kube-linter, shellcheck, zizmor). Python and npm
-# packages are pinned by version; pip and bun verify registry hashes at download.
+# the project publishes none (kube-linter, shellcheck, zizmor, cargo-audit, and the
+# pnpm and brakeman packages). Python and npm packages are pinned by version; pip
+# and bun verify registry hashes at download. staticcheck and govulncheck are built
+# from source, and `go install` checks their modules against the Go checksum database.
 #
-# `full` also carries the runtimes some scanners need: PHP for PHPStan and a JRE
-# for PMD.
+# `full` also carries the runtimes some scanners need: PHP for PHPStan, a JRE for
+# PMD, a Go toolchain for gosec/staticcheck/govulncheck/golangci-lint (they
+# type-check the target through it), Ruby for brakeman, and Node.js for npm and
+# pnpm audit. cargo-audit runs standalone against Cargo.lock.
 #
-# Not included: ZAP (needs Docker), Prowler (cloud credentials), gosec/staticcheck/
-# govulncheck/golangci-lint (need a Go toolchain), clippy/cargo-audit (Rust),
-# brakeman (Ruby), tsc/eslint/knip/mypy (need the target's own dependencies).
-# Those auditors report "skipped" with an install hint.
+# Not included: ZAP (needs Docker), Prowler (cloud credentials), clippy (needs a
+# full Rust toolchain), tsc/eslint/knip/mypy (need the target's own dependencies),
+# and in slim, everything `full` adds. Those auditors report "skipped" with an
+# install hint.
 
 # Base image: Debian 13 (trixie) slim with Bun, pinned by digest.
 ARG BUN_IMAGE=oven/bun:1.4.2-slim@sha256:cb3bbbb08e13a4a2ff400f24c7a2a1d5efa83f6ef8544d52d95a519631e2fc61
@@ -54,6 +58,24 @@ ARG PHPSTAN_VERSION=2.3.1
 ARG PHPSTAN_SHA256=85157dba3d95d77ca603d2b7303aa78a538f9e3b56ccad07dd794c53aa96d1ae
 ARG PMD_VERSION=7.28.0
 ARG PMD_SHA256=f974ba571f7bc01c73fffe11bade25fbc1f438698f9e9c00e416e8d65e9fbac2
+ARG PNPM_VERSION=11.28.2
+ARG PNPM_SHA256=30d4099fa03b9ba1124d81527808b1e4d8e719aeb0ddfe169426df3c4a038a5f
+ARG BRAKEMAN_VERSION=8.0.6
+ARG BRAKEMAN_SHA256=759cc69341115e6c2dcd47b6fd8649a0b9bd540e3585ac8a0a94e31c66fee386
+# Toolchains and scanners, `full` only. go.dev publishes the Go SHA-256s on its
+# download page rather than as a checksum file, so they are pinned here.
+ARG GO_VERSION=1.27.1
+ARG GO_SHA256_AMD64=63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445
+ARG GO_SHA256_ARM64=3450b45a3f9ee8568792736a5c5e70a1f2e9b36c35a8f74958c03e51d7d92bec
+ARG NODE_VERSION=24.21.0
+ARG GOSEC_VERSION=2.29.0
+ARG GOLANGCI_LINT_VERSION=2.14.0
+ARG CARGO_AUDIT_VERSION=0.22.2
+ARG CARGO_AUDIT_SHA256_AMD64=ab28a1bdb54db4d5d8ad5981cf1f959410370b3d28250dbd35f6a44248620e39
+ARG CARGO_AUDIT_SHA256_ARM64=c6603814ddaa45e51263dafd31c0ac98808f688d26f7395804f9670b0fd599dd
+# Built from source with the Go toolchain above (no checksummed release binaries).
+ARG STATICCHECK_VERSION=0.8.1
+ARG GOVULNCHECK_VERSION=1.8.0
 
 # Python tools (one isolated environment each, via uv).
 ARG SEMGREP_VERSION=1.180.0
@@ -105,6 +127,19 @@ ARG PHPSTAN_VERSION
 ARG PHPSTAN_SHA256
 ARG PMD_VERSION
 ARG PMD_SHA256
+ARG PNPM_VERSION
+ARG PNPM_SHA256
+ARG BRAKEMAN_VERSION
+ARG BRAKEMAN_SHA256
+ARG GO_VERSION
+ARG GO_SHA256_AMD64
+ARG GO_SHA256_ARM64
+ARG NODE_VERSION
+ARG GOSEC_VERSION
+ARG GOLANGCI_LINT_VERSION
+ARG CARGO_AUDIT_VERSION
+ARG CARGO_AUDIT_SHA256_AMD64
+ARG CARGO_AUDIT_SHA256_ARM64
 
 USER 0
 # hadolint ignore=DL3008
@@ -133,8 +168,8 @@ RUN <<'EOF'
 set -eux
 mkdir -p /out
 case "$TARGETARCH" in
-  amd64) A=amd64; X=x86_64;  G=x64;   H=x86_64;   T=64bit; KL=linux;       KLSHA=$KUBE_LINTER_SHA256_AMD64; SCSHA=$SHELLCHECK_SHA256_AMD64; ZZSHA=$ZIZMOR_SHA256_AMD64 ;;
-  arm64) A=arm64; X=aarch64; G=arm64; H=arm64; T=ARM64; KL=linux_arm64; KLSHA=$KUBE_LINTER_SHA256_ARM64; SCSHA=$SHELLCHECK_SHA256_ARM64; ZZSHA=$ZIZMOR_SHA256_ARM64 ;;
+  amd64) A=amd64; X=x86_64;  G=x64;   H=x86_64;   T=64bit; KL=linux;       KLSHA=$KUBE_LINTER_SHA256_AMD64; SCSHA=$SHELLCHECK_SHA256_AMD64; ZZSHA=$ZIZMOR_SHA256_AMD64; GOSHA=$GO_SHA256_AMD64; CASHA=$CARGO_AUDIT_SHA256_AMD64 ;;
+  arm64) A=arm64; X=aarch64; G=arm64; H=arm64; T=ARM64; KL=linux_arm64; KLSHA=$KUBE_LINTER_SHA256_ARM64; SCSHA=$SHELLCHECK_SHA256_ARM64; ZZSHA=$ZIZMOR_SHA256_ARM64; GOSHA=$GO_SHA256_ARM64; CASHA=$CARGO_AUDIT_SHA256_ARM64 ;;
   *) echo "unsupported arch: $TARGETARCH" >&2; exit 1 ;;
 esac
 gh() { echo "https://github.com/$1/releases/download/$2"; }
@@ -214,6 +249,41 @@ fetch "https://github.com/phpstan/phpstan/releases/download/$PHPSTAN_VERSION/php
 fetch "https://github.com/pmd/pmd/releases/download/pmd_releases%2F$PMD_VERSION/pmd-dist-$PMD_VERSION-bin.zip" "$PMD_SHA256" pmd.zip
 unzip -q pmd.zip -d /out-full
 mv "/out-full/pmd-bin-$PMD_VERSION" /out-full/pmd
+
+# full only: the Go toolchain, without its own tests (test/ and testdata/, ~50 MB).
+fetch "https://go.dev/dl/go$GO_VERSION.linux-$A.tar.gz" "$GOSHA" go.tgz
+tar -xzf go.tgz -C /out-full
+rm -rf /out-full/go/test
+find /out-full/go/src -type d -name testdata -prune -exec rm -rf {} +
+
+# full only: Node.js for npm and pnpm (headers and corepack are left out).
+u="https://nodejs.org/dist/v$NODE_VERSION"
+n="node-v$NODE_VERSION-linux-$G"
+fetch "$u/$n.tar.xz" "$u/SHASUMS256.txt" node.txz
+mkdir /out-full/node
+tar -xJf node.txz --strip-components=1 -C /out-full/node "$n/LICENSE" "$n/bin/node" "$n/lib/node_modules/npm"
+fetch "https://registry.npmjs.org/pnpm/-/pnpm-$PNPM_VERSION.tgz" "$PNPM_SHA256" pnpm.tgz
+mkdir /out-full/pnpm
+tar -xzf pnpm.tgz --strip-components=1 -C /out-full/pnpm
+
+# full only: gosec and golangci-lint (they need the Go toolchain) and cargo-audit.
+mkdir -p /out-full-bin
+u=$(gh securego/gosec "v$GOSEC_VERSION")
+fetch "$u/gosec_${GOSEC_VERSION}_linux_$A.tar.gz" "$u/gosec_${GOSEC_VERSION}_checksums.txt" gosec.tgz
+tar -xzf gosec.tgz -C /out-full-bin gosec
+
+u=$(gh golangci/golangci-lint "v$GOLANGCI_LINT_VERSION")
+fetch "$u/golangci-lint-$GOLANGCI_LINT_VERSION-linux-$A.tar.gz" "$u/golangci-lint-$GOLANGCI_LINT_VERSION-checksums.txt" golangci-lint.tgz
+tar -xzf golangci-lint.tgz --strip-components=1 -C /out-full-bin "golangci-lint-$GOLANGCI_LINT_VERSION-linux-$A/golangci-lint"
+
+u=$(gh rustsec/rustsec "cargo-audit%2Fv$CARGO_AUDIT_VERSION")
+fetch "$u/cargo-audit-$X-unknown-linux-gnu-v$CARGO_AUDIT_VERSION.tgz" "$CASHA" cargo-audit.tgz
+tar -xzf cargo-audit.tgz --strip-components=1 -C /out-full-bin "cargo-audit-$X-unknown-linux-gnu-v$CARGO_AUDIT_VERSION/cargo-audit"
+chmod 0755 /out-full-bin/*
+
+# full only: the brakeman gem, installed offline in the full stage.
+mkdir -p /out-gems
+fetch "https://rubygems.org/downloads/brakeman-$BRAKEMAN_VERSION.gem" "$BRAKEMAN_SHA256" "/out-gems/brakeman-$BRAKEMAN_VERSION.gem"
 EOF
 
 USER 1000
@@ -279,6 +349,24 @@ RUN bun add -g "lighthouse@$LIGHTHOUSE_VERSION" "pa11y@$PA11Y_VERSION" \
  && ls /opt/bun-browser/bin
 USER 1000
 
+# full only: staticcheck and govulncheck publish no checksummed binaries, so they
+# are built with the bundled Go toolchain. `go install pkg@version` verifies every
+# module against the Go checksum database.
+FROM ${BUN_IMAGE} AS gotools
+ARG STATICCHECK_VERSION
+ARG GOVULNCHECK_VERSION
+COPY --from=fetch /out-full/go /opt/go
+ENV GOTOOLCHAIN=local \
+    CGO_ENABLED=0 \
+    GOBIN=/out \
+    GOPATH=/tmp/gopath \
+    GOCACHE=/tmp/gocache
+USER 0
+RUN /opt/go/bin/go install -trimpath "honnef.co/go/tools/cmd/staticcheck@v$STATICCHECK_VERSION" \
+ && /opt/go/bin/go install -trimpath "golang.org/x/vuln/cmd/govulncheck@v$GOVULNCHECK_VERSION" \
+ && ls /out
+USER 1000
+
 # --------------------------------------------------------------------------
 # Stage 4: openaudit itself, with only the CLI's dependency graph.
 FROM ${BUN_IMAGE} AS app
@@ -340,19 +428,37 @@ CMD ["--help"]
 
 # --------------------------------------------------------------------------
 # full: adds Chromium, Lighthouse and pa11y for `--browser` and the web.* auditors,
-# plus PHP for PHPStan and a JRE for PMD.
+# plus the language runtimes: PHP for PHPStan, a JRE for PMD, Go for the Go
+# scanners, Ruby for brakeman and Node.js for npm/pnpm audit.
 FROM runtime AS full
+ARG BRAKEMAN_VERSION
 USER 0
 # hadolint ignore=DL3008
 RUN apt-get update \
- && apt-get install -y --no-install-recommends chromium fonts-liberation php-cli default-jre-headless \
+ && apt-get install -y --no-install-recommends chromium fonts-liberation php-cli default-jre-headless ruby \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=browsertools /opt/bun-browser/ /opt/bun-browser/
 COPY --from=fetch /out-full/ /opt/
+COPY --from=fetch /out-full-bin/ /usr/local/bin/
+COPY --from=gotools /out/ /usr/local/bin/
+# The gem file was pinned by SHA-256 in fetch. --local installs it without contacting
+# rubygems.org; its one dependency, racc, is a default gem of Debian's Ruby.
+# hadolint ignore=DL3028
+RUN --mount=type=bind,from=fetch,source=/out-gems,target=/tmp/gems \
+    gem install --local --no-document "/tmp/gems/brakeman-$BRAKEMAN_VERSION.gem"
+# Node.js stays off PATH: the Bun-installed scanners (#!/usr/bin/env node) resolve
+# `node` to Bun's fallback shim, and a real node earlier on PATH would silently
+# move them, Lighthouse and pa11y included, onto it. npm and pnpm call it directly.
 RUN printf '#!/bin/sh\nexec php /opt/phpstan.phar "$@"\n' > /usr/local/bin/phpstan \
- && chmod 0755 /usr/local/bin/phpstan \
+ && printf '#!/bin/sh\nexec /opt/node/bin/node /opt/node/lib/node_modules/npm/bin/npm-cli.js "$@"\n' > /usr/local/bin/npm \
+ && printf '#!/bin/sh\nexec /opt/node/bin/node /opt/pnpm/bin/pnpm.mjs "$@"\n' > /usr/local/bin/pnpm \
+ && chmod 0755 /usr/local/bin/phpstan /usr/local/bin/npm /usr/local/bin/pnpm \
  && ln -s /opt/pmd/bin/pmd /usr/local/bin/pmd
-ENV PATH=/opt/bun-browser/bin:$PATH \
+# GOTOOLCHAIN=local: a target's go.mod `toolchain` line must never make go download
+# and run another toolchain (the Go wrappers also pass it). No update checks either.
+ENV PATH=/opt/bun-browser/bin:/opt/go/bin:$PATH \
+    GOTOOLCHAIN=local \
+    npm_config_update_notifier=false \
     CHROME_PATH=/usr/bin/chromium \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
     PUPPETEER_SKIP_DOWNLOAD=1

@@ -8,7 +8,7 @@ import {
 } from "@openaudit/core";
 import { Effect } from "effect";
 
-import { arr, parseJson, str } from "../../tool";
+import { arr, parseJson, str, withTempDir } from "../../tool";
 import { osvSeverity } from "../dependencies";
 import { isRecord } from "../util";
 import {
@@ -135,7 +135,7 @@ export const cargoAudit = defineAuditor({
 	id: "code.cargo-audit",
 	title: "cargo-audit (Rust advisories)",
 	description:
-		"Checks Cargo.lock against the RustSec advisory database with cargo-audit. Reads the lockfile only; nothing is compiled or fetched from the project.",
+		"Checks Cargo.lock against the RustSec advisory database with cargo-audit. Reads the lockfile only, never the project's .cargo/audit.toml; nothing is compiled or fetched from the project.",
 	categories: ["supply-chain", "security"],
 	targets: ["codebase"],
 	engine: "external",
@@ -154,11 +154,14 @@ export const cargoAudit = defineAuditor({
 			);
 			const findings: FindingInput[] = [];
 			for (const lock of locks) {
-				// Exit 1 = vulnerabilities found.
-				const res = yield* run(
-					ctx,
-					[bin, "audit", "--json", "-f", ws.absolute(lock)],
-					{ cwd: ws.root, okCodes: [0, 1] },
+				// Exit 1 = vulnerabilities found. cargo-audit reads .cargo/audit.toml
+				// from its cwd, where a project could ignore advisories or point the
+				// advisory database at its own URL or path, so it runs from a scratch dir.
+				const res = yield* withTempDir("openaudit-cargo-audit-", (dir) =>
+					run(ctx, [bin, "audit", "--json", "-f", ws.absolute(lock)], {
+						cwd: dir,
+						okCodes: [0, 1],
+					}),
 				);
 				findings.push(
 					...parseCargoAuditReport(

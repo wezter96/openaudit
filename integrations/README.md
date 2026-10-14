@@ -9,7 +9,7 @@ Ways to run openaudit without installing it by hand. The Docker image is the onl
 | Tag | Contents |
 | --- | --- |
 | `latest`, `1.2.3`, `1.2`, `edge` (main) | slim: openaudit and the scanners below |
-| `latest-full`, `1.2.3-full`, `edge-full` | slim plus Chromium, Lighthouse and pa11y, for `--browser` and the web auditors |
+| `latest-full`, `1.2.3-full`, `edge-full` | slim plus Chromium, Lighthouse and pa11y (for `--browser` and the web auditors) and the Go, Ruby, Rust, Node, PHP and Java scanners |
 
 ```bash
 # Audit the current directory. Run as yourself: git refuses repositories owned by
@@ -24,9 +24,9 @@ docker run --rm ghcr.io/wezter96/openaudit:latest-full https://example.com --bro
 docker run --rm ghcr.io/wezter96/openaudit doctor
 ```
 
-Included: gitleaks, trufflehog, osv-scanner, Trivy, Grype, Syft, hadolint, actionlint, kube-linter, kubeconform, TFLint (with the AWS, Azure and Google rulesets), ShellCheck, zizmor, OpenSSF Scorecard, oxlint, Biome, Spectral, jscpd, Semgrep, Bandit, pip-audit, Checkov, Ruff, mobsfscan, GuardDog. The `-full` images add Chromium, Lighthouse and pa11y, plus PHPStan (with PHP) and PMD (with a Java runtime). The versions are the `ARG`s at the top of the [`Dockerfile`](../Dockerfile).
+Included: gitleaks, trufflehog, osv-scanner, Trivy, Grype, Syft, hadolint, actionlint, kube-linter, kubeconform, TFLint (with the AWS, Azure and Google rulesets), ShellCheck, zizmor, OpenSSF Scorecard, oxlint, Biome, Spectral, jscpd, Semgrep, Bandit, pip-audit, Checkov, Ruff, mobsfscan, GuardDog. The `-full` images add Chromium, Lighthouse and pa11y, plus PHPStan (with PHP), PMD (with a Java runtime), gosec, staticcheck, govulncheck and golangci-lint (with a Go toolchain), brakeman (with Ruby), cargo-audit, and npm and pnpm (with Node.js) for npm and pnpm audit. The versions are the `ARG`s at the top of the [`Dockerfile`](../Dockerfile).
 
-Not included: ZAP (needs Docker), Prowler (needs cloud credentials), the Go, Rust and Ruby linters (gosec, staticcheck, govulncheck, golangci-lint, clippy, cargo-audit, brakeman need their language toolchain), and tsc, ESLint, knip and mypy (need the audited project's own dependencies). Those auditors report `skipped` with an install hint. Network-backed scanners (Trivy, OSV, Semgrep rules) need outbound access; add `--offline` to forbid it.
+Not included: ZAP (needs Docker), Prowler (needs cloud credentials), clippy (needs a full Rust toolchain), tsc, ESLint, knip and mypy (need the audited project's own dependencies), and in the slim images everything `-full` adds. Those auditors report `skipped` with an install hint. Network-backed scanners (Trivy, OSV, Semgrep rules) need outbound access; add `--offline` to forbid it.
 
 Always pass `--user "$(id -u):$(id -g)"`. The image does not disable git's ownership check (`safe.directory`), which protects scanners from a hostile repository's `.git/config`, so a mount owned by another uid makes git-based features such as `--diff` fail with "dubious ownership". GitLab runners and pre-commit already match ownership (see below).
 
