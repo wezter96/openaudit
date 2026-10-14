@@ -16,13 +16,15 @@ import Base from "../layouts/Base.astro";
 import { wrappedCount } from "../lib/home";
 import { counts, PITCH, REPO, SITE, u } from "../lib/site";
 
-const description = `${counts.builtin} built-in auditors and ${wrappedCount} free scanners, merged into one report with a 0–100 score and an A–F grade in each of ten areas.`;
+/** What people search for, so the title and description lead with it. */
+const title = "open-source code and security audit for AI agents";
+const description = `Free, open-source audit of code, sites, containers and cloud: ${counts.builtin} checks and ${wrappedCount} scanners in one report. Run it from CI or your AI agent over MCP.`;
 const jsonLd = JSON.stringify({
 	"@context": "https://schema.org",
 	"@type": "SoftwareApplication",
 	name: "openaudit",
 	url: `${SITE}${u("/")}`,
-	description: PITCH,
+	description,
 	applicationCategory: "DeveloperApplication",
 	operatingSystem: "Any system that runs Bun 1.4 or newer",
 	license: "https://opensource.org/licenses/MIT",
@@ -32,7 +34,7 @@ const jsonLd = JSON.stringify({
 }).replace(/</g, "\\u003c");
 ---
 
-<Base title={PITCH} ogTitle={PITCH} description={description} heroDial>
+<Base title={title} ogTitle={PITCH} description={description} heroDial>
 	<script type="application/ld+json" slot="head" is:inline set:html={jsonLd} />
 	<Hero />
 	<Proof />

@@ -12,7 +12,13 @@
 		"mcp",
 		"cli",
 		"performance",
-		"supply-chain"
+		"supply-chain",
+		"mcp-server",
+		"ai-agents",
+		"security-scanner",
+		"owasp",
+		"llm-security",
+		"code-review"
 	],
 	"homepage": "https://openaudit.se",
 	"bugs": {
