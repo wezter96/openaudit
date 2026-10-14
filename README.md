@@ -97,6 +97,8 @@ Every language also gets secret scanning (built-in, gitleaks, TruffleHog), dupli
 
 \* Opt-in, because it's slow, noisy, sends more traffic to the target, spends tokens, or runs project code. Select it with `--only <id>`, e.g. `--only code.clippy` or `--only agent.deepsec`.
 
+The built-in hidden-Unicode check (`code.unicode`) flags Trojan Source bidirectional controls, zero-width and other invisible characters, hidden prompt text in Unicode tag characters, variation-selector payloads and look-alike (homoglyph) identifiers in code, docs and agent instruction files such as AGENTS.md and Cursor rules.
+
 `bunx @openaudit/cli list` shows every auditor and playbook. The [architecture page](https://wezter96.github.io/openaudit/architecture.html) maps every auditor to the targets and areas it covers.
 
 ## The report

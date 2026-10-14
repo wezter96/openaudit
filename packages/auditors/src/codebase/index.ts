@@ -29,11 +29,13 @@ import { security } from "./security";
 import { spectral } from "./spectral";
 import { strictness } from "./strictness";
 import { supplyChainToolAuditors } from "./supply-chain-tools";
+import { unicode } from "./unicode";
 
 export const codebaseAuditors: ReadonlyArray<Auditor> = [
 	hygiene,
 	secrets,
 	security,
+	unicode,
 	dependencies,
 	licenses,
 	accessibility,

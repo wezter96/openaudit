@@ -467,7 +467,7 @@ export const nonCodeMask = (text: string, lang: string): Uint8Array => {
 				prev = "x";
 				continue;
 			}
-			if (lang === "js" && ch === "/" && REGEX_PRECEDER.test(prev.slice(-8))) {
+			if (lang === "js" && ch === "/" && REGEX_PRECEDER.test(prev.trimEnd())) {
 				const after = scanRegex(i);
 				if (after > i + 1) {
 					i = after;
