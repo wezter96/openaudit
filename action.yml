@@ -24,7 +24,11 @@ inputs:
     description: Comma-separated auditor ids or prefixes to skip.
     default: ""
   config:
-    description: Trusted config file (openaudit.config.json) for opt-in auditors and settings.
+    description: >-
+      Config file to trust (e.g. openaudit.config.jsonc), for opt-in auditors
+      and settings. Pass it only on push, where the file is reviewed, never on
+      pull_request or pull_request_target. Without it the repository's config
+      is still read, as untrusted.
     default: ""
   upload-sarif:
     description: Upload SARIF to GitHub code scanning (needs security-events write).

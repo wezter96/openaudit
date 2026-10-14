@@ -43,7 +43,7 @@ Build it yourself: `docker build -t openaudit .` (slim) or `docker build --targe
     fail-on: high
 ```
 
-Uploads SARIF to code scanning and the reports as an artifact. Inputs and outputs are listed in the [README](../README.md#ci). The action runs on the runner without the bundled scanners; to use them, run the image in a step instead:
+Uploads SARIF to code scanning and the reports as an artifact. Inputs and outputs are listed in the [README](../README.md#ci). The repository's `openaudit.config.jsonc` is read as untrusted, even here; to let it enable opt-in auditors, pass it as `config` on pushes only, as shown in [`apps/cli/README.md`](../apps/cli/README.md#ci-github-code-scanning). The action runs on the runner without the bundled scanners; to use them, run the image in a step instead:
 
 ```yaml
 - run: docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/src:ro" -w /src ghcr.io/wezter96/openaudit . --fail-on high
