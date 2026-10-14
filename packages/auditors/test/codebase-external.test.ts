@@ -228,8 +228,10 @@ describe("external tool auditors", () => {
 		try {
 			mkdirSync(join(repo, "logs"));
 			writeFileSync(join(repo, "Dockerfile"), "FROM alpine");
-			writeFileSync(join(repo, ".gitignore"), ".env\nlogs/\n");
+			writeFileSync(join(repo, ".gitignore"), ".env\nlogs/\n*.tmp\n");
 			writeFileSync(join(repo, ".env"), "KEY=abc");
+			// A hostile name must not become a skip-everything pattern.
+			writeFileSync(join(repo, "**.tmp"), "x");
 			writeFileSync(join(repo, "logs", "a.log"), "x");
 			Bun.spawnSync(["git", "init", "-q"], { cwd: repo });
 			let args: ReadonlyArray<string> = [];
@@ -264,6 +266,7 @@ describe("external tool auditors", () => {
 			);
 			expect(args.join(" ")).toContain("--skip-files .env");
 			expect(args.join(" ")).toContain("--skip-dirs logs");
+			expect(args.some((a) => a.includes("*.tmp"))).toBe(false);
 			expect(report.results[0]?.findings.map((f) => f.location?.file)).toEqual([
 				"Dockerfile",
 			]);

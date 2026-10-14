@@ -53,13 +53,26 @@ export const inIgnoredDir = (file: string | undefined): boolean =>
 const MAX_TOOL_IGNORES = 200;
 
 /**
+ * Characters a tool could read as pattern syntax, a list separator or a new
+ * line. File names come from the target, so a file called `**` must not
+ * become "skip everything".
+ */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: rejecting them
+const UNSAFE_SKIP = /[*?[\]{}!\\,\u0000-\u001f\u007f]/;
+
+/**
  * The workspace's gitignored paths (directories end in `/`) for a tool that
- * walks the folder itself, so it never reads them. Capped and never failing:
+ * walks the folder itself, so it never reads them. Paths that a tool could
+ * read as a pattern, or as a flag, are left out. Capped and never failing:
  * the engine drops findings in any ignored path a tool still reports.
  */
 export const gitignoredPaths = (ws: Workspace) =>
 	ws.ignored.pipe(
-		Effect.map((paths) => paths.slice(0, MAX_TOOL_IGNORES)),
+		Effect.map((paths) =>
+			paths
+				.filter((p) => !p.startsWith("-") && !UNSAFE_SKIP.test(p))
+				.slice(0, MAX_TOOL_IGNORES),
+		),
 		Effect.catch(() => Effect.succeed([] as ReadonlyArray<string>)),
 	);
 

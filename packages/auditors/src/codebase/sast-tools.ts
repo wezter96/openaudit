@@ -273,10 +273,9 @@ export const bandit = defineAuditor({
 				"bandit",
 				"Install: pipx install bandit or pip install bandit (https://bandit.readthedocs.io).",
 			);
-			// bandit's -x is a comma list, so a path with a comma can't be in it.
-			const ignored = (yield* gitignoredPaths(ws))
-				.filter((p) => !p.includes(","))
-				.map((p) => (p.endsWith("/") ? `${ws.root}/${p}*` : `${ws.root}/${p}`));
+			const ignored = (yield* gitignoredPaths(ws)).map((p) =>
+				p.endsWith("/") ? `${ws.root}/${p}*` : `${ws.root}/${p}`,
+			);
 			// Exit 1 = issues found.
 			const res = yield* runTool(
 				ctx,

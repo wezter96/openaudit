@@ -171,7 +171,7 @@ export const ignoredPathMatcher = (
 		if (p.endsWith("/")) dirs.push(p);
 		else files.add(p);
 	}
-	const prefix = toPosix(resolve(root)) + "/";
+	const prefix = `${toPosix(resolve(root))}/`;
 	return (path) => {
 		let p = toPosix(path);
 		if (p.startsWith(prefix)) p = p.slice(prefix.length);
