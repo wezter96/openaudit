@@ -139,6 +139,7 @@ export const certificateFindings = (
 		title: string,
 		message: string,
 		remediation: string,
+		cwe = "cwe-295",
 	) =>
 		findings.push({
 			ruleId: `web.tls/${rule}`,
@@ -150,7 +151,7 @@ export const certificateFindings = (
 			evidence,
 			remediation,
 			references: refs,
-			tags: ["cwe-295", "owasp-a02"],
+			tags: [cwe, "owasp-a02"],
 		});
 
 	const expired = info.validTo !== undefined && info.validTo.getTime() < now;
@@ -223,6 +224,7 @@ export const certificateFindings = (
 			`Server negotiated ${info.protocol}`,
 			`The connection used ${info.protocol}, which is deprecated (RFC 8996) and vulnerable to known attacks.`,
 			"Disable SSLv3, TLS 1.0 and TLS 1.1; support TLS 1.2 and 1.3 only.",
+			"cwe-327",
 		);
 	return findings;
 };
@@ -270,9 +272,11 @@ export const mixedContentFindings = (page: Page): FindingInput[] => {
 
 const checkRedirect = (ctx: AuditContext, url: URL) =>
 	Effect.gen(function* () {
+		// https://host:8443 has no known HTTP counterpart; http://host:8443 would
+		// speak plain HTTP to the TLS port.
+		if (url.port !== "") return [];
 		const httpUrl = new URL(url.toString());
 		httpUrl.protocol = "http:";
-		if (httpUrl.port === "443") httpUrl.port = "";
 		const res = yield* fetchCached(ctx, httpUrl.toString(), {
 			redirect: "manual",
 			timeoutMs: 8_000,
@@ -324,12 +328,18 @@ export const tlsAuditor = defineAuditor({
 	engine: "builtin",
 	run: (ctx) =>
 		Effect.gen(function* () {
-			const { start, pages } = yield* crawl(ctx);
-			const url = new URL(start.url);
+			const target = new URL(yield* requireUrl(ctx));
+			// A bad certificate or a legacy-only server makes the page fetch fail,
+			// and those are the hosts the TLS checks matter most for, so they run
+			// on their own handshake whether or not the crawl succeeds.
+			const crawled = yield* Effect.result(crawl(ctx));
+			const site = crawled._tag === "Success" ? crawled.success : undefined;
+			const url = site ? new URL(site.start.url) : target;
 			const findings: FindingInput[] = [];
-			const loopback = isLoopback(start.url);
+			const loopback = isLoopback(url.toString());
 
 			if (url.protocol === "http:") {
+				if (crawled._tag === "Failure") return yield* crawled.failure;
 				if (!loopback)
 					findings.push({
 						ruleId: "web.tls/no-https",
@@ -338,7 +348,7 @@ export const tlsAuditor = defineAuditor({
 						category: "security",
 						message:
 							"The target is served without TLS, so everything (including cookies and form data) travels in clear text and can be modified in transit.",
-						location: { url: start.url },
+						location: { url: site?.start.url ?? url.toString() },
 						remediation:
 							"Serve the site over HTTPS with a trusted certificate and redirect HTTP to HTTPS.",
 						references: ["https://web.dev/articles/why-https-matters"],
@@ -349,7 +359,8 @@ export const tlsAuditor = defineAuditor({
 
 			// The TLS probe dials a raw socket outside ctx.http, so its host and port
 			// come only from the target URL, never from a redirect to another host.
-			const target = new URL(yield* requireUrl(ctx));
+			// Its findings are located at that URL: TLS is per host and port, not
+			// per page, and wrappers such as web.sslyze locate theirs there too.
 			const tlsUrl =
 				target.protocol === "https:"
 					? target
@@ -357,14 +368,25 @@ export const tlsAuditor = defineAuditor({
 						? url
 						: undefined;
 			if (!loopback && tlsUrl) {
+				const location = tlsUrl.toString();
 				findings.push(...(yield* checkRedirect(ctx, tlsUrl)));
 				const port = Number(tlsUrl.port || 443);
 				const connectHost = connectHostOf(ctx);
 				const info = yield* inspectTls(tlsUrl.hostname, port, {
 					connectHost,
-				}).pipe(Effect.option);
+				}).pipe(
+					// Clients default to TLS 1.2+, so a legacy-only server needs a retry.
+					Effect.catch(() =>
+						inspectTls(tlsUrl.hostname, port, {
+							connectHost,
+							minVersion: "TLSv1",
+							timeoutMs: 5_000,
+						}),
+					),
+					Effect.option,
+				);
 				if (info._tag === "Some")
-					findings.push(...certificateFindings(start.url, info.value));
+					findings.push(...certificateFindings(location, info.value));
 				else
 					yield* ctx.log(`web.tls: TLS handshake with ${tlsUrl.host} failed`);
 				// Does the server still accept TLS 1.0/1.1? Clients default to 1.2+, so ask explicitly.
@@ -389,7 +411,7 @@ export const tlsAuditor = defineAuditor({
 							severity: "medium",
 							category: "security",
 							message: `The server completed a ${legacy.value.protocol} handshake. TLS 1.0/1.1 are deprecated (RFC 8996) and enable downgrade attacks for old clients.`,
-							location: { url: start.url },
+							location: { url: location },
 							evidence: `protocol=${legacy.value.protocol}`,
 							remediation:
 								"Disable TLS 1.0 and 1.1; allow only TLS 1.2 and 1.3.",
@@ -399,7 +421,16 @@ export const tlsAuditor = defineAuditor({
 				}
 			}
 
-			for (const page of pages) findings.push(...mixedContentFindings(page));
+			if (crawled._tag === "Failure") {
+				// Nothing to show for the run: surface why the page was unreachable.
+				if (findings.length === 0) return yield* crawled.failure;
+				yield* ctx.log(
+					`web.tls: mixed content not checked, the page fetch failed: ${crawled.failure.message}`,
+				);
+				return findings;
+			}
+			for (const page of crawled.success.pages)
+				findings.push(...mixedContentFindings(page));
 			return findings;
 		}),
 });
