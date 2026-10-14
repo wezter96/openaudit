@@ -1,30 +1,95 @@
 name: Site
 
-# Builds the website (apps/site) and deploys it to openaudit.se as a Cloudflare
-# Worker with static assets. The build audits this repository for /report/
-# (the interactive HTML report plus the JSON, SARIF and Markdown versions) and
-# regenerates /architecture/, so both are current on every push.
+# Builds the website (apps/site) and serves it from a Cloudflare Worker.
+#
+# - deploy: every push. main goes live at openaudit.se in about a minute, with
+#   the last self-audit (restored from the cache) as /report/. Any other branch
+#   uploads a preview version and prints its URL in the job summary.
+# - report (main only): audits this commit inside the full scanner image,
+#   caches the report for the next fast deploy, and deploys again with it,
+#   unless a newer commit has reached main meanwhile.
+# - ui: scripts/check-ui.ts in WebKit and Chromium against what was deployed.
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: site
-  cancel-in-progress: false
+env:
+  # Build-time settings the web app and API validate (see .env.schema).
+  VITE_SERVER_URL: http://localhost:3000
+  CORS_ORIGIN: http://localhost:3001
 
 jobs:
-  site:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: site-deploy-${{ github.ref }}
+      cancel-in-progress: true
+    outputs:
+      url: ${{ steps.publish.outputs.url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+
+      - name: Restore the last self-audit
+        # Without one, prepare.ts audits with the runner's own tools instead.
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/site/public/report
+          key: site-report-${{ github.sha }}
+          restore-keys: site-report-
+      - name: Regenerate the architecture page
+        run: bun docs/architecture.ts
+      - name: Build the site
+        working-directory: apps/site
+        env:
+          SITE_URL: https://openaudit.se
+          BASE_PATH: /
+        run: bun run build
+
+      - name: Deploy, or upload a preview
+        id: publish
+        working-directory: apps/site
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error title=Site not deployed::Add the CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID repository secrets (see apps/site/README.md)."
+            exit 1
+          fi
+          if [ "$REF_NAME" = "main" ]; then
+            bunx wrangler deploy
+            echo "url=https://openaudit.se" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # A preview alias is lowercase letters, digits and dashes.
+          alias=$(printf '%s' "$REF_NAME" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-' | sed 's/--*/-/g; s/^-//; s/-$//' | cut -c1-40)
+          bunx wrangler versions upload --preview-alias "$alias" | tee upload.log
+          url=$(grep -o 'https://[^ ]*workers\.dev' upload.log | grep -- "^https://$alias-" | head -1)
+          if [ -z "$url" ]; then url=$(grep -o 'https://[^ ]*workers\.dev' upload.log | head -1); fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "### Preview: $url" >> "$GITHUB_STEP_SUMMARY"
+
+  report:
+    if: github.ref == 'refs/heads/main'
+    needs: deploy
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      # Build-time settings the web app and API validate (see .env.schema).
-      VITE_SERVER_URL: http://localhost:3000
-      CORS_ORIGIN: http://localhost:3001
+    concurrency:
+      group: site-report
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -36,7 +101,7 @@ jobs:
       - name: Generate types
         # Creates the generated files (env typings, Astro and router types,
         # project-reference declarations) so the self-audit's type check sees
-        # the same project a developer does. This also type-checks the site.
+        # the same project a developer does.
         run: bun run check-types
 
       - name: Audit this repository for /report/
@@ -47,9 +112,14 @@ jobs:
           docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp
           -v "$PWD:/src" -w /src --entrypoint bun ghcr.io/wezter96/openaudit:edge-full
           apps/cli/src/bin.ts . --format html,json,sarif,markdown --out apps/site/public/report --fail-on none --quiet
+      - name: Keep the report for the next fast deploy
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/site/public/report
+          key: site-report-${{ github.sha }}
+
       - name: Regenerate the architecture page
         run: bun docs/architecture.ts
-
       - name: Build the site
         working-directory: apps/site
         env:
@@ -57,14 +127,39 @@ jobs:
           BASE_PATH: /
         run: bun run build
 
-      - name: Deploy to Cloudflare
+      - name: Deploy, unless main has moved on
+        # A newer commit's deploy job has already shipped newer code; this
+        # report reaches the site with that commit's own report job.
         working-directory: apps/site
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          REPO: ${{ github.repository }}
         run: |
-          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "::error title=Site not deployed::Add the CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID repository secrets (see apps/site/README.md)."
-            exit 1
+          head=$(git ls-remote "https://github.com/$REPO" refs/heads/main | cut -f1)
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo "main is at $head now; skipping this deploy."
+            exit 0
           fi
           bunx wrangler deploy
+
+  ui:
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - name: Install the browsers
+        working-directory: apps/site
+        run: bunx playwright install --with-deps webkit chromium
+      - name: Check the deployed site in WebKit and Chromium
+        working-directory: apps/site
+        env:
+          URL: ${{ needs.deploy.outputs.url }}
+        run: bun run check:ui "$URL"

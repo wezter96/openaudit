@@ -16,6 +16,7 @@
 		{ "pattern": "www.openaudit.se", "custom_domain": true }
 	],
 	"workers_dev": false,
-	"preview_urls": false,
+	// Each branch push uploads a version with its own preview URL (site.yml).
+	"preview_urls": true,
 	"observability": { "enabled": false }
 }

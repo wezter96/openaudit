@@ -6,7 +6,7 @@ Nothing on the site is hand-copied from the rest of the repository. At build tim
 
 | Page | Built from |
 | --- | --- |
-| `/` | `README.md` (pitch, areas, languages, targets, safety, community), `integrations/README.md` and `apps/cli/README.md` (snippets), the auditor registry, `packages/core/src/scoring.ts`, and the self-audit's scores (hero dial and proof strip) |
+| `/` | `README.md` (pitch, languages, targets), `integrations/README.md` and `apps/cli/README.md` (snippets), the auditor registry, `packages/core/src/scoring.ts`, and the self-audit's scores (hero dial and proof strip). The short landing copy lives in the components; `postbuild` fails above 1,700 words |
 | `/docs/*` | Sections of `README.md`, `apps/cli/README.md`, `packages/agent/README.md`, `integrations/README.md`, `CONTRIBUTING.md` and `SECURITY.md`; `action.yml` (Action inputs and outputs); `openaudit --help` and `openaudit schema config`; `scoring.ts` (scoring examples); the HTTP API's OpenAPI document (`/docs/api/`). Titles and descriptions are in `DOCS` (`src/lib/site.ts`) |
 | `/auditors/`, `/auditors/<id>/` | `allAuditors()` from `apps/cli/src/audit.ts` and the playbooks in `packages/agent` |
 | `/report/` | `openaudit-report.{html,json,sarif,md}` written by the CLI, copied unmodified |
@@ -25,11 +25,15 @@ The example findings on the landing page use real rule ids, titles and severitie
 ```sh
 bun install                      # at the repository root
 cd apps/site
-bun run dev                      # http://localhost:4321/
+bun run dev                      # http://localhost:4321/, hot reload: use it for copy and styles
 bun run build                    # dist/
+bunx astro preview               # serves dist/; note the port it prints
+bun run check:ui <url>           # WebKit + Chromium checks, about 30 s (see below)
 bun run check-types              # astro check, strict
 bun run test                     # the Worker's tests (worker/*.test.ts)
 ```
+
+`scripts/check-ui.ts` opens the main pages at phone, tablet and desktop widths in WebKit and Chromium and fails on: sideways scrolling, no link home on screen at the bottom of a page, a footer that doesn't fit on screen at the bottom, an overlay menu that moves the page, and console errors. Point it at a local preview, a branch preview or `https://openaudit.se`. Install the browsers once with `bunx playwright install webkit chromium`.
 
 `scripts/prepare.ts` runs before `dev`, `build` and `check-types`. It writes `src/generated/*.json`, the JSON Schemas into `public/schema/`, and copies the report, the architecture page and the report screenshots into `public/`. All of that output is gitignored. If `public/report/` holds no report yet, `prepare` audits the repository (about 10 seconds). `bun scripts/prepare.ts --fresh` re-runs the audit.
 
@@ -57,7 +61,13 @@ Every internal link goes through `u()` in `src/lib/site.ts`, so it follows the b
 
 ## Deploy
 
-`.github/workflows/site.yml` runs on every push to `main` (and by hand). It audits the repository into `public/report/`, regenerates `docs/architecture.html`, builds the site for `https://openaudit.se` with base `/` and runs `wrangler deploy`. Without the Cloudflare secrets, the deploy step fails.
+`.github/workflows/site.yml` runs on every push (and by hand):
+
+- `deploy` builds the site with the last self-audit (from the Actions cache) and regenerates `docs/architecture.html`. On `main` it runs `wrangler deploy`, so a change is live in about a minute. On any other branch it uploads a preview version (`wrangler versions upload --preview-alias <branch>`) and prints its URL in the job summary.
+- `report` (main only) audits the commit inside `ghcr.io/wezter96/openaudit:edge-full`, caches the report for the next deploy and deploys again, unless a newer commit has reached `main` meanwhile.
+- `ui` runs `check:ui` against what `deploy` published.
+
+Without the Cloudflare secrets, the deploy steps fail.
 
 `wrangler.jsonc` deploys a Worker named `openaudit-site` that serves `dist/` as static assets, with `_headers` applied. `worker/index.ts` runs first on every request. It:
 
