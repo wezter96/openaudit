@@ -1,14 +1,17 @@
 import type { FindingInput } from "@openaudit/core";
 
 import { isRecord, lineLocator, owaspLlmUrl, type SourceFile } from "../util";
-import { fields, parseJsoncTree, stringItems, treeOf } from "./json";
+import { fallbackServers } from "./fallback";
+import { fields, parseJsoncDetailed, stringItems, treeOf } from "./json";
 import { type McpServer, scanServers } from "./mcp";
 import {
+	bestEffort,
 	CLAUDE_PERMISSIONS,
 	CODEX_CONFIG_DOCS,
 	finding,
 	locate,
 	MCP_SECURITY,
+	unparsed,
 } from "./shared";
 
 /* -------------------------------------------------------------------------- */
@@ -21,8 +24,20 @@ const BROAD_RULE =
 export const scanClaudeSettings = (file: SourceFile): FindingInput[] => {
 	const { path, text } = file;
 	// Every duplicate key counts: clients disagree on which one wins.
-	const root = parseJsoncTree(text);
+	const parsed = parseJsoncDetailed(text);
 	const lineOf = lineLocator(text);
+	if (!parsed.ok) {
+		if (text.trim() === "") return [];
+		const line = lineOf(parsed.offset);
+		return [
+			unparsed(
+				path,
+				line,
+				`is not valid JSON(C): ${parsed.reason} at line ${line}`,
+			),
+		];
+	}
+	const { root } = parsed;
 	const findings: FindingInput[] = [];
 	const permissions = fields(root, "permissions");
 
@@ -80,7 +95,7 @@ export const scanClaudeSettings = (file: SourceFile): FindingInput[] => {
 		);
 
 	const autoApprove =
-		root?.kind === "object"
+		root.kind === "object"
 			? root.entries.find(
 					(e) =>
 						e.key === "enableAllProjectMcpServers" &&
@@ -111,6 +126,24 @@ export const scanClaudeSettings = (file: SourceFile): FindingInput[] => {
 	return findings;
 };
 
+const sandboxFinding = (
+	path: string,
+	line: number,
+	never: boolean,
+): FindingInput =>
+	finding("permission-bypass-mode", path, line, {
+		title: "Codex project config disables the sandbox",
+		severity: never ? "high" : "medium",
+		category: "security",
+		message: `\`sandbox_mode = "danger-full-access"\` gives Codex unrestricted file and network access in this project${never ? ', and `approval_policy = "never"` means it never asks first' : ""}.`,
+		evidence: `sandbox_mode = "danger-full-access"${never ? ', approval_policy = "never"' : ""}`,
+		remediation:
+			'Use `sandbox_mode = "workspace-write"` in committed config and leave full access to an explicit per-session choice.',
+		references: [owaspLlmUrl("llm06"), CODEX_CONFIG_DOCS],
+		confidence: "high",
+		tags: ["owasp-llm06"],
+	});
+
 const parseToml = (text: string): Record<string, unknown> | undefined => {
 	try {
 		const doc: unknown = Bun.TOML.parse(text);
@@ -126,32 +159,39 @@ export const scanCodexConfig = (
 ): FindingInput[] => {
 	const { path, text } = file;
 	const toml = parseToml(text);
-	if (!toml) return [];
+	if (!toml) {
+		if (text.trim() === "") return [];
+		// Bun's TOML errors quote the input, so only a generic reason is given.
+		const bypass = /^[ \t]*sandbox_mode\s*=\s*["']danger-full-access["']/m.exec(
+			text,
+		);
+		return [
+			unparsed(path, 1, "is not valid TOML"),
+			...bestEffort([
+				...(bypass
+					? [sandboxFinding(path, lineLocator(text)(bypass.index), false)]
+					: []),
+				...scanServers(
+					path,
+					text,
+					fallbackServers(text, true),
+					localPackages,
+					false,
+				),
+			]),
+		];
+	}
 	const lineOf = lineLocator(text);
 	const findings: FindingInput[] = [];
 
-	if (toml.sandbox_mode === "danger-full-access") {
-		const never = toml.approval_policy === "never";
+	if (toml.sandbox_mode === "danger-full-access")
 		findings.push(
-			finding(
-				"permission-bypass-mode",
+			sandboxFinding(
 				path,
 				lineOf(locate(text, "sandbox_mode", 0)),
-				{
-					title: "Codex project config disables the sandbox",
-					severity: never ? "high" : "medium",
-					category: "security",
-					message: `\`sandbox_mode = "danger-full-access"\` gives Codex unrestricted file and network access in this project${never ? ', and `approval_policy = "never"` means it never asks first' : ""}.`,
-					evidence: `sandbox_mode = "danger-full-access"${never ? ', approval_policy = "never"' : ""}`,
-					remediation:
-						'Use `sandbox_mode = "workspace-write"` in committed config and leave full access to an explicit per-session choice.',
-					references: [owaspLlmUrl("llm06"), CODEX_CONFIG_DOCS],
-					confidence: "high",
-					tags: ["owasp-llm06"],
-				},
+				toml.approval_policy === "never",
 			),
 		);
-	}
 
 	// TOML forbids duplicate keys, so the parsed table is what Codex sees.
 	const tableAt = Math.max(0, text.indexOf("mcp_servers"));

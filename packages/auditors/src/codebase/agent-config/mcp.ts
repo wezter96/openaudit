@@ -12,8 +12,15 @@ import {
 	shannonEntropy,
 	truncate,
 } from "../util";
-import { fields, type JsonNode, parseJsoncTree } from "./json";
-import { finding, GEMINI_CONFIG, MCP_SECURITY } from "./shared";
+import { fallbackServers } from "./fallback";
+import { fields, type JsonNode, parseJsoncDetailed } from "./json";
+import {
+	bestEffort,
+	finding,
+	GEMINI_CONFIG,
+	MCP_SECURITY,
+	unparsed,
+} from "./shared";
 
 /* -------------------------------------------------------------------------- */
 /*                                 MCP servers                                */
@@ -673,11 +680,33 @@ export const scanServers = (
 export const scanMcpJson = (
 	file: SourceFile,
 	localPackages: ReadonlySet<string>,
-): FindingInput[] =>
-	scanServers(
-		file.path,
-		file.text,
-		serversIn(parseJsoncTree(file.text)),
-		localPackages,
-		/(?:^|\/)\.gemini\/settings\.json$/i.test(file.path),
-	);
+): FindingInput[] => {
+	const gemini = /(?:^|\/)\.gemini\/settings\.json$/i.test(file.path);
+	const parsed = parseJsoncDetailed(file.text);
+	if (parsed.ok)
+		return scanServers(
+			file.path,
+			file.text,
+			serversIn(parsed.root),
+			localPackages,
+			gemini,
+		);
+	if (file.text.trim() === "") return [];
+	const line = lineLocator(file.text)(parsed.offset);
+	return [
+		unparsed(
+			file.path,
+			line,
+			`is not valid JSON(C): ${parsed.reason} at line ${line}`,
+		),
+		...bestEffort(
+			scanServers(
+				file.path,
+				file.text,
+				fallbackServers(file.text, false),
+				localPackages,
+				gemini,
+			),
+		),
+	];
+};

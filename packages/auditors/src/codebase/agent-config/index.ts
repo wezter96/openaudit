@@ -14,19 +14,15 @@ import {
 	isRecord,
 	owaspLlmUrl,
 	parseJsonc,
-	readTextFiles,
 	type SourceFile,
 } from "../util";
 import { scanInstructionFile } from "./instructions";
 import { scanMcpJson } from "./mcp";
 import { scanClaudeSettings, scanCodexConfig } from "./settings";
-import { finding, ID } from "./shared";
+import { finding, ID, unparsed } from "./shared";
 
-export {
-	hiddenRegions,
-	hiddenUnicode,
-	scanInstructionFile,
-} from "./instructions";
+export { hiddenUnicode, scanInstructionFile } from "./instructions";
+export { hiddenRegions } from "./markdown";
 export { type LaunchedPackage, launchedPackages } from "./mcp";
 
 /*
@@ -60,25 +56,24 @@ const isConfigFile = (path: string): boolean =>
 		CLAUDE_SETTINGS.test(path) ||
 		CODEX_CONFIG.test(path));
 
-type Instruction =
-	| SourceFile
-	| { readonly path: string; readonly size?: number };
+type AgentFile = SourceFile | { readonly path: string; readonly size?: number };
 
 /**
- * Reads an instruction file without the generic reader's skips: fixture
- * paths, NUL bytes and minified-looking text are exactly where an attacker
- * would hide instructions. Only files the workspace refuses to read come
- * back without text.
+ * Reads an agent file without the generic reader's skips: fixture paths
+ * (for instruction files), size below the workspace limit, NUL bytes and
+ * minified-looking text are exactly where an attacker would hide content.
+ * Only files the workspace refuses to read come back without text, and
+ * those are reported, never dropped.
  */
-const readInstruction = (ws: Workspace, path: string) =>
+const readAgentFile = (ws: Workspace, path: string) =>
 	ws.size(path).pipe(
 		Effect.flatMap(
-			(size): Effect.Effect<Instruction, unknown> =>
+			(size): Effect.Effect<AgentFile, unknown> =>
 				size > MAX_TEXT_BYTES
 					? Effect.succeed({ path, size })
 					: Effect.map(ws.readText(path), (text) => ({ path, text })),
 		),
-		Effect.orElseSucceed((): Instruction => ({ path })),
+		Effect.orElseSucceed((): AgentFile => ({ path })),
 	);
 
 const unscanned = (file: { path: string; size?: number }): FindingInput =>
@@ -138,21 +133,25 @@ export const agentConfig = defineAuditor({
 	run: (ctx) =>
 		Effect.gen(function* () {
 			const ws = yield* requireWorkspace(ctx);
+			const listed = yield* ws.files;
 			const instructions = yield* Effect.forEach(
-				(yield* ws.files).filter(isInstructionFile),
-				(path) => readInstruction(ws, path),
+				listed.filter(isInstructionFile),
+				(path) => readAgentFile(ws, path),
 				{ concurrency: 16 },
 			);
-			const files = yield* readTextFiles(ws, isConfigFile, {
-				allowMinified: true,
-			});
-			if (files.length === 0 && instructions.length === 0)
+			const configs = yield* Effect.forEach(
+				listed.filter(isConfigFile),
+				(path) => readAgentFile(ws, path),
+				{ concurrency: 16 },
+			);
+			const files = configs.filter((f): f is SourceFile => "text" in f);
+			if (configs.length === 0 && instructions.length === 0)
 				return yield* skip(
 					"No agent instruction files, MCP configs or agent settings found",
 				);
 
 			// npx runs a declared dependency from node_modules, pinned by the lockfile.
-			const all = new Set(yield* ws.files);
+			const all = new Set(listed);
 			const manifests = new Set(
 				files
 					.filter((f) => MCP_CONFIG.test(f.path) || CODEX_CONFIG.test(f.path))
@@ -170,6 +169,17 @@ export const agentConfig = defineAuditor({
 				findings.push(
 					...("text" in file ? scanInstructionFile(file) : [unscanned(file)]),
 				);
+			for (const file of configs)
+				if (!("text" in file))
+					findings.push(
+						unparsed(
+							file.path,
+							1,
+							file.size === undefined
+								? "could not be read"
+								: `is ${file.size} bytes, over the ${MAX_TEXT_BYTES}-byte read limit`,
+						),
+					);
 			for (const file of files) {
 				if (MCP_CONFIG.test(file.path))
 					findings.push(...scanMcpJson(file, localPackages));
