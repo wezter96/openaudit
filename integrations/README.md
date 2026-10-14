@@ -4,11 +4,11 @@ Ways to run openaudit without installing it by hand. The Docker image is the onl
 
 ## Docker
 
-`ghcr.io/wezter96/openaudit` bundles openaudit with the free scanners, pinned to exact versions. Images are multi-arch (`linux/amd64`, `linux/arm64`) and ship with provenance and an SBOM.
+`ghcr.io/wezter96/openaudit` bundles openaudit with the free scanners, pinned to exact versions. Images are multi-arch (`linux/amd64`, `linux/arm64`) and ship with provenance and an SBOM. Release tags are built with each release; `edge` is built from `main` every Monday.
 
 | Tag | Contents |
 | --- | --- |
-| `latest`, `1.2.3`, `1.2`, `edge` (main) | slim: openaudit and the scanners below |
+| `latest`, `1.2.3`, `1.2`, `edge` (weekly from main) | slim: openaudit and the scanners below |
 | `latest-full`, `1.2.3-full`, `edge-full` | slim plus Chromium, Lighthouse and pa11y (for `--browser` and the web auditors) and the Go, Ruby, Rust, Node, PHP and Java scanners |
 
 ```bash
