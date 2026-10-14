@@ -951,7 +951,7 @@ html:not(.js) .needs-js {
 	font-family: var(--display);
 	font-size: clamp(2.5rem, 1.4rem + 4.6vw, 5rem);
 	font-weight: 780;
-	letter-spacing: -0.05em;
+	letter-spacing: -0.035em;
 	line-height: 0.95;
 	max-width: 18ch;
 }
@@ -995,7 +995,7 @@ html:not(.js) .needs-js {
 	font-family: var(--display);
 	font-size: clamp(2.125rem, 1.3rem + 3.2vw, 3.75rem);
 	font-weight: 760;
-	letter-spacing: -0.045em;
+	letter-spacing: -0.03em;
 	line-height: 0.98;
 }
 

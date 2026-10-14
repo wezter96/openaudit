@@ -5,8 +5,10 @@ import Handoff from "../Handoff.astro";
 import Icon from "../Icon.astro";
 
 /** The headline's two sentences; the answer half is in the accent. */
-const lines = ["Your AI writes the code.", "Who checks it?"];
-const words = lines.flatMap((line, i) => line.split(" ").map((w) => ({ w, tone: i > 0 })));
+const lines = ["AI wrote it.", "Nobody checked it."];
+const words = lines.flatMap((line, i) =>
+	line.split(" ").map((w, j, all) => ({ w, tone: i > 0, ends: j === all.length - 1 })),
+);
 const badges = [
 	{ label: "Free" },
 	{ label: "Open source", href: REPO },
@@ -23,19 +25,19 @@ const segments = scored.map((c) => ({
 <section class="hero frame" aria-labelledby="hero-title">
 	<h1 id="hero-title" class="hero-title">
 		{
-			words.map(({ w, tone }, i) => (
+			words.map(({ w, tone, ends }, i) => (
 				<>
 					<span class:list={["w", { tone }]}>
 						<span>{w}</span>
 					</span>
-					{i < words.length - 1 ? " " : ""}
+					{i < words.length - 1 ? ends ? <br /> : " " : ""}
 				</>
 			))
 		}
 	</h1>
 	<div class="hero-copy">
 		<p class="hero-sub late">
-			It checks what you ship for security holes, leaked keys, slow pages and accessibility problems. Then it hands your AI the list to fix.
+			openaudit checks what you ship for security holes, leaked keys, slow pages and accessibility problems. Then it hands your AI the list to fix.
 		</p>
 		<div class="hero-cmd late">
 			<Handoff />
@@ -93,9 +95,8 @@ const segments = scored.map((c) => ({
 		font-family: var(--display);
 		font-size: clamp(3.25rem, 1.4rem + 5.9vw, 6.25rem);
 		font-weight: 790;
-		letter-spacing: -0.058em;
+		letter-spacing: -0.035em;
 		line-height: 0.9;
-		max-width: 11ch;
 		text-wrap: balance;
 	}
 
