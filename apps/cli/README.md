@@ -60,7 +60,7 @@ Exit code 3 fails closed, so a target cannot pass CI by crashing the auditor tha
 
 `openaudit init` writes `openaudit.config.json`. Flags on the command line take precedence over it.
 
-A config found in the audited target is written by whoever controls the target, so it is only partly trusted. From there, openaudit honours `only` (which can only narrow the default set: it never enables opt-in or agentic auditors), `exclude`, `categories`, `failOn` (except `"none"`), `ignore` and `options.maxPages`, and prints a notice when the config narrows which auditors run. Settings that send data, cost money or add credentials (`options.agentic`, `ai`, `model`, `headers`, `settings`, `browser`, ...) are ignored with a warning. Those settings are accepted only from flags or from a file passed explicitly with `--config <path>`. Every report states how many findings each config or baseline suppressed. Use `--no-config` to ignore the target's config entirely. **When CI audits untrusted changes (pull requests from forks), pass `--fail-on` and `--no-config` explicitly**, because the change itself can edit the config.
+A config found in the audited target is written by whoever controls the target, so it is only partly trusted. From there, openaudit honours `only` (which can only narrow the default set: it never enables opt-in or agentic auditors), `exclude`, `categories`, `failOn` (except `"none"`), `ignore`, `options.maxPages` and the licence policy in `options.settings["code.licenses"]` (it only adds findings), and prints a notice when the config narrows which auditors run. Settings that send data, cost money or add credentials (`options.agentic`, `ai`, `model`, `headers`, other auditors' `settings`, `browser`, ...) are ignored with a warning. Those settings are accepted only from flags or from a file passed explicitly with `--config <path>`. Every report states how many findings each config or baseline suppressed. Use `--no-config` to ignore the target's config entirely. **When CI audits untrusted changes (pull requests from forks), pass `--fail-on` and `--no-config` explicitly**, because the change itself can edit the config.
 
 ```json
 {
@@ -76,6 +76,34 @@ A config found in the audited target is written by whoever controls the target, 
   "options": { "maxPages": 10 }
 }
 ```
+
+#### Licence policy
+
+`code.licenses` checks dependency licences against a policy and is skipped until one is configured:
+
+```json
+{
+  "options": {
+    "settings": {
+      "code.licenses": {
+        "deny": ["AGPL-*", "GPL-*", "SSPL-1.0"],
+        "allow": ["MIT", "Apache-2.0", "BSD-*", "ISC"],
+        "unknown": "low",
+        "ignorePackages": ["@acme/*"]
+      }
+    }
+  }
+}
+```
+
+- `deny`: licence ids or globs that fail the policy (`denied-license`, high).
+- `allow`: when present, every licence not listed fails the policy (`license-not-allowed`, medium). Use `"*"` to allow anything that is not denied.
+- `unknown`: severity for packages that declare no licence or one the policy cannot read (`UNLICENSED`, `SEE LICENSE IN ...`, free text), or `"off"`. Default `"low"`. Name a `LicenseRef-*` id or the exact value in `allow` to accept it.
+- `ignorePackages`: package names or globs exempt from the policy. Every locked dependency is checked, development ones included, so list build-only tools here if their licence does not matter to you.
+
+Entries are SPDX ids, case-insensitive, with `*` globs. Common spellings (`Apache 2.0`, `GPLv3`, deprecated `GPL-2.0`) are normalised on both sides. A deny entry wins over an allow entry, except that an entry naming an exception (`GPL-2.0-only WITH Classpath-exception-2.0`) wins over one for the bare licence. Expressions are evaluated as SPDX defines them: `MIT OR GPL-3.0-only` passes if any alternative passes, `AND` needs every term to pass, and an `-or-later` or `+` licence also matches entries for its base version.
+
+Licences are read offline, without running project code: from `package-lock.json` (lockfile v2/v3) and `composer.lock`, from installed `node_modules/**/package.json` (hoisted, nested, and the pnpm and bun stores) for any npm lockfile, and from `.venv`/`venv` `*.dist-info/METADATA` for pinned Python requirements and `poetry.lock`. Dependencies with no licence data (Go, Cargo, Bundler, or packages that are not installed) are listed in one info finding, `no-license-data`. The opt-in `code.syft-licenses` auditor covers more ecosystems by building an SBOM with syft.
 
 Every finding has a stable `fingerprint`. To accept a known issue, add its fingerprint to `ignore.fingerprints`, or pass a whole earlier report with `--baseline`.
 

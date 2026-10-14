@@ -5,6 +5,7 @@ import { api } from "./api";
 import { dependencies } from "./dependencies";
 import { gitleaks, osvScanner, semgrep, trivyFs } from "./external";
 import { hygiene } from "./hygiene";
+import { licenses } from "./licenses";
 import { lintJsAuditors } from "./lint-js";
 import {
 	clippy,
@@ -34,6 +35,7 @@ export const codebaseAuditors: ReadonlyArray<Auditor> = [
 	secrets,
 	security,
 	dependencies,
+	licenses,
 	accessibility,
 	performanceAuditor,
 	quality,

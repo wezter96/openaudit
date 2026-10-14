@@ -87,7 +87,7 @@ Every language also gets secret scanning (built-in, gitleaks, TruffleHog), dupli
 
 | Target | Built-in auditors | Wrapped tools (used when installed) |
 |---|---|---|
-| Codebase | secrets, static security (SAST), vulnerable dependencies (OSV.dev), API specs (OpenAPI, GraphQL), privacy (tracking SDKs, PII in logs), accessibility, performance, quality, language strictness, repo hygiene | **Secrets:** gitleaks, TruffleHog, git history\*. **SAST:** Semgrep, Bandit, gosec, Brakeman, mobsfscan. **Types and lint:** tsc, oxlint, Biome, ruff, staticcheck, ShellCheck, ESLint\*, clippy\*, mypy\*, golangci-lint\*. **APIs:** Spectral. **Dependencies:** osv-scanner, Trivy, npm/pnpm/bun audit, pip-audit, cargo-audit, govulncheck\*, Grype\*. **Supply chain:** OpenSSF Scorecard, Syft licences\*. **Quality and licences:** jscpd, knip\*, ScanCode\*. **AI review:** deepsec\* |
+| Codebase | secrets, static security (SAST), vulnerable dependencies (OSV.dev), API specs (OpenAPI, GraphQL), privacy (tracking SDKs, PII in logs), accessibility, performance, quality, language strictness, repo hygiene, dependency licence policy | **Secrets:** gitleaks, TruffleHog, git history\*. **SAST:** Semgrep, Bandit, gosec, Brakeman, mobsfscan. **Types and lint:** tsc, oxlint, Biome, ruff, staticcheck, ShellCheck, ESLint\*, clippy\*, mypy\*, golangci-lint\*. **APIs:** Spectral. **Dependencies:** osv-scanner, Trivy, npm/pnpm/bun audit, pip-audit, cargo-audit, govulncheck\*, Grype\*. **Supply chain:** OpenSSF Scorecard, Syft licences\*. **Quality and licences:** jscpd, knip\*, ScanCode\*. **AI review:** deepsec\* |
 | URL | security headers, TLS, DNS and email (SPF, DMARC, CAA, MTA-STS, subdomain takeover), exposed APIs (OpenAPI, GraphQL introspection), SEO, accessibility, performance, reliability, exposed files, privacy and trackers | Lighthouse, pa11y, OWASP ZAP baseline\*, ZAP active scan\* (allow-listed hosts only), testssl.sh\* |
 | Running web app (`--browser`) | axe-core in Chromium, console errors, failed and mixed-content requests, Core Web Vitals, trackers and cookies set before consent | |
 | Containers | Dockerfile, Compose, image (root user, age, size, secrets) | Trivy, hadolint, Dockle\* |
@@ -144,9 +144,9 @@ Elsewhere, run the CLI: `bunx @openaudit/cli . --diff origin/main -f html,sarif 
 
 ## Configuration
 
-`bunx @openaudit/cli init` writes an `openaudit.config.json` with suppressions (`ignore.rules`, `ignore.paths`, `ignore.fingerprints`), auditor selection and per-auditor settings. Every report discloses how many findings each config or baseline suppressed.
+`bunx @openaudit/cli init` writes an `openaudit.config.json` with suppressions (`ignore.rules`, `ignore.paths`, `ignore.fingerprints`), auditor selection and per-auditor settings, such as a dependency licence policy (`settings["code.licenses"]` with `deny` and `allow` lists of SPDX ids). Every report discloses how many findings each config or baseline suppressed.
 
-A config found inside the audited target is written by whoever controls the target, so it can only narrow an audit. It cannot enable opt-in auditors, add credentials or switch off the `--fail-on` gate. Settings like that come only from flags or from a file passed with `--config <path>`. See [`apps/cli/README.md`](apps/cli/README.md#configuration).
+A config found inside the audited target is written by whoever controls the target, so it can only narrow an audit or add its own licence policy. It cannot enable opt-in auditors, add credentials or switch off the `--fail-on` gate. Settings like that come only from flags or from a file passed with `--config <path>`. See [`apps/cli/README.md`](apps/cli/README.md#configuration).
 
 ## Safety
 
