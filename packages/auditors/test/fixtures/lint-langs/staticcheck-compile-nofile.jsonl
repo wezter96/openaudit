@@ -1,0 +1,1 @@
+{"code":"compile","severity":"error","location":{"file":"main.go","line":3,"column":8},"end":{"file":"","line":0,"column":0},"message":"missing go.sum entry for module providing package golang.org/x/text/language (imported by example.com/vuln); to add:\n\tgo get example.com/vuln"}

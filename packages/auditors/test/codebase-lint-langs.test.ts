@@ -234,6 +234,26 @@ describe("staticcheck parser", () => {
 		});
 		expect(f?.message).toContain("declared and not used");
 	});
+
+	test("compile errors without a position in the message use the reported location", () => {
+		// Recorded from staticcheck 2026.2.1 on a module missing its go.sum.
+		// Without a location, path suppressions (e.g. test fixtures) missed it.
+		const [f] = parseStaticcheckReport(
+			text("staticcheck-compile-nofile.jsonl"),
+			"/repo/supply/go",
+			"supply/go",
+		);
+		expect(f).toMatchObject({
+			ruleId: "code.staticcheck/compile-error",
+			location: { file: "supply/go/main.go", line: 3, column: 8 },
+		});
+		const [bare] = parseStaticcheckReport(
+			'{"code":"compile","severity":"error","location":{"file":"","line":0,"column":0},"message":"go: cannot load module"}',
+			"/repo/svc",
+			"svc",
+		);
+		expect(bare?.location).toEqual({ file: "svc/go.mod" });
+	});
 });
 
 describe("golangci-lint parser", () => {

@@ -48,8 +48,10 @@ export const parseStaticcheckReport = (
 				f && prefix ? `${prefix}/${f}` : f;
 			if (code === "compile") {
 				// The package did not type-check; the first `file:line:col:` in the
-				// message locates it. Usually a missing dependency or build tag.
+				// message locates it, else the reported location, else the module's
+				// go.mod. Usually a missing dependency or build tag.
 				const m = /^\.?\/?([^\s:]+\.go):(\d+):(\d+):/m.exec(message);
+				const reported = inRoot(root, str(loc.file));
 				return [
 					{
 						ruleId: "code.staticcheck/compile-error",
@@ -63,7 +65,13 @@ export const parseStaticcheckReport = (
 									line: Number(m[2]),
 									column: Number(m[3]),
 								}
-							: undefined,
+							: reported
+								? {
+										file: withPrefix(reported),
+										line: num(loc.line),
+										column: num(loc.column),
+									}
+								: { file: withPrefix("go.mod") },
 						remediation:
 							"Make the module build (go build ./...); staticcheck cannot analyse packages that fail to type-check.",
 						confidence: "low",
