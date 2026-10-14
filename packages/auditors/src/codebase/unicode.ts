@@ -33,6 +33,25 @@ import {
  * identifiers (CVE-2021-42694). Legitimate text is left alone: RTL letters and
  * directional marks in prose, ZWJ in emoji and Indic text, ZWNJ in Persian,
  * subdivision-flag tag sequences, single variation selectors and a leading BOM.
+ *
+ * Known limitations:
+ * - Strings and comments are found by an approximate, per-language lexer. Its
+ *   answer can only lower severity (high to medium) when it is certain, and
+ *   it gives up certainty past anything it does not model (multi-line, raw
+ *   and heredoc literals, Java `\u` escapes, Ruby percent literals), so a
+ *   miss costs severity, never the finding. Languages without a lexer here
+ *   are judged entirely as code.
+ * - Files are decoded as UTF-8, and as UTF-16 or UTF-32 when they carry a BOM
+ *   or (UTF-16 only) look like it from the NUL bytes in their first 4 KB.
+ *   BOM-less UTF-16 that opens with non-ASCII text, BOM-less UTF-32 and other
+ *   encodings (Shift-JIS, UTF-7, EBCDIC, ...) are read only as UTF-8.
+ * - Files over 16 MB, and files past the 512 MB per-audit read budget, are
+ *   not scanned; they are listed in one `scan-incomplete` finding.
+ * - Homoglyphs: only Cyrillic and Greek look-alikes of Latin letters are
+ *   checked, in files with a lexer, not full UTS #39 confusables (Armenian,
+ *   Cherokee, mathematical alphanumerics, fullwidth forms and so on).
+ * - Visible tricks with no hidden character are out of scope, such as a Java
+ *   `\u000a` escape that ends a comment early.
  */
 
 const AUDITOR = "code.unicode";
@@ -153,9 +172,13 @@ const EXECUTABLE_CONFIG =
 const PROSE_NAME =
 	/^(README|LICEN[CS]E|COPYING|NOTICE|AUTHORS|CONTRIBUTORS|CHANGELOG|CHANGES|HISTORY|CODEOWNERS)$/i;
 
-/** Undefined for unknown files, which are scanned as code. */
-const kindOf = (path: string): Kind | undefined => {
-	if (AGENT_FILE.test(path)) return "agent";
+/**
+ * Undefined for unknown files, which are scanned as code. Scripts inside
+ * agent folders (`.claude/skills/x/run.py`) are code, and so is any file
+ * whose `text` starts with a shebang, whatever its name.
+ */
+const kindOf = (path: string, text?: string): Kind | undefined => {
+	if (text?.startsWith("#!")) return "code";
 	const ext = extOf(path);
 	if (
 		languageOf(path) ||
@@ -165,6 +188,7 @@ const kindOf = (path: string): Kind | undefined => {
 		/(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/.test(path)
 	)
 		return "code";
+	if (AGENT_FILE.test(path)) return "agent";
 	if (
 		TEXT_EXT.has(ext) ||
 		/^\.env(\.|$)/.test(baseName(path)) ||
@@ -178,10 +202,17 @@ const kindOf = (path: string): Kind | undefined => {
 
 const NAMES: ReadonlyMap<number, string> = new Map([
 	[0x00ad, "SOFT HYPHEN"],
+	[0x034f, "COMBINING GRAPHEME JOINER"],
 	[0x061c, "ARABIC LETTER MARK"],
 	[0x115f, "HANGUL CHOSEONG FILLER"],
 	[0x1160, "HANGUL JUNGSEONG FILLER"],
+	[0x17b4, "KHMER VOWEL INHERENT AQ"],
+	[0x17b5, "KHMER VOWEL INHERENT AA"],
+	[0x180b, "MONGOLIAN FREE VARIATION SELECTOR ONE"],
+	[0x180c, "MONGOLIAN FREE VARIATION SELECTOR TWO"],
+	[0x180d, "MONGOLIAN FREE VARIATION SELECTOR THREE"],
 	[0x180e, "MONGOLIAN VOWEL SEPARATOR"],
+	[0x180f, "MONGOLIAN FREE VARIATION SELECTOR FOUR"],
 	[0x200b, "ZERO WIDTH SPACE"],
 	[0x200c, "ZERO WIDTH NON-JOINER"],
 	[0x200d, "ZERO WIDTH JOINER"],
@@ -203,15 +234,27 @@ const NAMES: ReadonlyMap<number, string> = new Map([
 	[0x2067, "RIGHT-TO-LEFT ISOLATE"],
 	[0x2068, "FIRST STRONG ISOLATE"],
 	[0x2069, "POP DIRECTIONAL ISOLATE"],
+	[0x206a, "INHIBIT SYMMETRIC SWAPPING"],
+	[0x206b, "ACTIVATE SYMMETRIC SWAPPING"],
+	[0x206c, "INHIBIT ARABIC FORM SHAPING"],
+	[0x206d, "ACTIVATE ARABIC FORM SHAPING"],
+	[0x206e, "NATIONAL DIGIT SHAPES"],
+	[0x206f, "NOMINAL DIGIT SHAPES"],
 	[0x3164, "HANGUL FILLER"],
 	[0xfeff, "ZERO WIDTH NO-BREAK SPACE"],
 	[0xffa0, "HALFWIDTH HANGUL FILLER"],
+	[0xfff9, "INTERLINEAR ANNOTATION ANCHOR"],
+	[0xfffa, "INTERLINEAR ANNOTATION SEPARATOR"],
+	[0xfffb, "INTERLINEAR ANNOTATION TERMINATOR"],
 ]);
 
-/** Every character this auditor reports, as runs. */
-const HIDDEN =
-	// biome-ignore lint/suspicious/noMisleadingCharacterClass: matches variation selectors on their own
-	/[\u00AD\u061C\u115F\u1160\u180E\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2064\u2066-\u2069\u3164\uFE00-\uFE0F\uFEFF\uFFA0\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]+/gu;
+/**
+ * Every character this auditor reports, as runs: all of Unicode's
+ * Default_Ignorable_Code_Point (which renderers draw as nothing, including
+ * the deprecated format controls and unassigned reserved ranges), the
+ * interlinear annotation controls, and the line and paragraph separators.
+ */
+const HIDDEN = /[\p{Default_Ignorable_Code_Point}\u2028\u2029\uFFF9-\uFFFB]+/gu;
 
 type Group = "bidi" | "mark" | "tag" | "selector" | "invisible";
 
@@ -267,8 +310,15 @@ const legitimateInvisible = (
 		case 0x200c:
 		case 0x200d:
 		case 0x2060:
+		case 0x034f: // grapheme joiner
+		case 0x17b4: // Khmer inherent vowels
+		case 0x17b5:
 			return near(isComplexScript);
+		case 0x180b:
+		case 0x180c:
+		case 0x180d:
 		case 0x180e:
+		case 0x180f:
 			return near((ch) => /\p{Script=Mongolian}/u.test(ch));
 		default:
 			return false;
@@ -625,7 +675,8 @@ type Region = "code" | "comment" | "string";
  * Where a character sits, as far as the lexer can tell. Our lexer will never
  * match every language's tokenizer, so its answer may only lower severity
  * when it is certain: a simple one-line quoted literal, or a comment that
- * starts its line. Anything else is judged as code.
+ * starts its line, before anything the lexer does not model. Anything else is
+ * judged as code.
  */
 interface Place {
 	readonly region: Region;
@@ -638,6 +689,49 @@ const IN_CODE: Place = { region: "code", certain: true };
 
 /** Longest line prefix inspected when judging a literal or comment simple. */
 const MAX_PREFIX = 500;
+
+/** Languages whose `'` starts a one-character literal, not a string. */
+const CHAR_LITERAL = new Set(["c", "csharp", "go", "java", "rust", "swift"]);
+
+/** Languages whose multi-line literals the lexer models. */
+const MODELLED_LITERALS = new Set(["js", "python", "go"]);
+
+/** Heredocs and percent literals, which the lexer does not model. */
+const UNMODELLED_OPENER: Readonly<Record<string, RegExp>> = {
+	php: /<<</g,
+	ruby: /<<[~-]?["'`]?[A-Za-z_]|%[qQwWiIrsx]?[^\w\s=]/g,
+};
+
+/** Java decodes `\uXXXX` before lexing, so one can end a string or comment. */
+const JAVA_ESCAPE = /\\u+[0-9A-Fa-f]{4}/;
+
+/**
+ * Where the lexer may have lost track of literals: the first quote it left
+ * open at a line end (a multi-line string, raw string or text block it reads
+ * as one line), or the first heredoc or percent literal. Past it, nothing is
+ * certain. One pass over the mask.
+ */
+const desyncOf = (text: string, lang: string, m: Uint8Array): number => {
+	let at = text.length;
+	const openers = UNMODELLED_OPENER[lang];
+	if (openers)
+		for (const o of text.matchAll(openers))
+			if (!m[o.index ?? 0]) {
+				at = o.index ?? 0;
+				break;
+			}
+	if (MODELLED_LITERALS.has(lang)) return at;
+	for (let i = 0; i < at; i++) {
+		const c = text[i];
+		if (m[i] || (c !== '"' && c !== "'")) continue;
+		let j = i + 1;
+		while (j < m.length && m[j]) j++;
+		// One-line character literals cannot leave a string open.
+		if (text[j] !== c && !(c === "'" && CHAR_LITERAL.has(lang))) return i;
+		i = text[j] === c ? j : j - 1;
+	}
+	return at;
+};
 
 /** Code before a literal on its line, free of anything that could fool the lexer. */
 const isPlainPrefix = (prefix: string): boolean => {
@@ -662,6 +756,7 @@ const placeFinder = (
 	let built = false;
 	let mask: Uint8Array | undefined;
 	let starts = new Int32Array(0);
+	let desync = text.length;
 	const spans = new Map<number, Place & { breakAt: number }>();
 
 	const build = () => {
@@ -673,6 +768,7 @@ const placeFinder = (
 			return; // no mask: everything is code, the stricter reading
 		}
 		const m = mask;
+		desync = desyncOf(text, lang, m);
 		const isStart = (i: number) => m[i] === 1 && (i === 0 || m[i - 1] === 0);
 		let count = 0;
 		for (let i = 0; i < m.length; i++) if (isStart(i)) count++;
@@ -686,18 +782,32 @@ const placeFinder = (
 		let end = s;
 		while (end < m.length && m[end]) end++;
 		const lineStart = lines.startOf(lines.lineOf(s));
-		const prefix =
-			s - lineStart <= MAX_PREFIX ? text.slice(lineStart, s) : undefined;
+		let prefix =
+			s - lineStart <= MAX_PREFIX && s < desync
+				? text.slice(lineStart, s)
+				: undefined;
+		// Ruby's `?"` and `%q(` literals hide quotes from the lexer.
+		if (lang === "ruby" && prefix && /[?%]/.test(prefix)) prefix = undefined;
+		// In Java a `\u` escape is an ordinary character: `\u0022` is a quote,
+		// `\u000a` a line break.
+		let escapeAt = end;
+		if (lang === "java") {
+			if (prefix && JAVA_ESCAPE.test(prefix)) prefix = undefined;
+			const e = JAVA_ESCAPE.exec(text.slice(s, end));
+			if (e) escapeAt = s + e.index;
+		}
 		if (/^(\/\/|\/\*|#)/.test(text.slice(s, s + 2))) {
-			// The mask starts comments at their delimiter. JavaScript also ends
-			// line comments at CR and the Unicode line separators.
-			let breakAt = end;
-			if (text[s + 1] !== "*")
-				for (let i = s; i < end; i++)
-					if (/[\r\u2028\u2029]/.test(text[i] ?? "")) {
-						breakAt = i;
-						break;
-					}
+			// The mask starts comments at their delimiter. Line comments may also
+			// end at CR, NEL (C#), the Unicode line separators (JavaScript, C#)
+			// or, in PHP, at `?>`.
+			let breakAt = escapeAt;
+			if (text[s + 1] !== "*") {
+				const body = text.slice(s, end);
+				const lineBreak = /[\r\u0085\u2028\u2029]/.exec(body);
+				if (lineBreak) breakAt = Math.min(breakAt, s + lineBreak.index);
+				const close = lang === "php" ? body.indexOf("?>") : -1;
+				if (close !== -1) breakAt = Math.min(breakAt, s + close);
+			}
 			return {
 				region: "comment",
 				certain: prefix !== undefined && /^\s*$/.test(prefix),
@@ -705,11 +815,19 @@ const placeFinder = (
 			};
 		}
 		// Strings start after their quote. Prefixed (f"", r#"", $"", @""),
-		// interpolating, multi-line or unclosed literals are never certain.
+		// interpolating, multi-line or unclosed literals are never certain,
+		// nor is a `'` literal longer than one character where `'` delimits
+		// characters (it is a Rust lifetime or a C++ digit separator).
 		const quote = text[s - 1] ?? "";
 		const certain =
 			(quote === '"' || quote === "'") &&
 			text[end] === quote &&
+			!(
+				quote === "'" &&
+				lang !== undefined &&
+				CHAR_LITERAL.has(lang) &&
+				(end - s > 2 || [...text.slice(s, end)].length > 1)
+			) &&
 			!/[\w#$@"'`]/.test(text[s - 2] ?? "") &&
 			!/[{$\r\n]/.test(text.slice(s, end)) &&
 			prefix !== undefined &&
@@ -718,7 +836,7 @@ const placeFinder = (
 			region: "string",
 			certain,
 			regex: text[s] === "/" && quote !== "/",
-			breakAt: end,
+			breakAt: escapeAt,
 		};
 	};
 
@@ -983,7 +1101,7 @@ export interface ScanOptions {
 	 * minified, generated, fixture and lock files, and files over 1 MB.
 	 */
 	readonly mode?: Mode;
-	/** Overrides the kind derived from the path (e.g. shebang scripts). */
+	/** Overrides the kind derived from the path and shebang. */
 	readonly kind?: Kind;
 }
 
@@ -1018,7 +1136,7 @@ export const scanUnicode = (
 	options: ScanOptions = {},
 ): FindingInput[] => {
 	const { path, text } = file;
-	const kind = options.kind ?? kindOf(path) ?? "code";
+	const kind = options.kind ?? kindOf(path, text) ?? "code";
 	if (!/[^\p{ASCII}]/u.test(text)) return [];
 	const mode = options.mode ?? modeOf(file);
 	const lang = kind === "code" ? languageOf(path) : undefined;
@@ -1177,7 +1295,7 @@ export const unicode = defineAuditor({
 	id: AUDITOR,
 	title: "Hidden Unicode",
 	description:
-		"Finds Trojan Source bidi controls, invisible and zero-width characters, hidden text in Unicode tag characters, variation-selector payloads and homoglyph identifiers in code, docs and agent instruction files.",
+		"Finds Trojan Source bidi controls, invisible and zero-width characters, hidden text in Unicode tag characters, variation-selector payloads and homoglyph identifiers in code, docs and agent instruction files. Known limits: string and comment detection is approximate per language and only ever lowers severity when certain; only UTF-8, UTF-16 and UTF-32 are decoded; files over 16 MB are reported as not scanned; homoglyphs are checked for Cyrillic and Greek look-alikes only.",
 	categories: ["security"],
 	targets: ["codebase"],
 	engine: "builtin",
@@ -1235,7 +1353,7 @@ export const unicode = defineAuditor({
 							scanUnicode(
 								{ path, text },
 								{
-									kind: kind ?? "code",
+									kind: kindOf(path, text) ?? "code",
 									mode: binary || texts.length > 1 ? "quick" : undefined,
 								},
 							),
