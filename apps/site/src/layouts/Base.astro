@@ -54,6 +54,7 @@ const grade = self.grade ?? "";
 		<link rel="apple-touch-icon" href={u("/apple-touch-icon.png")} />
 		<link rel="sitemap" href={u("/sitemap-index.xml")} />
 		{markdown && <link rel="alternate" type="text/markdown" href={u(markdownPath(path))} />}
+		<link rel="ai-catalog" href={u("/.well-known/ai-catalog.json")} />
 		<meta property="og:type" content="website" />
 		<meta property="og:site_name" content="openaudit" />
 		<meta property="og:title" content={Astro.props.ogTitle ?? title} />
