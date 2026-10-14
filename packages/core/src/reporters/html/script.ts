@@ -44,7 +44,9 @@ fades();
 }
 function fades(){if(!tablist)return;var max=tablist.scrollWidth-tablist.clientWidth;tablist.classList.toggle("at-start",tablist.scrollLeft<=2);tablist.classList.toggle("at-end",tablist.scrollLeft>=max-2);}
 var frame=d.querySelector(".frame");
-function topOfTabs(){var y=frame.getBoundingClientRect().top+w.pageYOffset;if(w.pageYOffset>y)w.scrollTo(0,y);}
+/* a host page may pin its own bar above the report; it sets scroll-margin-top on .frame */
+function above(){return frame?parseFloat(w.getComputedStyle(frame).scrollMarginTop)||0:0;}
+function topOfTabs(){var y=frame.getBoundingClientRect().top+w.pageYOffset-above();if(w.pageYOffset>y)w.scrollTo(0,y);}
 function select(i,focus){
 if(i<0||i>=tabs.length)return;
 var prev=current;
@@ -91,7 +93,7 @@ w.addEventListener("hashchange",route);
 
 /* the compact grade in the sticky bar appears once the masthead is gone */
 var mast=d.querySelector(".mast");
-if(mast&&bar&&w.IntersectionObserver){new IntersectionObserver(function(es){bar.classList.toggle("stuck",!es[0].isIntersecting);},{threshold:0}).observe(mast);}
+if(mast&&bar&&w.IntersectionObserver){new IntersectionObserver(function(es){bar.classList.toggle("stuck",!es[0].isIntersecting);},{threshold:0,rootMargin:(-above())+"px 0px 0px 0px"}).observe(mast);}
 
 /* ---- load sequence: the dial settles, the readout and rack follow ---- */
 function count(el,to,ms){
