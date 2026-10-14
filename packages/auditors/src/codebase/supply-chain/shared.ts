@@ -1,15 +1,14 @@
 import { isAbsolute, relative } from "node:path";
 import {
 	type AuditContext,
-	AuditorError,
+	type AuditorError,
 	type FindingInput,
 	requireWorkspace,
 	type Severity,
 } from "@openaudit/core";
 import { Effect } from "effect";
 
-import { withTempDir as withScratchDir } from "../../tool";
-import { truncate } from "../util";
+import { runCommand, withTempDir as withScratchDir } from "../../tool";
 
 /* -------------------------------------------------------------------------- */
 /*                                   Shared                                   */
@@ -56,31 +55,8 @@ export const withTempDir = <A, E>(
 	fn: (dir: string) => Effect.Effect<A, E>,
 ): Effect.Effect<A, E | AuditorError> => withScratchDir("openaudit-sc-", fn);
 
-/** Runs a tool; fails with its stderr unless the exit code is in `okCodes`. */
-export const run = (
-	ctx: AuditContext,
-	cmd: ReadonlyArray<string>,
-	opts: {
-		cwd: string;
-		okCodes: ReadonlyArray<number>;
-		env?: Record<string, string>;
-	},
-) =>
-	Effect.flatMap(
-		ctx.exec.run(cmd, {
-			cwd: opts.cwd,
-			timeoutMs: 15 * 60_000,
-			env: opts.env,
-		}),
-		(res) =>
-			opts.okCodes.includes(res.code)
-				? Effect.succeed(res)
-				: Effect.fail(
-						new AuditorError({
-							message: `${baseOf(cmd[0] ?? "tool")} exited with code ${res.code}: ${truncate(res.stderr || res.stdout, 300)}`,
-						}),
-					),
-	);
+/** Runs a tool; fails with its output unless the exit code is in `okCodes`. */
+export const run = runCommand;
 
 export const advisoryTags = (ids: ReadonlyArray<string>) =>
 	ids.filter((a) => /^(CVE|GHSA)-/i.test(a)).map((a) => a.toLowerCase());

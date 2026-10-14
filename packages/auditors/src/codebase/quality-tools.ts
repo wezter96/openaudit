@@ -79,11 +79,51 @@ export const parseJscpdReport = (
 	return findings;
 };
 
+/** Directories and files jscpd never scans. */
+const JSCPD_IGNORES = [
+	"**/node_modules/**",
+	"**/dist/**",
+	"**/build/**",
+	"**/.git/**",
+	"**/*.min.js",
+	"**/vendor/**",
+];
+const MAX_PROJECT_IGNORES = 100;
+
+/**
+ * `ignore` globs from the project's `.jscpd.json`. jscpd reads that file from
+ * its cwd, but `--ignore` replaces the list instead of adding to it, so the
+ * project's own exclusions (generated or vendored files) are passed along.
+ * Globs with a comma (`{a,b}`) are dropped: the flag splits on commas.
+ */
+const jscpdProjectIgnores = (ws: Workspace) =>
+	ws.exists(".jscpd.json").pipe(
+		Effect.flatMap((exists) =>
+			exists ? ws.readText(".jscpd.json") : Effect.succeed("{}"),
+		),
+		Effect.map((text): string[] => {
+			try {
+				const config: unknown = JSON.parse(text);
+				return isRecord(config)
+					? arr(config.ignore)
+							.filter(
+								(g): g is string =>
+									typeof g === "string" && g !== "" && !g.includes(","),
+							)
+							.slice(0, MAX_PROJECT_IGNORES)
+					: [];
+			} catch {
+				return [];
+			}
+		}),
+		Effect.orElseSucceed((): string[] => []),
+	);
+
 export const jscpd = defineAuditor({
 	id: "code.jscpd",
 	title: "jscpd copy-paste detection",
 	description:
-		"Runs jscpd to find copy-pasted blocks of 10+ lines across the codebase. Read-only: writes its report to a temp directory.",
+		"Runs jscpd to find copy-pasted blocks of 10+ lines across the codebase, honouring the `ignore` list of the project's .jscpd.json. Read-only: writes its report to a temp directory.",
 	categories: ["maintainability"],
 	targets: ["codebase"],
 	engine: "external",
@@ -97,6 +137,11 @@ export const jscpd = defineAuditor({
 				"jscpd",
 				"Install: npm install -g jscpd (https://github.com/kucherenko/jscpd#installation).",
 			);
+			const projectIgnores = yield* jscpdProjectIgnores(ws);
+			if (projectIgnores.length > 0)
+				yield* ctx.log(
+					`code.jscpd: also ignoring ${projectIgnores.length} pattern(s) from .jscpd.json`,
+				);
 			const outDir = yield* Effect.promise(() =>
 				mkdtemp(join(tmpdir(), "openaudit-jscpd-")),
 			);
@@ -114,7 +159,7 @@ export const jscpd = defineAuditor({
 						"--min-lines",
 						"10",
 						"--ignore",
-						"**/node_modules/**,**/dist/**,**/build/**,**/.git/**,**/*.min.js,**/vendor/**",
+						[...JSCPD_IGNORES, ...projectIgnores].join(","),
 					],
 					ws.root,
 					[0],

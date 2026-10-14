@@ -2,6 +2,8 @@ import { chmod, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+	type AuditContext,
+	type Auditor,
 	AuditorError,
 	defineAuditor,
 	type FindingInput,
@@ -13,7 +15,7 @@ import { Effect } from "effect";
 
 import { cweTags } from "../tool";
 import { isLoopback } from "./page";
-import { truncate } from "./util";
+import { parseUrl, truncate } from "./util";
 
 /** Pinned stable ZAP image; bump deliberately. */
 export const ZAP_IMAGE = "ghcr.io/zaproxy/zaproxy:2.17.0";
@@ -158,100 +160,136 @@ export const forContainer = (url: string): string => {
 	return u.toString();
 };
 
+/** Auditor fields shared by the ZAP scans: opt-in, and run through Docker. */
+export const ZAP_AUDITOR = {
+	categories: ["security"],
+	targets: ["url", "webapp"],
+	engine: "external",
+	tool: "docker",
+	defaultEnabled: false,
+} satisfies Partial<Auditor>;
+
+interface ZapScan {
+	/** Auditor id: the rule id prefix and log prefix. */
+	readonly id: string;
+	/** ZAP packaged scan script, e.g. `zap-baseline.py`. */
+	readonly script: string;
+	readonly url: string;
+	readonly hostname: string;
+	readonly tmpPrefix: string;
+	/** Script arguments for the URL ZAP should scan. */
+	readonly args: (target: string) => ReadonlyArray<string>;
+	readonly timeoutMs: number;
+	/** Logged just before the scan starts. */
+	readonly announce?: string;
+}
+
+/**
+ * Runs a ZAP packaged scan from a local install or the pinned Docker image and
+ * parses its JSON report. Skips when neither is available.
+ */
+export const runZapScan = (ctx: AuditContext, scan: ZapScan) =>
+	Effect.gen(function* () {
+		if (ctx.options.headers && Object.keys(ctx.options.headers).length > 0)
+			yield* ctx.log(
+				`${scan.id}: custom headers are not forwarded (authenticated scans are not supported)`,
+			);
+		const local = yield* ctx.exec.which(scan.script);
+		const docker = local ? undefined : yield* ctx.exec.which("docker");
+		if (!local && !docker)
+			return yield* skip(
+				`Neither ${scan.script} nor docker found on PATH. Install Docker (https://docs.docker.com/get-docker/) and the scan pulls ` +
+					`${ZAP_IMAGE}, or install ZAP's ${scan.script}.`,
+			);
+		if (docker) {
+			const info = yield* ctx.exec
+				.run([docker, "info"], { timeoutMs: 20_000 })
+				.pipe(
+					Effect.orElseSucceed(() => ({ code: 1, stdout: "", stderr: "" })),
+				);
+			if (info.code !== 0)
+				return yield* skip(
+					"Docker daemon is not running (`docker info` failed)",
+				);
+		}
+		const loopback = isLoopback(scan.url);
+		const target = docker && loopback ? forContainer(scan.url) : scan.url;
+		const dir = yield* Effect.promise(() =>
+			mkdtemp(join(tmpdir(), scan.tmpPrefix)),
+		);
+		return yield* Effect.gen(function* () {
+			// The container's zap user must be able to write the report.
+			yield* Effect.promise(() => chmod(dir, 0o777));
+			const args = scan.args(target);
+			const cmd = local
+				? [local, ...args]
+				: [
+						docker as string,
+						"run",
+						"--rm",
+						"-v",
+						`${dir}:/zap/wrk/:rw`,
+						...(loopback ? [`--add-host=${DOCKER_HOST}:host-gateway`] : []),
+						ZAP_IMAGE,
+						scan.script,
+						...args,
+					];
+			if (scan.announce) yield* ctx.log(scan.announce);
+			const res = yield* ctx.exec.run(cmd, {
+				cwd: dir,
+				timeoutMs: scan.timeoutMs,
+			});
+			const body = yield* Effect.promise(() =>
+				readFile(join(dir, "report.json"), "utf8").catch(() => ""),
+			);
+			// 0 = pass, 1 = failures, 2 = warnings; 3 and others = scan error.
+			if (!body.trim() || res.code > 2)
+				return yield* Effect.fail(
+					new AuditorError({
+						message: `${scan.script} exited with code ${res.code} and no report: ${truncate((res.stderr || res.stdout).trim(), 300)}`,
+					}),
+				);
+			const report = yield* Effect.try({
+				try: () => JSON.parse(body) as ZapReport,
+				catch: (cause) =>
+					new AuditorError({
+						message: "ZAP produced an invalid JSON report",
+						cause,
+					}),
+			});
+			return parseZapReport(
+				report,
+				docker && loopback
+					? { from: DOCKER_HOST, to: scan.hostname }
+					: undefined,
+				scan.id,
+			);
+		}).pipe(
+			Effect.ensuring(
+				Effect.promise(() => rm(dir, { recursive: true, force: true })),
+			),
+		);
+	});
+
 /** OWASP ZAP baseline scan: spider plus passive rules only, never the active scan. */
 export const zapBaseline = defineAuditor({
 	id: "web.zap-baseline",
 	title: "OWASP ZAP baseline",
 	description:
 		"Runs the OWASP ZAP baseline scan (zap-baseline.py: spider for about a minute, then passive rules only; no attacks and no active scan) from a local install or the pinned Docker image. Sends GET requests while spidering, more than the default URL auditors, so it is opt-in. Localhost targets are reached through host.docker.internal. Authenticated scans are not supported.",
-	categories: ["security"],
-	targets: ["url", "webapp"],
-	engine: "external",
-	tool: "docker",
-	defaultEnabled: false,
+	...ZAP_AUDITOR,
 	run: (ctx) =>
 		Effect.gen(function* () {
 			const url = yield* requireUrl(ctx);
-			const parsed = yield* Effect.try({
-				try: () => new URL(url),
-				catch: () => new AuditorError({ message: `Invalid URL: ${url}` }),
+			const parsed = yield* parseUrl(url);
+			return yield* runZapScan(ctx, {
+				id: "web.zap-baseline",
+				script: "zap-baseline.py",
+				url,
+				hostname: parsed.hostname,
+				tmpPrefix: "openaudit-zap-",
+				args: (target) => ["-t", target, "-J", "report.json", "-m", "1", "-I"],
+				timeoutMs: 20 * 60_000,
 			});
-			if (ctx.options.headers && Object.keys(ctx.options.headers).length > 0)
-				yield* ctx.log(
-					"web.zap-baseline: custom headers are not forwarded (authenticated scans are not supported)",
-				);
-			const local = yield* ctx.exec.which("zap-baseline.py");
-			const docker = local ? undefined : yield* ctx.exec.which("docker");
-			if (!local && !docker)
-				return yield* skip(
-					"Neither zap-baseline.py nor docker found on PATH. Install Docker (https://docs.docker.com/get-docker/) and the scan pulls " +
-						`${ZAP_IMAGE}, or install ZAP's zap-baseline.py.`,
-				);
-			if (docker) {
-				const info = yield* ctx.exec
-					.run([docker, "info"], { timeoutMs: 20_000 })
-					.pipe(
-						Effect.orElseSucceed(() => ({ code: 1, stdout: "", stderr: "" })),
-					);
-				if (info.code !== 0)
-					return yield* skip(
-						"Docker daemon is not running (`docker info` failed)",
-					);
-			}
-			const loopback = isLoopback(url);
-			const target = docker && loopback ? forContainer(url) : url;
-			const dir = yield* Effect.promise(() =>
-				mkdtemp(join(tmpdir(), "openaudit-zap-")),
-			);
-			return yield* Effect.gen(function* () {
-				// The container's zap user must be able to write the report.
-				yield* Effect.promise(() => chmod(dir, 0o777));
-				const scan = ["-t", target, "-J", "report.json", "-m", "1", "-I"];
-				const cmd = local
-					? [local, ...scan]
-					: [
-							docker as string,
-							"run",
-							"--rm",
-							"-v",
-							`${dir}:/zap/wrk/:rw`,
-							...(loopback ? [`--add-host=${DOCKER_HOST}:host-gateway`] : []),
-							ZAP_IMAGE,
-							"zap-baseline.py",
-							...scan,
-						];
-				const res = yield* ctx.exec.run(cmd, {
-					cwd: dir,
-					timeoutMs: 20 * 60_000,
-				});
-				const body = yield* Effect.promise(() =>
-					readFile(join(dir, "report.json"), "utf8").catch(() => ""),
-				);
-				// 0 = pass, 1 = failures, 2 = warnings; 3 and others = scan error.
-				if (!body.trim() || res.code > 2)
-					return yield* Effect.fail(
-						new AuditorError({
-							message: `zap-baseline.py exited with code ${res.code} and no report: ${truncate((res.stderr || res.stdout).trim(), 300)}`,
-						}),
-					);
-				const report = yield* Effect.try({
-					try: () => JSON.parse(body) as ZapReport,
-					catch: (cause) =>
-						new AuditorError({
-							message: "ZAP produced an invalid JSON report",
-							cause,
-						}),
-				});
-				return parseZapReport(
-					report,
-					docker && loopback
-						? { from: DOCKER_HOST, to: parsed.hostname }
-						: undefined,
-				);
-			}).pipe(
-				Effect.ensuring(
-					Effect.promise(() => rm(dir, { recursive: true, force: true })),
-				),
-			);
 		}),
 });

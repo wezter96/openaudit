@@ -1,7 +1,6 @@
 import type {
 	AuditorEngine,
 	AuditorStatus,
-	Category,
 	Grade,
 	Report,
 	Severity,
@@ -12,7 +11,10 @@ import type {
  * Display metadata for the report model. Kept here (not imported as values
  * from @openaudit/core/model) so pages that only render reports do not pull
  * Effect Schema into the bundle; the report viewer loads it lazily to validate.
+ * `@openaudit/core/labels` is safe to import: it has no runtime dependencies.
  */
+
+export { CATEGORY_LABEL, SEVERITY_LABEL } from "@openaudit/core/labels";
 
 export const SEVERITY_ORDER: ReadonlyArray<Severity> = [
 	"critical",
@@ -21,14 +23,6 @@ export const SEVERITY_ORDER: ReadonlyArray<Severity> = [
 	"low",
 	"info",
 ];
-
-export const SEVERITY_LABEL: Record<Severity, string> = {
-	critical: "Critical",
-	high: "High",
-	medium: "Medium",
-	low: "Low",
-	info: "Info",
-};
 
 /** Tailwind text colour per severity (tokens defined in index.css). */
 export const SEVERITY_TEXT: Record<Severity, string> = {
@@ -45,19 +39,6 @@ export const SEVERITY_BG: Record<Severity, string> = {
 	medium: "bg-sev-medium",
 	low: "bg-sev-low",
 	info: "bg-sev-info",
-};
-
-export const CATEGORY_LABEL: Record<Category, string> = {
-	security: "Security",
-	accessibility: "Accessibility",
-	performance: "Performance",
-	seo: "SEO",
-	privacy: "Privacy",
-	"best-practices": "Best practices",
-	reliability: "Reliability",
-	maintainability: "Maintainability",
-	"supply-chain": "Supply chain",
-	compliance: "Compliance",
 };
 
 export const TARGET_LABEL: Record<TargetKind, string> = {

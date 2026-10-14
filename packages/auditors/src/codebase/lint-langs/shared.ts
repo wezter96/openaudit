@@ -1,12 +1,7 @@
-import {
-	type AuditContext,
-	AuditorError,
-	type FindingInput,
-} from "@openaudit/core";
-import { Effect } from "effect";
+import type { AuditorError, FindingInput } from "@openaudit/core";
+import type { Effect } from "effect";
 
-import { relPath, withTempDir as withScratchDir } from "../../tool";
-import { baseName, truncate } from "../util";
+import { relPath, runCommand, withTempDir as withScratchDir } from "../../tool";
 
 const MODULE_LIMIT = 10;
 export const SHELL_FILE_LIMIT = 500;
@@ -35,31 +30,8 @@ export const inRoot = (root: string, file: string | undefined) => {
 		: undefined;
 };
 
-/** Runs a tool; fails with its stderr unless the exit code is in `okCodes`. */
-export const run = (
-	ctx: AuditContext,
-	cmd: ReadonlyArray<string>,
-	opts: {
-		cwd: string;
-		okCodes: ReadonlyArray<number>;
-		env?: Record<string, string>;
-	},
-) =>
-	Effect.flatMap(
-		ctx.exec.run(cmd, {
-			cwd: opts.cwd,
-			timeoutMs: 15 * 60_000,
-			env: opts.env,
-		}),
-		(res) =>
-			opts.okCodes.includes(res.code)
-				? Effect.succeed(res)
-				: Effect.fail(
-						new AuditorError({
-							message: `${baseName(cmd[0] ?? "tool")} exited with code ${res.code}: ${truncate(res.stderr || res.stdout, 300)}`,
-						}),
-					),
-	);
+/** Runs a tool; fails with its output unless the exit code is in `okCodes`. */
+export const run = runCommand;
 
 /** Runs `fn` with a scratch directory that is always removed afterwards. */
 export const withTempDir = <A, E>(

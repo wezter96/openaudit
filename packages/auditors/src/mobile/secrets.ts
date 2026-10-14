@@ -9,6 +9,7 @@ import {
 } from "@openaudit/core";
 import { Effect } from "effect";
 
+import { shannonEntropy } from "../codebase/util";
 import { loadMobileTarget } from "./shared";
 
 const MASVS_STORAGE = "https://mas.owasp.org/MASVS/05-MASVS-STORAGE/";
@@ -146,16 +147,7 @@ export const sanitizeUrl = (raw: string, max = 120): string => {
 };
 
 /** Shannon entropy in bits per character. */
-export const entropy = (s: string): number => {
-	const counts = new Map<string, number>();
-	for (const c of s) counts.set(c, (counts.get(c) ?? 0) + 1);
-	let h = 0;
-	for (const n of counts.values()) {
-		const p = n / s.length;
-		h -= p * Math.log2(p);
-	}
-	return h;
-};
+export const entropy = shannonEntropy;
 
 const FIREBASE_CONFIG_RE =
 	/(^|[/!])(google-services\.json|GoogleService-Info\.plist)$/;

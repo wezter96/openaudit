@@ -1,3 +1,4 @@
+import { correlate } from "./correlate";
 import {
 	type AuditorResult,
 	CATEGORIES,
@@ -91,4 +92,28 @@ export const summarize = (results: ReadonlyArray<AuditorResult>): Summary => {
 		categories,
 		auditors,
 	};
+};
+
+/**
+ * Keeps the findings `keep` accepts and recomputes what depends on them:
+ * pass/fail statuses, correlation (dropping a kept finding promotes one of its
+ * duplicates) and the summary. Unchanged results are returned as they were.
+ */
+export const filterFindings = (
+	results: ReadonlyArray<AuditorResult>,
+	keep: (f: Finding) => boolean,
+): { results: AuditorResult[]; summary: Summary } => {
+	const filtered = results.map((r): AuditorResult => {
+		const findings = r.findings.filter(keep);
+		if (findings.length === r.findings.length) return r;
+		const status =
+			r.status === "passed" || r.status === "failed"
+				? findings.some((f) => f.severity !== "info")
+					? "failed"
+					: "passed"
+				: r.status;
+		return { ...r, status, findings };
+	});
+	const correlated = correlate(filtered);
+	return { results: correlated, summary: summarize(correlated) };
 };

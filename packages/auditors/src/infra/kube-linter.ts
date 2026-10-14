@@ -9,11 +9,7 @@ import { Effect } from "effect";
 
 import { isRecord, kebab, truncate } from "../codebase/util";
 import { arr, parseJson, relPath, runTool, str } from "../tool";
-import { readOptional, targetFiles } from "./shared";
-
-const YAML_RE = /\.ya?ml$/;
-const NOT_K8S_RE =
-	/(^|\/)(\.github\/|\.gitlab-ci|(docker-)?compose[^/]*\.ya?ml$|pnpm-lock|\.pre-commit|mkdocs|openapi|swagger)/;
+import { kubernetesManifests } from "./shared";
 
 /** Checks with a security impact, with a deliberate severity. */
 const SECURITY: Record<string, Severity> = {
@@ -119,20 +115,8 @@ export const kubeLinter = defineAuditor({
 	tool: "kube-linter",
 	run: (ctx) =>
 		Effect.gen(function* () {
-			const { ws, files } = yield* targetFiles(ctx, YAML_RE);
-			const manifests: string[] = [];
-			for (const file of files) {
-				if (ctx.target.type !== "file" && NOT_K8S_RE.test(file)) continue;
-				const text = yield* readOptional(ws, file);
-				if (
-					text === undefined ||
-					!/^apiVersion:\s*\S/m.test(text) ||
-					!/^kind:\s*\S/m.test(text) ||
-					text.includes("{{")
-				)
-					continue;
-				manifests.push(file);
-			}
+			const { ws, manifests: byFile } = yield* kubernetesManifests(ctx);
+			const manifests = [...byFile.keys()];
 			if (manifests.length === 0)
 				return yield* skip("No Kubernetes manifests found");
 			const bin = yield* requireTool(

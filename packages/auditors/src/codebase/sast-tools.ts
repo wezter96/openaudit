@@ -14,7 +14,7 @@ import {
 } from "@openaudit/core";
 import { Effect } from "effect";
 
-import { arr, num, parseJson, relPath, runTool, str } from "../tool";
+import { arr, jsonLines, num, parseJson, relPath, runTool, str } from "../tool";
 import { cweUrl, extOf, isRecord, kebab, scrubLine, truncate } from "./util";
 
 /**
@@ -78,16 +78,7 @@ export const parseTrufflehogReport = (
 	stdout: string,
 	root: string,
 ): FindingInput[] =>
-	stdout.split("\n").flatMap((line) => {
-		const text = line.trim();
-		if (!text.startsWith("{")) return [];
-		let item: unknown;
-		try {
-			item = JSON.parse(text);
-		} catch {
-			return [];
-		}
-		if (!isRecord(item)) return [];
+	jsonLines(stdout).flatMap((item) => {
 		const detector = str(item.DetectorName);
 		if (!detector) return [];
 		const data = isRecord(item.SourceMetadata) ? item.SourceMetadata : {};

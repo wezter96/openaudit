@@ -10,7 +10,7 @@ import {
 } from "@openaudit/core";
 import { Effect } from "effect";
 
-import { arr, num, parseJson, relPath, str } from "../../tool";
+import { arr, jsonLines, num, parseJson, relPath, str } from "../../tool";
 import { baseName, extOf, isRecord, kebab, truncate } from "../util";
 import { dedupe, run, withTempDir } from "./shared";
 
@@ -191,16 +191,8 @@ const MYPY_ENVIRONMENT = new Set(["import-untyped", "import-not-found"]);
 /** Parses `mypy --output json` (one JSON object per line). */
 export const parseMypyReport = (stdout: string, root: string): FindingInput[] =>
 	dedupe(
-		stdout.split("\n").flatMap((line): FindingInput[] => {
-			const text = line.trim();
-			if (!text.startsWith("{")) return [];
-			let item: unknown;
-			try {
-				item = JSON.parse(text);
-			} catch {
-				return [];
-			}
-			if (!isRecord(item) || item.severity !== "error") return [];
+		jsonLines(stdout).flatMap((item): FindingInput[] => {
+			if (item.severity !== "error") return [];
 			const code = str(item.code) ?? "error";
 			const message = str(item.message) ?? code;
 			const hint = str(item.hint);

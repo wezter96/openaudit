@@ -1,3 +1,6 @@
+import { AuditorError } from "@openaudit/core";
+import { Effect } from "effect";
+
 /** Small parsers shared by the web auditors. */
 
 export interface Cookie {
@@ -60,3 +63,10 @@ export const maxAgeOf = (header: string | null): number | undefined => {
 	const m = header?.match(/max-age\s*=\s*"?(\d+)/i);
 	return m?.[1] ? Number(m[1]) : undefined;
 };
+
+/** Parses the target URL, failing the auditor when it is malformed. */
+export const parseUrl = (url: string) =>
+	Effect.try({
+		try: () => new URL(url),
+		catch: () => new AuditorError({ message: `Invalid URL: ${url}` }),
+	});

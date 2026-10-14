@@ -187,6 +187,34 @@ describe("code.jscpd auditor", () => {
 		expect(report.results[0]?.findings.length).toBe(2);
 	});
 
+	test("adds the project's .jscpd.json ignore list to the built-in one", async () => {
+		const root = await mkdtemp(join(tmpdir(), "openaudit-jscpd-cfg-"));
+		try {
+			await writeFile(join(root, "a.ts"), "export const a = 1;\n");
+			await writeFile(
+				join(root, ".jscpd.json"),
+				JSON.stringify({
+					ignore: ["docs/generated.html", "**/{a,b}/**", 5, ""],
+				}),
+			);
+			let cmd: ReadonlyArray<string> = [];
+			await runWithExec(
+				jscpd,
+				root,
+				(bin) => `/usr/local/bin/${bin}`,
+				async (argv) => {
+					cmd = argv;
+					return { code: 0, stdout: "", stderr: "" };
+				},
+			);
+			expect(cmd[cmd.indexOf("--ignore") + 1]).toBe(
+				"**/node_modules/**,**/dist/**,**/build/**,**/.git/**,**/*.min.js,**/vendor/**,docs/generated.html",
+			);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
 	test("no report file means no clones", async () => {
 		const report = await runWithExec(
 			jscpd,

@@ -9,7 +9,7 @@ import {
 } from "@openaudit/core";
 import { Effect } from "effect";
 
-import { truncate } from "./codebase/util";
+import { baseName, isRecord, truncate } from "./codebase/util";
 
 /**
  * Shared helpers for external-tool wrappers: running the tool, parsing its
@@ -53,6 +53,22 @@ export const str = (v: unknown): string | undefined =>
 export const num = (v: unknown): number | undefined =>
 	typeof v === "number" ? v : undefined;
 export const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+
+/**
+ * JSON objects from line-delimited output (NDJSON). Log lines and anything
+ * else that is not a JSON object are skipped.
+ */
+export const jsonLines = (stdout: string): Record<string, unknown>[] =>
+	stdout.split("\n").flatMap((line) => {
+		const text = line.trim();
+		if (!text.startsWith("{")) return [];
+		try {
+			const item: unknown = JSON.parse(text);
+			return isRecord(item) ? [item] : [];
+		} catch {
+			return [];
+		}
+	});
 
 export const cweTags = (values: ReadonlyArray<string>) =>
 	values.flatMap((v) => {
@@ -105,6 +121,35 @@ export const runTool = (
 						message: `${cmd[0]} exited with code ${res.code}: ${truncate(res.stderr || res.stdout, 300)}`,
 					}),
 				),
+	);
+
+/**
+ * Runs a tool with optional extra env; fails with its output, naming the tool
+ * by its file name, unless the exit code is in `okCodes`.
+ */
+export const runCommand = (
+	ctx: AuditContext,
+	cmd: ReadonlyArray<string>,
+	opts: {
+		cwd: string;
+		okCodes: ReadonlyArray<number>;
+		env?: Record<string, string>;
+	},
+) =>
+	Effect.flatMap(
+		ctx.exec.run(cmd, {
+			cwd: opts.cwd,
+			timeoutMs: 15 * 60_000,
+			env: opts.env,
+		}),
+		(res) =>
+			opts.okCodes.includes(res.code)
+				? Effect.succeed(res)
+				: Effect.fail(
+						new AuditorError({
+							message: `${baseName(cmd[0] ?? "tool")} exited with code ${res.code}: ${truncate(res.stderr || res.stdout, 300)}`,
+						}),
+					),
 	);
 
 /* -------------------------------------------------------------------------- */
