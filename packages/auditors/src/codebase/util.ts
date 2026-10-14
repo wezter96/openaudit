@@ -339,6 +339,23 @@ const OWASP_2021: Readonly<Record<string, string>> = {
 export const owaspUrl = (category: string) =>
 	`https://owasp.org/Top10/${OWASP_2021[category.toLowerCase()] ?? ""}/`;
 
+const OWASP_LLM_2025: Readonly<Record<string, string>> = {
+	llm01: "llm01-prompt-injection",
+	llm02: "llm022025-sensitive-information-disclosure",
+	llm03: "llm032025-supply-chain",
+	llm04: "llm042025-data-and-model-poisoning",
+	llm05: "llm052025-improper-output-handling",
+	llm06: "llm062025-excessive-agency",
+	llm07: "llm072025-system-prompt-leakage",
+	llm08: "llm082025-vector-and-embedding-weaknesses",
+	llm09: "llm092025-misinformation",
+	llm10: "llm102025-unbounded-consumption",
+};
+
+/** OWASP Top 10 for LLM Applications (2025) page for a risk such as `llm01`. */
+export const owaspLlmUrl = (risk: string) =>
+	`https://genai.owasp.org/llmrisk/${OWASP_LLM_2025[risk.toLowerCase()] ?? ""}/`;
+
 const WCAG_SLUGS: Readonly<Record<string, string>> = {
 	"1.1.1": "non-text-content",
 	"1.3.1": "info-and-relationships",

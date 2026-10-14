@@ -1,0 +1,6 @@
+{
+	"general": { "defaultApprovalMode": "default" },
+	"mcpServers": {
+		"internal": { "httpUrl": "http://10.0.0.5:8080/mcp", "trust": true }
+	}
+}
