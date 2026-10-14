@@ -99,6 +99,8 @@ Every language also gets secret scanning (built-in, gitleaks, TruffleHog), dupli
 
 The built-in hidden-Unicode check (`code.unicode`) flags Trojan Source bidirectional controls, zero-width and other invisible characters, hidden prompt text in Unicode tag characters, variation-selector payloads and look-alike (homoglyph) identifiers in code, docs and agent instruction files such as AGENTS.md and Cursor rules.
 
+The opt-in `code.dependency-health` auditor looks your pinned dependencies up on [deps.dev](https://deps.dev) and flags deprecated packages, yanked releases, dependencies whose source repository is archived, and direct dependencies with no release in years.
+
 `bunx @openaudit/cli list` shows every auditor and playbook. The [architecture page](https://wezter96.github.io/openaudit/architecture.html) maps every auditor to the targets and areas it covers.
 
 ## The report
