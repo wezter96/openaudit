@@ -11,9 +11,8 @@ import { Effect } from "effect";
 
 import { isRecord, kebab, scrubLine, truncate } from "../codebase/util";
 import { arr, num, parseJson, relPath, str } from "../tool";
-import { targetFiles } from "./shared";
+import { workflowFiles } from "./shared";
 
-const WORKFLOW_RE = /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/;
 const DOCS = "https://github.com/rhysd/actionlint/blob/main/docs/checks.md";
 const INJECTION_DOCS =
 	"https://docs.github.com/en/actions/reference/security/secure-use#good-practices-for-mitigating-script-injection-attacks";
@@ -94,10 +93,7 @@ export const actionlint = defineAuditor({
 	tool: "actionlint",
 	run: (ctx) =>
 		Effect.gen(function* () {
-			const { ws, files } = yield* targetFiles(
-				ctx,
-				ctx.target.type === "file" ? /\.ya?ml$/ : WORKFLOW_RE,
-			);
+			const { ws, files } = yield* workflowFiles(ctx);
 			if (files.length === 0)
 				return yield* skip("No GitHub Actions workflows found");
 			const bin = yield* requireTool(

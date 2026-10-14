@@ -10,7 +10,7 @@ import {
 } from "@openaudit/core";
 import { Effect } from "effect";
 
-import { arr, num, parseJson, str } from "../../tool";
+import { arr, jsonLines, num, parseJson, str } from "../../tool";
 import { isRecord, kebab, scrubLine, truncate } from "../util";
 import { dedupe, GO_ENV, inRoot, manifestDirs, run } from "./shared";
 
@@ -40,16 +40,7 @@ export const parseStaticcheckReport = (
 	prefix = "",
 ): FindingInput[] =>
 	dedupe(
-		stdout.split("\n").flatMap((line): FindingInput[] => {
-			const text = line.trim();
-			if (!text.startsWith("{")) return [];
-			let item: unknown;
-			try {
-				item = JSON.parse(text);
-			} catch {
-				return [];
-			}
-			if (!isRecord(item)) return [];
+		jsonLines(stdout).flatMap((item): FindingInput[] => {
 			const code = str(item.code) ?? "";
 			const message = str(item.message) ?? code;
 			const loc = isRecord(item.location) ? item.location : {};

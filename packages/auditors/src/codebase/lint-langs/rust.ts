@@ -10,7 +10,7 @@ import {
 } from "@openaudit/core";
 import { Effect } from "effect";
 
-import { arr, num, str } from "../../tool";
+import { arr, jsonLines, num, str } from "../../tool";
 import { isRecord, kebab, scrubLine, truncate } from "../util";
 import { dedupe, inRoot, manifestDirs, run, withTempDir } from "./shared";
 
@@ -145,16 +145,8 @@ export const parseClippyReport = (
 	prefix = "",
 ): FindingInput[] => {
 	const findings: FindingInput[] = [];
-	for (const line of stdout.split("\n")) {
-		const text = line.trim();
-		if (!text.startsWith("{")) continue;
-		let record: unknown;
-		try {
-			record = JSON.parse(text);
-		} catch {
-			continue;
-		}
-		if (!isRecord(record) || record.reason !== "compiler-message") continue;
+	for (const record of jsonLines(stdout)) {
+		if (record.reason !== "compiler-message") continue;
 		const msg = record.message;
 		if (!isRecord(msg)) continue;
 		const level = str(msg.level);

@@ -37,6 +37,16 @@ export const targetFiles = (
 		return { ws, files: all.filter((f) => pattern.test(f)) };
 	});
 
+/** GitHub Actions workflow files. */
+export const WORKFLOW_RE = /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/;
+
+/**
+ * GitHub Actions files matching `pattern` (workflows by default). For
+ * single-file targets any YAML file is considered.
+ */
+export const workflowFiles = (ctx: AuditContext, pattern = WORKFLOW_RE) =>
+	targetFiles(ctx, ctx.target.type === "file" ? /\.ya?ml$/ : pattern);
+
 /** Reads a text file, yielding `undefined` when it cannot be read. */
 export const readOptional = (ws: Workspace, file: string) =>
 	ws.readText(file).pipe(Effect.orElseSucceed(() => undefined));

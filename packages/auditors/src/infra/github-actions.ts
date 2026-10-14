@@ -6,11 +6,9 @@ import {
 	asRecord,
 	parseYaml,
 	readOptional,
-	targetFiles,
+	workflowFiles,
 	type YamlPath,
 } from "./shared";
-
-const WORKFLOW_RE = /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/;
 
 const HARDENING =
 	"https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions";
@@ -411,10 +409,7 @@ export const githubActions = defineAuditor({
 	engine: "builtin",
 	run: (ctx) =>
 		Effect.gen(function* () {
-			const { ws, files } = yield* targetFiles(
-				ctx,
-				ctx.target.type === "file" ? /\.ya?ml$/ : WORKFLOW_RE,
-			);
+			const { ws, files } = yield* workflowFiles(ctx);
 			const findings: FindingInput[] = [];
 			let audited = 0;
 			for (const file of files) {

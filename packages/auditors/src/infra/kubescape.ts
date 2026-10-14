@@ -14,11 +14,7 @@ import { Effect } from "effect";
 
 import { isRecord, scrubLine, truncate } from "../codebase/util";
 import { arr, num, parseJson, relPath, runTool, str } from "../tool";
-import { readOptional, targetFiles } from "./shared";
-
-const YAML_RE = /\.ya?ml$/;
-const NOT_K8S_RE =
-	/(^|\/)(\.github\/|\.gitlab-ci|(docker-)?compose[^/]*\.ya?ml$|pnpm-lock|\.pre-commit|mkdocs|openapi|swagger)/;
+import { kubernetesManifests } from "./shared";
 
 /** Controls about capacity and availability rather than security. */
 const RELIABILITY = new Set(["C-0004", "C-0050", "C-0018", "C-0056"]);
@@ -136,20 +132,8 @@ export const kubescape = defineAuditor({
 	defaultEnabled: false,
 	run: (ctx) =>
 		Effect.gen(function* () {
-			const { ws, files } = yield* targetFiles(ctx, YAML_RE);
-			const manifests: string[] = [];
-			for (const file of files) {
-				if (ctx.target.type !== "file" && NOT_K8S_RE.test(file)) continue;
-				const text = yield* readOptional(ws, file);
-				if (
-					text === undefined ||
-					!/^apiVersion:\s*\S/m.test(text) ||
-					!/^kind:\s*\S/m.test(text) ||
-					text.includes("{{")
-				)
-					continue;
-				manifests.push(file);
-			}
+			const { ws, manifests: byFile } = yield* kubernetesManifests(ctx);
+			const manifests = [...byFile.keys()];
 			if (manifests.length === 0)
 				return yield* skip("No Kubernetes manifests found");
 			const bin = yield* requireTool(

@@ -12,9 +12,10 @@ import { Effect } from "effect";
 
 import { isRecord, kebab, scrubLine, truncate } from "../codebase/util";
 import { arr, num, parseJson, relPath, str } from "../tool";
-import { targetFiles } from "./shared";
+import { workflowFiles } from "./shared";
 
-const WORKFLOW_RE =
+/** Workflows and composite actions. */
+const ACTIONS_RE =
 	/(^|\/)(\.github\/workflows\/[^/]+|action)\.ya?ml$|(^|\/)\.github\/actions\/.+\/action\.ya?ml$/;
 
 /** zizmor severities; "Informational"/"Unknown" are advisory only. */
@@ -132,10 +133,7 @@ export const zizmor = defineAuditor({
 	tool: "zizmor",
 	run: (ctx) =>
 		Effect.gen(function* () {
-			const { ws, files } = yield* targetFiles(
-				ctx,
-				ctx.target.type === "file" ? /\.ya?ml$/ : WORKFLOW_RE,
-			);
+			const { ws, files } = yield* workflowFiles(ctx, ACTIONS_RE);
 			if (files.length === 0)
 				return yield* skip("No GitHub Actions workflows found");
 			const bin = yield* requireTool(
