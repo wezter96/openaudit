@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Finding } from "@openaudit/core";
 
-import { escapesRoot, lockfiles } from "../src/codebase/lockfiles";
+import { escapesRoot, lockfiles, scrubText } from "../src/codebase/lockfiles";
 import { runAuditor } from "./helpers";
 
 /*
@@ -562,5 +562,85 @@ describe("second review, round 2", () => {
 `,
 		});
 		expect(rules(findings)).toEqual(["unexpected-host medium a@1.0.0"]);
+	});
+});
+
+describe("output boundary: no credential in any finding", () => {
+	const JWT =
+		"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJTRUNSRVRKV1QifQ.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+
+	test("path tokens, encoded userinfo and other variants never reach the report", async () => {
+		const secrets = [
+			"Ab3dEf9hJk2LmN5pQr8s",
+			"SECRETTOK1",
+			"SECRETTOK2",
+			"SECRETTOK3",
+			"SECRETTOK4",
+			"RETTOK6",
+			JWT,
+			"Zm9vOlNFQ1JFVA",
+		];
+		const tarball = (resolved: string) => ({
+			version: "1.0.0",
+			resolved,
+			integrity: SHA512,
+		});
+		const findings = await audit({
+			"package-lock.json": npmLock({
+				// Gemfury's proxy and other hosted registries put the token in the path.
+				"node_modules/a": tarball(
+					"https://npm-proxy.fury.io/Ab3dEf9hJk2LmN5pQr8s/acme/a/-/a-1.0.0.tgz",
+				),
+				"node_modules/b": tarball(
+					"https://registry.example/_authToken/SECRETTOK1/b/-/b-1.0.0.tgz",
+				),
+				"node_modules/c": tarball(
+					"https://pkgs.example/t/SECRETTOK2/npm/c/-/c-1.0.0.tgz",
+				),
+				// Percent-encoded userinfo: WHATWG rejects it, so it was shown raw.
+				"node_modules/d": tarball(
+					"https://user%3ASECRETTOK3%40npm.example/d-1.0.0.tgz",
+				),
+				"node_modules/e": tarball("https://SECRETTOK4%40npm.example/e.tgz"),
+				"node_modules/f": tarball(
+					"x-access-token:SEC/RETTOK6@github.com:org/f.git",
+				),
+				"node_modules/g": tarball(`https://npm.example/${JWT}/g-1.0.0.tgz`),
+				"node_modules/h": tarball(
+					"https://npm.example/Basic%20Zm9vOlNFQ1JFVA==/h-1.0.0.tgz",
+				),
+			}),
+		});
+		expect(rules(findings).length).toBeGreaterThanOrEqual(8);
+		const text = JSON.stringify(findings).toLowerCase();
+		for (const s of secrets) expect(text).not.toContain(s.toLowerCase());
+	});
+
+	test("the scrub is bounded on hostile strings", () => {
+		const n = 2_000_000;
+		const start = performance.now();
+		for (const s of [
+			"aB3".repeat(n / 3),
+			"a://".repeat(n / 4),
+			`x://${"@".repeat(n)}`,
+			"?a".repeat(n / 2),
+			"/t".repeat(n / 2),
+			"eyJ".repeat(n / 3),
+			"u:p@ ".repeat(n / 5),
+		])
+			scrubText(s);
+		expect(performance.now() - start).toBeLessThan(2000);
+	});
+
+	test("the scrub leaves ordinary findings untouched", () => {
+		for (const s of [
+			"https://codeload.github.com/a/b/tar.gz/98e8ff1da1a89f93d1397a24d7413ed15421c139",
+			"@img/sharp-libvips-linuxmusl-x64, @axe-core/playwright",
+			"https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/",
+			'git+ssh://github.com/a/b.git at "v1.2.3"',
+			"npm:@scope/pkg@^1.0.0",
+			"packages/auditors/test/fixtures/codebase/lockfiles/npm/package-lock.json",
+		])
+			expect(scrubText(s)).toBe(s);
 	});
 });

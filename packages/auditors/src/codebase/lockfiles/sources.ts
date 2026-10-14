@@ -1,6 +1,7 @@
 import { redact } from "@openaudit/core";
 
 import { truncate } from "../util";
+import { scrubText } from "./scrub";
 
 /**
  * Hosts of the public npm registry. Registries where anyone can publish
@@ -283,20 +284,6 @@ const lenientUserinfo = (raw: string): string => {
 	return scheme !== -1 || /^[^:@]+:[^@]+$/.test(userinfo) ? userinfo : "";
 };
 
-/** Parameters (`?a=b`, `#a=b&c=d`); linear, as names stop at delimiters. */
-const PARAM = /([?#&;])([^=?#&;]*)=([^?#&;]*)/g;
-
-/** Parameter names whose value is likely a credential. */
-const SECRET_NAME = /token|auth|key|secret|passw|pwd|sig|credential/i;
-
-/** Tokens with a well-known prefix (GitHub, GitLab, npm), wherever they appear. */
-const KNOWN_TOKEN =
-	/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|glpat-[\w-]{20,}|npm_[A-Za-z0-9]{30,})/g;
-
-/** `s` with well-known token formats masked, for refs and URL paths. */
-export const maskTokens = (s: string): string =>
-	s.replace(KNOWN_TOKEN, (token) => redact(token));
-
 /**
  * A URL without credentials or query string, safe to show as evidence.
  * Userinfo is dropped up to the last `@`, however a parser splits it.
@@ -312,7 +299,7 @@ export const displayUrl = (input: string): string => {
 		const url = new URL(raw);
 		if (url.protocol === "http:" || url.protocol === "https:")
 			return truncate(
-				maskTokens(`${url.protocol}//${url.host}${url.pathname}`),
+				scrubText(`${url.protocol}//${url.host}${url.pathname}`),
 				120,
 			);
 	} catch {
@@ -326,11 +313,7 @@ export const displayUrl = (input: string): string => {
 			: raw;
 	const q = withoutUser.indexOf("?");
 	return truncate(
-		maskTokens(q === -1 ? withoutUser : withoutUser.slice(0, q)).replace(
-			PARAM,
-			(param, sep: string, name: string, value: string) =>
-				SECRET_NAME.test(name) ? `${sep}${name}=${redact(value)}` : param,
-		),
+		scrubText(q === -1 ? withoutUser : withoutUser.slice(0, q)),
 		120,
 	);
 };

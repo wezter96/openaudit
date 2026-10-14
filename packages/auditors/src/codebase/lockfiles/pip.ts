@@ -12,6 +12,7 @@ import {
 	rule,
 	tlsFinding,
 } from "./findings";
+import { scrubText } from "./scrub";
 import { dirOf, stripBom, unquote } from "./shared";
 import {
 	displayHost,
@@ -19,7 +20,6 @@ import {
 	escapesRoot,
 	hostOf,
 	isInsecureUrl,
-	maskTokens,
 	onPypi,
 	resolveInRepo,
 } from "./sources";
@@ -160,7 +160,7 @@ const pipDirectReference = (
 			evidence,
 			ref !== undefined && /^[0-9a-f]{40}$/i.test(ref),
 			ref
-				? `${displayUrl(url)} at "${truncate(maskTokens(ref), 60)}"`
+				? `${displayUrl(url)} at "${truncate(scrubText(ref), 60)}"`
 				: displayUrl(url),
 			host,
 		);

@@ -31,6 +31,7 @@ import {
 	unique,
 } from "./findings";
 import { installScriptFindings } from "./scripts";
+import { scrubText } from "./scrub";
 import {
 	declaredSpecs,
 	dirOf,
@@ -51,7 +52,6 @@ import {
 	hostOf,
 	integrityStrength,
 	isOfficialRuntime,
-	maskTokens,
 } from "./sources";
 
 const unexpectedHostFinding = (
@@ -152,7 +152,7 @@ const sourceFinding = (
 				evidence(shown),
 				pinned,
 				source.ref
-					? `${displayUrl(source.url)} at "${truncate(maskTokens(source.ref), 60)}"`
+					? `${displayUrl(source.url)} at "${truncate(scrubText(source.ref), 60)}"`
 					: displayUrl(source.url),
 				displayHost(p.source ?? "", source.host),
 			);
