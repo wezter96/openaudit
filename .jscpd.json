@@ -1,0 +1,6 @@
+{
+	"ignore": [
+		"docs/architecture.html",
+		"packages/ui/src/styles/shadcn-tailwind.css"
+	]
+}
