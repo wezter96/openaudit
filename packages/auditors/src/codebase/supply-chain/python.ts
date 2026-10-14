@@ -146,7 +146,7 @@ export const parsePipAuditReport = (
 	return findings;
 };
 
-const isPyRequirements = (p: string) =>
+export const isPyRequirements = (p: string) =>
 	/(^|\/)requirements[^/]*\.txt$/i.test(p) ||
 	/(^|\/)requirements\/[^/]+\.txt$/i.test(p);
 const PY_LOCKS = new Set(["poetry.lock", "Pipfile.lock"]);

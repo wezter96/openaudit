@@ -1,0 +1,5 @@
+# fixture for guarddog verify
+requests==2.32.3
+beautifulsoup==3.2.2
+colorama==0.4.6
+reqeusts
