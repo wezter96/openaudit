@@ -246,6 +246,42 @@ describe("untrusted target config", () => {
 		await rm(root, { recursive: true, force: true });
 	});
 
+	test("honours its own licence policy, which only adds findings", async () => {
+		const root = await project({
+			only: ["code.licenses"],
+			failOn: "high",
+			options: {
+				settings: {
+					"code.licenses": { deny: ["GPL-*"] },
+					"code.syft-licenses": { sbomOut: "sbom.json" },
+				},
+			},
+		});
+		await writeFile(
+			join(root, "package-lock.json"),
+			JSON.stringify({
+				lockfileVersion: 3,
+				packages: {
+					"": { name: "x" },
+					"node_modules/gpl-lib": { version: "1.0.0", license: "GPL-3.0" },
+				},
+			}),
+		);
+		const res = await cli(["--json"], root);
+		expect(res.stderr).toContain(
+			'ignoring options.settings["code.syft-licenses"]',
+		);
+		expect(res.stderr).not.toContain('options.settings["code.licenses"]');
+		const result = JSON.parse(res.stdout).results[0];
+		expect(result.auditor).toBe("code.licenses");
+		expect(result.findings.map((f: { ruleId: string }) => f.ruleId)).toEqual([
+			"code.licenses/denied-license",
+		]);
+		// A denied licence is high severity, so it trips the gate.
+		expect(res.code).toBe(1);
+		await rm(root, { recursive: true, force: true });
+	});
+
 	test("only narrows: it cannot enable opt-in or agentic auditors", async () => {
 		const root = await project({
 			only: ["code.hygiene", "code.knip", "code.clippy", "agent"],

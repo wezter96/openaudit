@@ -110,28 +110,45 @@ export interface LoadedConfig {
 }
 
 /**
+ * Per-auditor settings a target may set for itself. A licence policy only adds
+ * findings: without one, `code.licenses` is skipped.
+ */
+export const TARGET_SETTINGS: ReadonlyArray<string> = ["code.licenses"];
+
+/**
  * A config inside the audited target is written by whoever controls the
  * target. It may narrow the audit and suppress findings (both disclosed in the
- * output), but nothing that sends data, costs money, adds credentials or turns
- * off `failOn`. CI on untrusted changes should pass `--fail-on` and
- * `--no-config` explicitly.
+ * output) and add checks of its own (`TARGET_SETTINGS`), but nothing that
+ * sends data, costs money, adds credentials or turns off `failOn`. CI on
+ * untrusted changes should pass `--fail-on` and `--no-config` explicitly.
  */
 export const restrictUntrusted = (
 	config: Config,
 ): { config: Config; ignored: string[] } => {
 	const { options, $schema: _, failOn, ...rest } = config;
 	const ignored = Object.keys(options ?? {})
-		.filter((k) => k !== "maxPages")
+		.filter((k) => k !== "maxPages" && k !== "settings")
 		.map((k) => `options.${k}`);
+	const raw: unknown = options?.settings;
+	const entries = raw && typeof raw === "object" ? Object.entries(raw) : [];
+	if (raw !== undefined && !entries.length) ignored.push("options.settings");
+	for (const [id] of entries)
+		if (!TARGET_SETTINGS.includes(id))
+			ignored.push(`options.settings[${JSON.stringify(id)}]`);
+	const settings = Object.fromEntries(
+		entries.filter(([id]) => TARGET_SETTINGS.includes(id)),
+	);
 	// The target may tighten the CI gate but never switch it off.
 	if (failOn === "none") ignored.push("failOn: none");
+	const kept = {
+		...(options?.maxPages !== undefined ? { maxPages: options.maxPages } : {}),
+		...(Object.keys(settings).length ? { settings } : {}),
+	};
 	return {
 		config: {
 			...rest,
 			...(failOn !== undefined && failOn !== "none" ? { failOn } : {}),
-			...(options?.maxPages !== undefined
-				? { options: { maxPages: options.maxPages } }
-				: {}),
+			...(Object.keys(kept).length ? { options: kept } : {}),
 		},
 		ignored,
 	};

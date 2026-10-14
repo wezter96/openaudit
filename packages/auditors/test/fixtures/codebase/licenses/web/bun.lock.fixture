@@ -1,0 +1,16 @@
+{
+  "lockfileVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "web",
+      "dependencies": {
+        "react": "^18.2.0",
+        "not-installed": "^1.0.0",
+      },
+    },
+  },
+  "packages": {
+    "react": ["react@18.2.0", "", {}, "sha512-AAAA"],
+    "not-installed": ["not-installed@1.0.0", "", {}, "sha512-BBBB"],
+  }
+}

@@ -1,0 +1,5 @@
+module example.com/licences
+
+go 1.22
+
+require github.com/example/gomod v1.2.3

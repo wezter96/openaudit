@@ -286,7 +286,7 @@ export const parseDependencies = (file: SourceFile): Dependency[] => {
 	return parser ? parser(file.text, file.path) : [];
 };
 
-const isManifest = (path: string) =>
+export const isManifest = (path: string) =>
 	!isFixturePath(path) &&
 	(PARSERS.some(([re]) => re.test(path)) || baseName(path) === "package.json");
 
@@ -707,6 +707,39 @@ export const uniqueDependencies = (
 	return [...seen.values()];
 };
 
+/**
+ * The 1-based line declaring a dependency in its lockfile or manifest,
+ * preferring a line that mentions both the name and the resolved version.
+ */
+export const dependencyLineFinder = (
+	files: ReadonlyArray<SourceFile>,
+): ((d: Dependency) => number | undefined) => {
+	const texts = new Map(files.map((f) => [f.path, f.text.toLowerCase()]));
+	const locators = new Map<string, (i: number) => number>();
+	return (d) => {
+		const text = texts.get(d.file);
+		if (!text) return undefined;
+		// The version is escaped, so it only matches itself.
+		// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
+		const exact = new RegExp(
+			`(?<![\\w.^~<>=*-])${d.version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`,
+		);
+		const name = d.name.toLowerCase();
+		let i = text.indexOf(name);
+		const first = i;
+		while (i !== -1 && !exact.test(fullLineAt(text, i)))
+			i = text.indexOf(name, i + 1);
+		if (i === -1) i = first;
+		if (i === -1) return undefined;
+		let locate = locators.get(d.file);
+		if (!locate) {
+			locate = lineLocator(text);
+			locators.set(d.file, locate);
+		}
+		return locate(i);
+	};
+};
+
 export const dependencies = defineAuditor({
 	id: "code.dependencies",
 	title: "Vulnerable dependencies",
@@ -741,31 +774,7 @@ export const dependencies = defineAuditor({
 			const idsPerDep = yield* queryOsvBatch(ctx.http, deps);
 			const details = yield* fetchOsvVulns(ctx.http, roundRobin(idsPerDep));
 
-			const texts = new Map(files.map((f) => [f.path, f.text.toLowerCase()]));
-			const locators = new Map<string, (i: number) => number>();
-			const lineFor = (d: Dependency) => {
-				const text = texts.get(d.file);
-				if (!text) return undefined;
-				// Prefer the line that mentions both the name and the resolved version.
-				// The version is escaped, so it only matches itself.
-				// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-				const exact = new RegExp(
-					`(?<![\\w.^~<>=*-])${d.version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`,
-				);
-				const name = d.name.toLowerCase();
-				let i = text.indexOf(name);
-				const first = i;
-				while (i !== -1 && !exact.test(fullLineAt(text, i)))
-					i = text.indexOf(name, i + 1);
-				if (i === -1) i = first;
-				if (i === -1) return undefined;
-				let locate = locators.get(d.file);
-				if (!locate) {
-					locate = lineLocator(text);
-					locators.set(d.file, locate);
-				}
-				return locate(i);
-			};
+			const lineFor = dependencyLineFinder(files);
 
 			deps.forEach((d, i) => {
 				// OSV can return the same advisory under several ids (PYSEC + GHSA).
