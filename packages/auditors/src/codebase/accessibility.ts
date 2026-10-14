@@ -362,6 +362,8 @@ const isWrappedInLabel = (text: string, index: number) =>
 	text.lastIndexOf("<label", index) > text.lastIndexOf("</label", index);
 
 const hasExplicitLabel = (text: string, id: string) =>
+	// id is escaped, so it only matches itself.
+	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 	new RegExp(
 		`(?:\\bfor|htmlFor)\\s*=\\s*\\{?\\s*["'\`]${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'\`]`,
 	).test(text);

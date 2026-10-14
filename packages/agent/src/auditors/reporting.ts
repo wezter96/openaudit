@@ -124,9 +124,12 @@ export const truncate = (value: string, max: number) =>
 	value.length > max ? `${value.slice(0, max)}…` : value;
 
 const normalizeRuleId = (playbookId: string, raw: string): string => {
-	const suffix = raw
-		.trim()
-		.replace(new RegExp(`^${playbookId.replace(".", "\\.")}/`), "")
+	const trimmed = raw.trim();
+	const suffix = (
+		trimmed.startsWith(`${playbookId}/`)
+			? trimmed.slice(playbookId.length + 1)
+			: trimmed
+	)
 		.toLowerCase()
 		.replace(/[^a-z0-9/]+/g, "-")
 		.replace(/^[-/]+|[-/]+$/g, "");

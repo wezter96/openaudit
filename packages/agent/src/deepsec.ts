@@ -249,6 +249,8 @@ const safeRel = (p: string | undefined): string | undefined => {
 
 /** Body of a `## <heading>` section of the exported markdown description. */
 const section = (md: string, heading: string): string | undefined => {
+	// heading is one of this module's literals.
+	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 	const m = new RegExp(
 		`^## ${heading}\\s*\\n([\\s\\S]*?)(?=^## |(?![\\s\\S]))`,
 		"m",

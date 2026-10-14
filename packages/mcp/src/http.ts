@@ -492,8 +492,8 @@ export const startHttpServer = async (
 		(closed ??= (async () => {
 			clearInterval(sweep);
 			await bun.stop(true);
-			for (const id of [...sessions.keys()]) dropSession(id);
-			await Promise.allSettled([...closing]);
+			for (const id of sessions.keys()) dropSession(id);
+			await Promise.allSettled(closing);
 		})());
 
 	const shownHost = host.includes(":") ? `[${host}]` : host;

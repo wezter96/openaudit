@@ -59,7 +59,10 @@ const DANGEROUS_CAPS = new Set([
 const getIn = (value: unknown, path: YamlPath): unknown => {
 	let cur = value;
 	for (const key of path) {
-		if (cur === null || typeof cur !== "object") return undefined;
+		if (cur === null || typeof cur !== "object" || !Object.hasOwn(cur, key))
+			return undefined;
+		// Reads own properties only; nothing is assigned into the object.
+		// nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop
 		cur = (cur as Record<string | number, unknown>)[key];
 	}
 	return cur;

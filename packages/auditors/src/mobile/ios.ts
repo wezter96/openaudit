@@ -359,7 +359,7 @@ const auditSource = (target: MobileSource) =>
 		const { ws, files } = target;
 		const findings: FindingInput[] = [];
 		const infoPlists = files.filter((f) => /(^|\/)Info\.plist$/.test(f));
-		const entitlements = files.filter((f) => /\.entitlements$/.test(f));
+		const entitlements = files.filter((f) => f.endsWith(".entitlements"));
 		const expoJson = files.filter((f) => /(^|\/)app\.json$/.test(f));
 		const expoConfig = files.filter((f) =>
 			/(^|\/)app\.config\.[cm]?[jt]s$/.test(f),
@@ -515,7 +515,7 @@ const findUndeclaredUsage = (
 			if (pending.size === 0) break;
 			const text = yield* readOptional(ws, file);
 			if (!text) continue;
-			for (const perm of [...pending]) {
+			for (const perm of pending) {
 				const m = perm.code.exec(text);
 				if (m) report(perm, file, text, m.index);
 			}

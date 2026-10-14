@@ -62,6 +62,8 @@ export const SEVERITY_LABEL: Record<Severity, string> = {
 };
 
 export const escapeHtml = (value: unknown): string =>
+	// Escapes all five HTML-significant characters, "&" first.
+	// nosemgrep: javascript.audit.detect-replaceall-sanitization.detect-replaceall-sanitization
 	String(value)
 		.replaceAll("&", "&amp;")
 		.replaceAll("<", "&lt;")

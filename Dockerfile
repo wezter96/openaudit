@@ -59,6 +59,7 @@ ARG PA11Y_VERSION=10.0.0
 
 # --------------------------------------------------------------------------
 # Stage 1: download and verify the release binaries into /out.
+# checkov:skip=CKV_DOCKER_7:BUN_IMAGE is pinned by tag and digest (ARG above)
 FROM ${BUN_IMAGE} AS fetch
 ARG TARGETARCH
 ARG GITLEAKS_VERSION

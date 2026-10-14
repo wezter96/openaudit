@@ -473,7 +473,9 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 export const staticPattern = (t: Tracker): RegExp | undefined =>
 	t.pattern ??
 	(t.hosts.length > 0
-		? new RegExp(
+		? // Hosts are escaped, so they only match themselves.
+			// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
+			new RegExp(
 				`//(?:[\\w-]+\\.)*(?:${t.hosts.map(escapeRe).join("|")})(?![\\w-])`,
 			)
 		: undefined);

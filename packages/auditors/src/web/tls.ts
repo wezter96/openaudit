@@ -51,6 +51,8 @@ export const inspectTls = (
 	} = {},
 ): Effect.Effect<TlsInfo, Error> =>
 	Effect.callback<TlsInfo, Error>((resume) => {
+		// rejectUnauthorized is off for inspection only; see below.
+		// nosemgrep: problem-based-packs.insecure-transport.js-node.bypass-tls-verification.bypass-tls-verification
 		const socket = tls.connect({
 			host: options.connectHost ?? host,
 			port,

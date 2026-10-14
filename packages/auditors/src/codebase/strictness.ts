@@ -277,11 +277,14 @@ const rustStrictness = (ws: Workspace, files: ReadonlyArray<string>) =>
 /*                                   Python                                   */
 /* -------------------------------------------------------------------------- */
 
+// section is one of this module's literals (mypy, flake8, ...).
 const hasSection = (text: string, section: string) =>
+	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 	new RegExp(`^\\s*\\[${section}\\]`, "m").test(text);
 
 /** The `key = value` lines of an INI section. */
 const iniSection = (text: string, section: string): string => {
+	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 	const m = new RegExp(
 		`^\\s*\\[${section}\\]\\s*$([\\s\\S]*?)(?=^\\s*\\[|$(?![\\s\\S]))`,
 		"m",

@@ -99,7 +99,7 @@ export const makeAgenticAuditor = (
 						env: browserEnv(new URL(scope.url).origin),
 					};
 
-				const tools = [...(scope.root ? ["Read", "Grep", "Glob"] : [])];
+				const tools = scope.root ? ["Read", "Grep", "Glob"] : [];
 				const guard = makeToolGuard(scope);
 				const options: Options = {
 					model,

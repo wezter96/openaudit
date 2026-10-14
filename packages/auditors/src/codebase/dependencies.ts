@@ -503,7 +503,7 @@ export const cvss2BaseScore = (vector: string): number | undefined => {
  */
 export const osvSeverity = (vuln: OsvVuln): Severity => {
 	for (const s of vuln.severity ?? []) {
-		if (/^CVSS_V3/.test(s.type)) {
+		if (s.type.startsWith("CVSS_V3")) {
 			const score = cvss3BaseScore(s.score);
 			if (score !== undefined) return severityFromScore(score);
 		}
@@ -747,6 +747,8 @@ export const dependencies = defineAuditor({
 				const text = texts.get(d.file);
 				if (!text) return undefined;
 				// Prefer the line that mentions both the name and the resolved version.
+				// The version is escaped, so it only matches itself.
+				// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 				const exact = new RegExp(
 					`(?<![\\w.^~<>=*-])${d.version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`,
 				);

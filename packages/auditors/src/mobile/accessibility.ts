@@ -187,7 +187,7 @@ const belowMinimum = (size: string | undefined, min: string | undefined) => {
 const isClickable = (el: XmlElement) =>
 	el.attrs.clickable === "true" ||
 	el.attrs.onClick !== undefined ||
-	/ImageButton$/.test(el.name);
+	el.name.endsWith("ImageButton");
 
 export const checkLayout = (root: XmlElement): Map<RuleKey, Hit[]> => {
 	const hits = new Map<RuleKey, Hit[]>();

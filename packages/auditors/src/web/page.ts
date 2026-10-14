@@ -141,7 +141,7 @@ export const isLoopback = (url: string): boolean => {
 			host === "localhost" ||
 			host.endsWith(".localhost") ||
 			host === "::1" ||
-			/^127\./.test(host)
+			host.startsWith("127.")
 		);
 	} catch {
 		return false;

@@ -196,6 +196,8 @@ ${self.available ? `<g transform="translate(726 99) scale(1.8)">${dial()}</g>` :
 /* -------------------------------------------------------------- og + icons */
 
 const meta = (page: string, prop: string) =>
+	// prop is one of this script's own literals.
+	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 	new RegExp(`<meta property="${prop}" content="([^"]*)"`).exec(page)?.[1];
 const decodeEntities = (s: string) =>
 	s

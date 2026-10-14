@@ -81,7 +81,7 @@ export const systemResolver = (): Resolver => {
 				} catch (err) {
 					const code = (err as { code?: string }).code ?? "";
 					// ENODATA: the name exists, it just has no record of this type.
-					if (/NODATA$/.test(code)) return true;
+					if (code.endsWith("NODATA")) return true;
 					if (!isEmptyAnswer(err)) throw err;
 				}
 			}

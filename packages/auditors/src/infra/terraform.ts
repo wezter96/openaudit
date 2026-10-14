@@ -43,6 +43,8 @@ const matchBrace = (text: string, open: number): number => {
 		} else if (ch === "<" && text[i + 1] === "<") {
 			const m = /^<<-?([A-Za-z_]\w*)\s*\n/.exec(text.slice(i));
 			if (m) {
+				// The heredoc tag matched [A-Za-z_]\w* above.
+				// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 				const end = new RegExp(`^\\s*${m[1]}\\s*$`, "m").exec(
 					text.slice(i + m[0].length),
 				);
@@ -121,6 +123,8 @@ const attr = (
 	fileText: string,
 ): Attr | undefined => {
 	const own = ownAttributes(block.body);
+	// name is an attribute name literal from this module.
+	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 	const m = new RegExp(`^[ \\t]*${name}[ \\t]*=[ \\t]*(.+)$`, "m").exec(own);
 	if (!m) return undefined;
 	const raw = (m[1] ?? "").replace(/\s+(#|\/\/).*$/, "").trim();
