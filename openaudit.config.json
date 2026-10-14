@@ -10,6 +10,10 @@
 			{
 				"path": "**/*.test.ts",
 				"reason": "Tests outside test/ (packages/api/src) embed the same kind of sample payloads"
+			},
+			{
+				"path": "apps/site/src/generated/**",
+				"reason": "Gitignored build data that the site's prepare step copies from sources audited directly (playbooks, registry, schemas); scanning it again only duplicates their findings and bypasses their fingerprint suppressions"
 			}
 		],
 		"rules": [],
