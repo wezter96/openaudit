@@ -345,7 +345,16 @@ if (process.env.CUSTOM_DOMAIN) {
 
 const scriptHashes = new Set<string>();
 const styleHashes = new Set<string>();
-const policy = (scripts: Iterable<string>, styles: Iterable<string>) =>
+/**
+ * The page policy. Only the header upgrades requests to https: in the <meta>
+ * it would also apply to a local `astro preview` over http, where WebKit then
+ * never finishes loading the page.
+ */
+const policy = (
+	scripts: Iterable<string>,
+	styles: Iterable<string>,
+	{ upgrade = true } = {},
+) =>
 	[
 		"default-src 'none'",
 		`script-src 'self' ${[...scripts].join(" ")}`.trim(),
@@ -355,7 +364,7 @@ const policy = (scripts: Iterable<string>, styles: Iterable<string>) =>
 		"manifest-src 'self'",
 		"base-uri 'none'",
 		"form-action 'none'",
-		"upgrade-insecure-requests",
+		...(upgrade ? ["upgrade-insecure-requests"] : []),
 	].join("; ");
 for (const f of html) {
 	if (copied(f)) continue;
@@ -381,7 +390,7 @@ for (const f of html) {
 	// frame-ancestors is ignored in a <meta>; the header carries it.
 	page = page.replace(
 		'<meta charset="utf-8">',
-		`<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${policy(scripts, styles)}">`,
+		`<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${policy(scripts, styles, { upgrade: false })}">`,
 	);
 	await Bun.write(f, page);
 }

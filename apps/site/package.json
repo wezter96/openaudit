@@ -9,6 +9,7 @@
 		"preview": "wrangler dev",
 		"check-types": "bun scripts/prepare.ts --data-only && astro check",
 		"test": "bun test worker",
+		"check:ui": "bun scripts/check-ui.ts",
 		"deploy": "wrangler deploy"
 	},
 	"dependencies": {
@@ -23,6 +24,7 @@
 		"@expo-google-fonts/jetbrains-mono": "^0.4.1",
 		"@resvg/resvg-js": "^2.6.2",
 		"@types/bun": "catalog:",
+		"playwright": "1.56.1",
 		"typescript": "catalog:",
 		"wrangler": "^4.150.0"
 	}
