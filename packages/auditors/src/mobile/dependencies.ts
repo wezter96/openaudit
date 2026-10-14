@@ -4,12 +4,9 @@ import { Effect } from "effect";
 import {
 	type Dependency,
 	type Ecosystem,
-	fetchOsvVulns,
-	fixedVersions,
-	type OsvVuln,
-	osvSeverity,
-	queryOsvBatch,
-	roundRobin,
+	osvFindings,
+	type VulnWording,
+	vulnFinding,
 } from "../codebase/dependencies";
 import { asDict, parsePlist } from "./plist";
 import { loadMobileTarget, utf8 } from "./shared";
@@ -187,47 +184,12 @@ const asDependency = (c: Component, file: string): Dependency => ({
 	file: `${file}!/${c.entry}`,
 });
 
-const vulnFinding = (
-	d: Dependency,
-	id: string,
-	vuln: OsvVuln | undefined,
-): FindingInput => {
-	const aliases = (vuln?.aliases ?? []).filter((a) => a !== id);
-	const fixed = vuln ? fixedVersions(vuln, d) : [];
-	const cwes = Array.isArray(vuln?.database_specific?.cwe_ids)
-		? (vuln.database_specific.cwe_ids as unknown[]).filter(
-				(c): c is string => typeof c === "string",
-			)
-		: [];
-	const summary = vuln?.summary ?? vuln?.details?.split("\n")[0]?.slice(0, 200);
-	return {
-		ruleId: "mobile.dependencies/vulnerable-dependency",
-		title: `${d.name}@${d.version}: ${summary ?? id}`,
-		severity: vuln ? osvSeverity(vuln) : "medium",
-		category: "supply-chain",
-		message: `${d.name} ${d.version} (Maven) is bundled in the app and affected by ${id}${aliases.length ? ` (${aliases.slice(0, 3).join(", ")})` : ""}${summary ? `: ${summary}` : "."}${vuln ? "" : " Advisory details were not fetched (detail limit reached), so the severity is estimated."}`,
-		location: { file: d.file },
-		evidence: `${d.name}@${d.version} ${id}`,
-		remediation: fixed.length
-			? `Upgrade ${d.name} to ${fixed.join(" or ")} or later (or a newer major) in the app's Gradle dependencies, then rebuild. If the library is pulled in transitively, add a constraint or upgrade the parent SDK.`
-			: `No fixed version is published for ${d.name}; consider replacing it or mitigating per the advisory.`,
-		references: [
-			`https://osv.dev/vulnerability/${id}`,
-			...(vuln?.references ?? [])
-				.filter((r) => r.type === "ADVISORY" || r.type === "FIX")
-				.slice(0, 3)
-				.map((r) => r.url),
-		],
-		confidence: vuln ? "high" : "medium",
-		tags: [
-			"owasp-a06",
-			"owasp-mobile-m2",
-			...cwes.map((c) => c.toLowerCase()),
-			...[id, ...aliases]
-				.filter((a) => /^(CVE|GHSA)-/.test(a))
-				.map((a) => a.toLowerCase()),
-		],
-	};
+const MOBILE_VULN: VulnWording = {
+	ruleId: "mobile.dependencies/vulnerable-dependency",
+	affected: "is bundled in the app and affected by",
+	upgrade:
+		" in the app's Gradle dependencies, then rebuild. If the library is pulled in transitively, add a constraint or upgrade the parent SDK.",
+	tags: ["owasp-mobile-m2"],
 };
 
 const inventoryFinding = (
@@ -317,20 +279,11 @@ export const mobileDependencies = defineAuditor({
 			yield* ctx.log(
 				`mobile.dependencies: querying OSV for ${deps.length} libraries`,
 			);
-			const idsPerDep = yield* queryOsvBatch(ctx.http, deps);
-			const details = yield* fetchOsvVulns(ctx.http, roundRobin(idsPerDep));
-			deps.forEach((d, i) => {
-				// OSV can return the same advisory under several ids (GHSA + CVE alias).
-				const covered = new Set<string>();
-				for (const id of idsPerDep[i] ?? []) {
-					const vuln = details.get(id);
-					if (covered.has(id) || vuln?.aliases?.some((a) => covered.has(a)))
-						continue;
-					covered.add(id);
-					for (const alias of vuln?.aliases ?? []) covered.add(alias);
-					findings.push(vulnFinding(d, id, vuln));
-				}
-			});
+			findings.push(
+				...(yield* osvFindings(ctx.http, deps, (d, id, vuln) =>
+					vulnFinding(MOBILE_VULN, d, id, vuln),
+				)),
+			);
 			return findings;
 		}),
 });

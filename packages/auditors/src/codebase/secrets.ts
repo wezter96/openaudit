@@ -38,6 +38,25 @@ interface SecretRule {
 const ROTATE =
 	"Revoke and rotate the credential now, then purge it from history (git filter-repo / BFG) and load it from a secret manager or environment variable.";
 
+type RuleInfo = Pick<SecretRule, "id" | "title" | "severity" | "remediation">;
+
+/** Adds a finding for `rule` at a character index of the scanned file. */
+type Push = (
+	rule: RuleInfo,
+	index: number,
+	evidence: string,
+	message: string,
+	confidence?: "high" | "medium" | "low",
+) => void;
+
+/** High-entropy literals assigned to credential-like names. */
+const GENERIC_SECRET: RuleInfo = {
+	id: "generic-secret",
+	title: "Hardcoded secret",
+	severity: "high",
+	remediation: ROTATE,
+};
+
 /** Provider-specific patterns. Ordered: more specific first. */
 export const SECRET_RULES: ReadonlyArray<SecretRule> = [
 	{
@@ -230,13 +249,7 @@ export const scanSecrets = (file: SourceFile): FindingInput[] => {
 	const lineOf = lineLocator(text);
 	const flaggedLines = new Set<number>();
 	const inTests = isTestPath(path);
-	const push = (
-		rule: Pick<SecretRule, "id" | "title" | "severity" | "remediation">,
-		index: number,
-		evidence: string,
-		message: string,
-		confidence: "high" | "medium" | "low" = "high",
-	) => {
+	const push: Push = (rule, index, evidence, message, confidence = "high") => {
 		const lineText = fullLineAt(text, index);
 		if (ALLOW_MARKER.test(lineText)) return;
 		const line = lineOf(index);
@@ -302,12 +315,7 @@ export const scanSecrets = (file: SourceFile): FindingInput[] => {
 		const index = (m.index ?? 0) + m[0].lastIndexOf(secret);
 		if (flaggedLines.has(lineOf(index))) continue;
 		push(
-			{
-				id: "generic-secret",
-				title: "Hardcoded secret",
-				severity: "high",
-				remediation: ROTATE,
-			},
+			GENERIC_SECRET,
 			index,
 			secretEvidence(text, index, secret),
 			`\`${key}\` is assigned a high-entropy literal that looks like a credential.`,
@@ -322,13 +330,7 @@ const scanEnvAssignments = (
 	text: string,
 	lineOf: (index: number) => number,
 	flaggedLines: Set<number>,
-	push: (
-		rule: Pick<SecretRule, "id" | "title" | "severity" | "remediation">,
-		index: number,
-		evidence: string,
-		message: string,
-		confidence?: "high" | "medium" | "low",
-	) => void,
+	push: Push,
 ) => {
 	const re =
 		/^[ \t]*(?:export[ \t]+)?(?<key>[A-Za-z_][\w.]*)[ \t]*=[ \t]*["']?(?<secret>[^"'\s#]{8,})/gm;
@@ -340,12 +342,7 @@ const scanEnvAssignments = (
 		const index = (m.index ?? 0) + m[0].lastIndexOf(secret);
 		if (flaggedLines.has(lineOf(index))) continue;
 		push(
-			{
-				id: "generic-secret",
-				title: "Hardcoded secret",
-				severity: "high",
-				remediation: ROTATE,
-			},
+			GENERIC_SECRET,
 			index,
 			secretEvidence(text, index, secret),
 			`\`${key}\` in a committed environment file holds what looks like a real credential.`,

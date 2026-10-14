@@ -635,11 +635,24 @@ export const fetchOsvVulns = (
 		(vulns) => new Map(vulns.flatMap((v) => (v ? [[v.id, v] as const] : []))),
 	);
 
-const vulnFinding = (
+/** How a vulnerable-dependency finding words its message and advice. */
+export interface VulnWording {
+	readonly ruleId: string;
+	/** Verb phrase between the package and the advisory id. */
+	readonly affected: string;
+	/** Appended to the upgrade advice after "(or a newer major)". */
+	readonly upgrade: string;
+	/** Tags added after `owasp-a06`. */
+	readonly tags?: ReadonlyArray<string>;
+}
+
+/** One finding for an OSV advisory affecting `d`. */
+export const vulnFinding = (
+	wording: VulnWording,
 	d: Dependency,
 	id: string,
 	vuln: OsvVuln | undefined,
-	line: number | undefined,
+	line?: number,
 ): FindingInput => {
 	const aliases = (vuln?.aliases ?? []).filter((a) => a !== id);
 	const fixed = vuln ? fixedVersions(vuln, d) : [];
@@ -650,15 +663,15 @@ const vulnFinding = (
 		: [];
 	const summary = vuln?.summary ?? vuln?.details?.split("\n")[0]?.slice(0, 200);
 	return {
-		ruleId: "code.dependencies/vulnerable-dependency",
+		ruleId: wording.ruleId,
 		title: `${d.name}@${d.version}: ${summary ?? id}`,
 		severity: vuln ? osvSeverity(vuln) : "medium",
 		category: "supply-chain",
-		message: `${d.name} ${d.version} (${d.ecosystem}) is affected by ${id}${aliases.length ? ` (${aliases.slice(0, 3).join(", ")})` : ""}${summary ? `: ${summary}` : "."}${vuln ? "" : " Advisory details were not fetched (detail limit reached), so the severity is estimated."}`,
+		message: `${d.name} ${d.version} (${d.ecosystem}) ${wording.affected} ${id}${aliases.length ? ` (${aliases.slice(0, 3).join(", ")})` : ""}${summary ? `: ${summary}` : "."}${vuln ? "" : " Advisory details were not fetched (detail limit reached), so the severity is estimated."}`,
 		location: { file: d.file, line },
 		evidence: `${d.name}@${d.version} ${id}`,
 		remediation: fixed.length
-			? `Upgrade ${d.name} to ${fixed.join(" or ")} or later (or a newer major), then regenerate the lockfile.`
+			? `Upgrade ${d.name} to ${fixed.join(" or ")} or later (or a newer major)${wording.upgrade}`
 			: `No fixed version is published for ${d.name}; consider replacing it or mitigating per the advisory.`,
 		references: [
 			`https://osv.dev/vulnerability/${id}`,
@@ -670,12 +683,50 @@ const vulnFinding = (
 		confidence: vuln ? "high" : "medium",
 		tags: [
 			"owasp-a06",
+			...(wording.tags ?? []),
 			...cwes.map((c) => c.toLowerCase()),
 			...[id, ...aliases]
 				.filter((a) => /^(CVE|GHSA)-/.test(a))
 				.map((a) => a.toLowerCase()),
 		],
 	};
+};
+
+/**
+ * Looks `deps` up on OSV and returns one finding per distinct advisory: OSV
+ * can return the same advisory under several ids (PYSEC + GHSA, GHSA + CVE).
+ */
+export const osvFindings = (
+	http: Http,
+	deps: ReadonlyArray<Dependency>,
+	toFinding: (
+		d: Dependency,
+		id: string,
+		vuln: OsvVuln | undefined,
+	) => FindingInput,
+) =>
+	Effect.gen(function* () {
+		const idsPerDep = yield* queryOsvBatch(http, deps);
+		const details = yield* fetchOsvVulns(http, roundRobin(idsPerDep));
+		const findings: FindingInput[] = [];
+		deps.forEach((d, i) => {
+			const covered = new Set<string>();
+			for (const id of idsPerDep[i] ?? []) {
+				const vuln = details.get(id);
+				if (covered.has(id) || vuln?.aliases?.some((a) => covered.has(a)))
+					continue;
+				covered.add(id);
+				for (const alias of vuln?.aliases ?? []) covered.add(alias);
+				findings.push(toFinding(d, id, vuln));
+			}
+		});
+		return findings;
+	});
+
+const CODE_VULN: VulnWording = {
+	ruleId: "code.dependencies/vulnerable-dependency",
+	affected: "is affected by",
+	upgrade: ", then regenerate the lockfile.",
 };
 
 /**
@@ -771,23 +822,12 @@ export const dependencies = defineAuditor({
 				`code.dependencies: querying OSV for ${deps.length} packages`,
 			);
 
-			const idsPerDep = yield* queryOsvBatch(ctx.http, deps);
-			const details = yield* fetchOsvVulns(ctx.http, roundRobin(idsPerDep));
-
 			const lineFor = dependencyLineFinder(files);
-
-			deps.forEach((d, i) => {
-				// OSV can return the same advisory under several ids (PYSEC + GHSA).
-				const covered = new Set<string>();
-				for (const id of idsPerDep[i] ?? []) {
-					const vuln = details.get(id);
-					if (covered.has(id) || vuln?.aliases?.some((a) => covered.has(a)))
-						continue;
-					covered.add(id);
-					for (const alias of vuln?.aliases ?? []) covered.add(alias);
-					findings.push(vulnFinding(d, id, vuln, lineFor(d)));
-				}
-			});
+			findings.push(
+				...(yield* osvFindings(ctx.http, deps, (d, id, vuln) =>
+					vulnFinding(CODE_VULN, d, id, vuln, lineFor(d)),
+				)),
+			);
 			return findings;
 		}),
 });
