@@ -12,7 +12,7 @@ import {
 import { Effect } from "effect";
 
 import { arr, cweTags, str } from "../tool";
-import { truncate } from "./util";
+import { parseUrl, truncate } from "./util";
 
 export interface TestsslEntry {
 	readonly id?: string;
@@ -241,10 +241,7 @@ export const testssl = defineAuditor({
 	run: (ctx) =>
 		Effect.gen(function* () {
 			const url = yield* requireUrl(ctx);
-			const parsed = yield* Effect.try({
-				try: () => new URL(url),
-				catch: () => new AuditorError({ message: `Invalid URL: ${url}` }),
-			});
+			const parsed = yield* parseUrl(url);
 			if (parsed.protocol !== "https:")
 				return yield* skip("testssl.sh only applies to https targets");
 			const bin =
