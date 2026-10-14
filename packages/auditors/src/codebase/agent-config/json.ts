@@ -32,12 +32,29 @@ export interface JsonEntry {
 }
 
 const MAX_DEPTH = 64;
-const SCALAR = /-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null/y;
+const SCALAR = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null/y;
 
-class Bad extends Error {}
+class Bad extends Error {
+	constructor(
+		readonly reason: string,
+		readonly offset: number,
+	) {
+		super(reason);
+	}
+}
+
+export type JsonParse =
+	| { readonly ok: true; readonly root: JsonNode }
+	| { readonly ok: false; readonly reason: string; readonly offset: number };
 
 /** Parses JSONC into a tree, or undefined when it is not JSONC. */
 export const parseJsoncTree = (text: string): JsonNode | undefined => {
+	const parsed = parseJsoncDetailed(text);
+	return parsed.ok ? parsed.root : undefined;
+};
+
+/** Parses JSONC into a tree, or says why and where it is not JSONC. */
+export const parseJsoncDetailed = (text: string): JsonParse => {
 	let i = text.charCodeAt(0) === 0xfeff ? 1 : 0;
 	const n = text.length;
 
@@ -50,7 +67,7 @@ export const parseJsoncTree = (text: string): JsonNode | undefined => {
 				i = e === -1 ? n : e + 1;
 			} else if (c === "/" && text[i + 1] === "*") {
 				const e = text.indexOf("*/", i + 2);
-				if (e === -1) throw new Bad();
+				if (e === -1) throw new Bad("unterminated block comment", i);
 				i = e + 2;
 			} else return;
 		}
@@ -60,16 +77,19 @@ export const parseJsoncTree = (text: string): JsonNode | undefined => {
 		const start = i;
 		i++;
 		while (i < n && text[i] !== '"') i += text[i] === "\\" ? 2 : 1;
-		if (i >= n) throw new Bad();
+		if (i >= n) throw new Bad("unterminated string", start);
 		i++;
-		const value: unknown = JSON.parse(text.slice(start, i));
-		if (typeof value !== "string") throw new Bad();
-		return value;
+		try {
+			return JSON.parse(text.slice(start, i)) as string;
+		} catch {
+			throw new Bad("invalid escape or control character in a string", start);
+		}
 	};
 
 	const value = (depth: number): JsonNode => {
-		if (depth > MAX_DEPTH) throw new Bad();
 		skip();
+		if (depth > MAX_DEPTH)
+			throw new Bad(`nesting deeper than ${MAX_DEPTH} levels`, i);
 		const offset = i;
 		const c = text[i];
 		if (c === "{") {
@@ -81,16 +101,16 @@ export const parseJsoncTree = (text: string): JsonNode | undefined => {
 					i++;
 					return { kind: "object", offset, entries };
 				}
-				if (text[i] !== '"') throw new Bad();
+				if (text[i] !== '"') throw new Bad("expected a double-quoted key", i);
 				const keyOffset = i;
 				const key = string();
 				skip();
-				if (text[i] !== ":") throw new Bad();
+				if (text[i] !== ":") throw new Bad("expected ':'", i);
 				i++;
 				entries.push({ key, keyOffset, value: value(depth + 1) });
 				skip();
 				if (text[i] === ",") i++;
-				else if (text[i] !== "}") throw new Bad();
+				else if (text[i] !== "}") throw new Bad("expected ',' or '}'", i);
 			}
 		}
 		if (c === "[") {
@@ -105,13 +125,13 @@ export const parseJsoncTree = (text: string): JsonNode | undefined => {
 				items.push(value(depth + 1));
 				skip();
 				if (text[i] === ",") i++;
-				else if (text[i] !== "]") throw new Bad();
+				else if (text[i] !== "]") throw new Bad("expected ',' or ']'", i);
 			}
 		}
 		if (c === '"') return { kind: "string", offset, value: string() };
 		SCALAR.lastIndex = i;
 		const m = SCALAR.exec(text);
-		if (!m) throw new Bad();
+		if (!m) throw new Bad("unexpected value", i);
 		i += m[0].length;
 		return { kind: "scalar", offset, value: JSON.parse(m[0]) };
 	};
@@ -119,9 +139,12 @@ export const parseJsoncTree = (text: string): JsonNode | undefined => {
 	try {
 		const root = value(0);
 		skip();
-		return i === n ? root : undefined;
+		return i === n
+			? { ok: true, root }
+			: { ok: false, reason: "unexpected content after the value", offset: i };
 	} catch (e) {
-		if (e instanceof Bad || e instanceof SyntaxError) return undefined;
+		if (e instanceof Bad)
+			return { ok: false, reason: e.reason, offset: e.offset };
 		throw e;
 	}
 };
