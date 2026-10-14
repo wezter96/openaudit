@@ -8,6 +8,7 @@
 				"varsIgnorePattern": "^_",
 				"argsIgnorePattern": "^_"
 			}
-		]
+		],
+		"jsx-a11y/no-noninteractive-tabindex": ["warn", { "tags": ["section"] }]
 	}
 }

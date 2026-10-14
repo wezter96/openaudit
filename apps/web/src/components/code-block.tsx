@@ -65,9 +65,7 @@ export function CodeBlock({
 				)}
 				<span className="sr-only">Copy {label}</span>
 			</button>
-			<span role="status" className="sr-only">
-				{copied ? "Copied to clipboard" : ""}
-			</span>
+			<output className="sr-only">{copied ? "Copied to clipboard" : ""}</output>
 		</div>
 	);
 }

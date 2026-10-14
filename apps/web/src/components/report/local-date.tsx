@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
+
+const subscribeNothing = () => () => {};
 
 /**
  * Renders a timestamp in UTC on the server and in the visitor's locale and
@@ -11,8 +13,12 @@ export function LocalDate({
 	iso: string;
 	withTime?: boolean;
 }) {
-	const [hydrated, setHydrated] = useState(false);
-	useEffect(() => setHydrated(true), []);
+	// false while server rendering and hydrating, true once in the browser.
+	const hydrated = useSyncExternalStore(
+		subscribeNothing,
+		() => true,
+		() => false,
+	);
 
 	const date = new Date(iso);
 	if (Number.isNaN(date.getTime())) return <>{iso}</>;

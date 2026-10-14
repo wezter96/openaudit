@@ -1,5 +1,5 @@
 import { Moon, Sun } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 const STORAGE_KEY = "openaudit-theme";
 
@@ -9,16 +9,23 @@ const STORAGE_KEY = "openaudit-theme";
  */
 export const themeScript = `(function(){try{var t=localStorage.getItem("${STORAGE_KEY}");var d=t?t==="dark":matchMedia("(prefers-color-scheme: dark)").matches;document.documentElement.classList.toggle("dark",d)}catch(e){}})()`;
 
-export function ThemeToggle() {
-	const [dark, setDark] = useState<boolean | undefined>(undefined);
+/** The theme lives in the <html> class; re-render when it changes. */
+const subscribeTheme = (onChange: () => void) => {
+	const observer = new MutationObserver(onChange);
+	observer.observe(document.documentElement, {
+		attributes: true,
+		attributeFilter: ["class"],
+	});
+	return () => observer.disconnect();
+};
+const isDark = () => document.documentElement.classList.contains("dark");
 
-	useEffect(() => {
-		setDark(document.documentElement.classList.contains("dark"));
-	}, []);
+export function ThemeToggle() {
+	// Unknown (undefined) while server rendering.
+	const dark = useSyncExternalStore(subscribeTheme, isDark, () => undefined);
 
 	const toggle = () => {
 		const next = !dark;
-		setDark(next);
 		document.documentElement.classList.toggle("dark", next);
 		try {
 			localStorage.setItem(STORAGE_KEY, next ? "dark" : "light");
