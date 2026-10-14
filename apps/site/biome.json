@@ -10,6 +10,7 @@
 			"!.wrangler",
 			"!src/generated",
 			"!public/report",
+			"!public/schema",
 			"!public/architecture"
 		]
 	},
