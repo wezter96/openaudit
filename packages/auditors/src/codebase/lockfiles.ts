@@ -31,6 +31,25 @@ import {
  * for install scripts) but never makes it disappear: settings are only
  * honoured where the package manager itself reads and enforces them, and what
  * they allow is still reported.
+ *
+ * Files and entries that cannot be read are reported (`unparseable-lockfile`,
+ * `unparseable-config`, `truncated`), never skipped.
+ *
+ * Known limitations, ways an entry can still evade these checks:
+ * - Package substitution on the public registry: an entry for `a` whose
+ *   tarball is another package on registry.npmjs.org is not flagged, because
+ *   npm aliases make that legitimate.
+ * - Settings from outside the repository (user and global .npmrc,
+ *   `npm_config_*` variables, CI configuration) and pnpm's registry settings
+ *   in pnpm-workspace.yaml are not read. Entries without a recorded URL are
+ *   assumed to come from the registry the repository configures.
+ * - Integrity hashes are checked for presence and algorithm only. Nothing is
+ *   downloaded, so a hash that does not match its tarball goes unnoticed.
+ * - A file that parses here but is read differently by a package-manager
+ *   version not modelled here (for example Yarn 1's quirks inside a merge
+ *   conflict) is checked as parsed here. Only parse failures are reported.
+ * - `-r`/`-c` includes missing from the checkout (generated at install time)
+ *   are not checked.
  */
 
 export const LOCKFILES_ID = "code.lockfiles";
@@ -45,15 +64,41 @@ const MAX_LOCKFILE_BYTES = 20 * 1024 * 1024;
 /** Text searches for a location per file; later findings get no line. */
 const MAX_LINE_SEARCHES = 50;
 
-/** Hosts every JavaScript package manager treats as the public registry. */
+/**
+ * Hosts of the public npm registry. Registries where anyone can publish
+ * under their own namespace (GitHub Packages) are not on the list.
+ */
 const DEFAULT_REGISTRY_HOSTS = new Set([
 	"registry.npmjs.org",
 	"registry.yarnpkg.com",
-	"npm.pkg.github.com",
 ]);
 
-/** Default download hosts of pnpm `runtime:` dependencies (Node.js, Bun, Deno). */
-const RUNTIME_HOSTS = new Set(["nodejs.org", "github.com", "dl.deno.land"]);
+/**
+ * Default download locations of pnpm `runtime:` dependencies, by runtime.
+ * Prefixes of the parsed URL: github.com serves anyone's release assets.
+ */
+const RUNTIME_DOWNLOADS: Readonly<Record<string, ReadonlyArray<string>>> = {
+	node: ["https://nodejs.org/download/"],
+	bun: ["https://github.com/oven-sh/bun/releases/download/"],
+	deno: [
+		"https://github.com/denoland/deno/releases/download/",
+		"https://dl.deno.land/",
+	],
+};
+
+const isOfficialRuntime = (name: string, raw: string): boolean => {
+	const prefixes = Object.hasOwn(RUNTIME_DOWNLOADS, name)
+		? RUNTIME_DOWNLOADS[name]
+		: undefined;
+	if (!prefixes) return false;
+	try {
+		const url = new URL(raw);
+		const href = `${url.protocol}//${url.host}${url.pathname}`;
+		return !url.username && prefixes.some((p) => href.startsWith(p));
+	} catch {
+		return false;
+	}
+};
 
 /** Hosts of the Python Package Index. */
 const PYPI_HOSTS = new Set(["pypi.org", "files.pythonhosted.org"]);
@@ -201,14 +246,15 @@ export const classifySource = (raw: string | undefined): Source => {
 	if (s.startsWith("//")) return classifySource(`https:${s}`);
 	const hash = s.indexOf("#");
 	const fragment = hash === -1 ? undefined : s.slice(hash + 1);
-	if (lower.startsWith("http://") || lower.startsWith("https://")) {
-		const insecure = lower.startsWith("http://");
+	// `http:host/x` and `https:\\host` are URLs too, as npm and pnpm parse them.
+	if (/^https?:/i.test(s)) {
 		let url: URL;
 		try {
 			url = new URL(s);
 		} catch {
 			return UNKNOWN;
 		}
+		const insecure = url.protocol === "http:";
 		if (url.pathname.toLowerCase().endsWith(".git"))
 			return gitSource(s, fragment, insecure);
 		const ref = archiveRef(url);
@@ -242,21 +288,44 @@ export const classifySource = (raw: string | undefined): Source => {
 };
 
 /**
- * Whether `path`, relative to the repository directory `base` (`""` for the
- * root), points outside the repository.
+ * The repository path of `rel` relative to the repository directory `dir`
+ * (`""` for the root), or undefined if either leaves the repository. With
+ * `urlDots`, `%2e` counts as a dot, as it does where a path is resolved as a
+ * URL (npm-package-arg).
  */
-export const escapesRoot = (base: string, path: string): boolean => {
-	const p = path.replace(/\\/g, "/");
-	if (p.startsWith("/") || p.startsWith("~") || /^[a-z]:/i.test(p)) return true;
-	let depth = base.split("/").filter((s) => s && s !== ".").length;
-	for (const seg of p.split("/")) {
-		if (seg === "..") {
-			depth--;
-			if (depth < 0) return true;
-		} else if (seg && seg !== ".") depth++;
+const resolvePath = (
+	dir: string,
+	rel: string,
+	urlDots: boolean,
+): string | undefined => {
+	const out: string[] = [];
+	for (const part of [dir, rel]) {
+		const p = part.replace(/\\/g, "/");
+		if (p.startsWith("/") || p.startsWith("~") || /^[a-z]:/i.test(p))
+			return undefined;
+		for (const raw of p.split("/")) {
+			const seg = urlDots ? raw.replace(/%2e/gi, ".") : raw;
+			if (!seg || seg === ".") continue;
+			if (seg === "..") {
+				if (!out.length) return undefined;
+				out.pop();
+			} else out.push(raw);
+		}
 	}
-	return false;
+	return out.join("/");
 };
+
+/** A repository path for `rel` relative to `dir`, or undefined if it leaves the repository. */
+const resolveInRepo = (dir: string, rel: string) =>
+	resolvePath(dir, rel, false);
+
+/**
+ * Whether `path`, relative to the repository directory `base` (`""` for the
+ * root), points outside the repository. `base` comes from the lockfile too,
+ * so a base that leaves the repository counts.
+ */
+export const escapesRoot = (base: string, path: string): boolean =>
+	resolvePath(base, path, true) === undefined;
 
 const dirOf = (path: string) => {
 	const i = path.lastIndexOf("/");
@@ -285,6 +354,10 @@ export const displayUrl = (raw: string): string => {
 	const q = withoutUser.indexOf("?");
 	return truncate(q === -1 ? withoutUser : withoutUser.slice(0, q), 120);
 };
+
+/** A dependency spec safe to show: URL specs lose credentials and query strings. */
+const displaySpec = (spec: string): string =>
+	spec.includes("://") ? displayUrl(spec) : truncate(spec, 120);
 
 /** The host of a registry URL, or `undefined` when it does not parse. */
 const hostOf = (url: string): string | undefined => {
@@ -352,10 +425,60 @@ export interface Lockfile {
 	readonly recordsInstallScripts: boolean;
 	/** bun.lock `trustedDependencies`. */
 	readonly trusted?: ReadonlyArray<string>;
+	/** Parts of the file that could not be checked. */
+	readonly problems?: ReadonlyArray<Problem>;
+}
+
+/** Why part of a lockfile was not checked. */
+export interface Problem {
+	readonly severity: Severity;
+	/** A few words for the evidence, distinct per kind of problem. */
+	readonly what: string;
+	readonly reason: string;
 }
 
 const str = (v: unknown): string | undefined =>
 	typeof v === "string" ? v : undefined;
+
+const typeName = (v: unknown) =>
+	v === null ? "null" : Array.isArray(v) ? "array" : typeof v;
+
+/**
+ * A field that names where a package comes from. A value that is not a
+ * string becomes a marker that classifies as an unknown source, so it is
+ * reported instead of being read as "no URL, so the registry".
+ */
+const sourceField = (v: unknown): string | undefined =>
+	v === undefined || v === null
+		? undefined
+		: typeof v === "string"
+			? v
+			: `(${typeName(v)} value)`;
+
+/** A lockfile entry that is not the shape the format defines. */
+const malformedEntry = (
+	name: string,
+	value: unknown,
+	line: number | undefined,
+): LockedPackage => ({ name, source: `(${typeName(value)} entry)`, line });
+
+/** A problem for a `lockfileVersion` outside `known`, or none. */
+const versionProblem = (
+	version: unknown,
+	known: ReadonlyArray<number>,
+): Problem[] => {
+	const v = Number.parseInt(String(version ?? ""), 10);
+	const shown = truncate(String(version ?? "none"), 20);
+	return known.includes(v)
+		? []
+		: [
+				{
+					severity: "low",
+					what: `format version ${shown}`,
+					reason: `Its format version (${shown}) is not one openaudit recognises, so entries may have been missed.`,
+				},
+			];
+};
 
 /** A YAML or Yarn scalar as text (js-yaml's FAILSAFE schema keeps every scalar a string). */
 const scalar = (v: unknown): string | undefined =>
@@ -453,9 +576,18 @@ export const parseNpmLock = (file: SourceFile): Lockfile | undefined => {
 	if (isRecord(json.packages)) {
 		const lines = jsonKeyLines(file.text, "packages");
 		for (const [key, value] of Object.entries(json.packages)) {
-			if (!isRecord(value)) continue;
 			const line = lines.get(key);
 			const nm = key.lastIndexOf("node_modules/");
+			if (!isRecord(value)) {
+				packages.push(
+					malformedEntry(
+						nm === -1 ? key : key.slice(nm + "node_modules/".length),
+						value,
+						line,
+					),
+				);
+				continue;
+			}
 			if (nm === -1) {
 				// The root, a workspace or a `file:` directory dependency.
 				importers.set(key, declaredSpecs(value));
@@ -469,9 +601,10 @@ export const parseNpmLock = (file: SourceFile): Lockfile | undefined => {
 			}
 			const name = str(value.name) ?? key.slice(nm + "node_modules/".length);
 			if (value.link) {
+				const resolved = sourceField(value.resolved) ?? "";
 				packages.push({
 					name,
-					source: `file:${str(value.resolved) ?? ""}`,
+					source: resolved.startsWith("(") ? resolved : `file:${resolved}`,
 					line,
 				});
 				continue;
@@ -479,7 +612,7 @@ export const parseNpmLock = (file: SourceFile): Lockfile | undefined => {
 			packages.push({
 				name,
 				version: str(value.version),
-				source: str(value.resolved),
+				source: sourceField(value.resolved),
 				integrity: str(value.integrity),
 				installScript: value.hasInstallScript === true,
 				bundled: value.inBundle === true,
@@ -489,25 +622,27 @@ export const parseNpmLock = (file: SourceFile): Lockfile | undefined => {
 	}
 	if (isRecord(json.dependencies)) {
 		const lines = jsonKeyLines(file.text, "dependencies");
-		const visit = (deps: Record<string, unknown>, depth: number) => {
-			if (depth > 64) return;
+		// npm 6 nests without a depth limit; an explicit stack has none either.
+		const stack: Array<Record<string, unknown>> = [json.dependencies];
+		for (let deps = stack.pop(); deps; deps = stack.pop())
 			for (const [name, value] of Object.entries(deps)) {
-				if (!isRecord(value)) continue;
+				if (!isRecord(value)) {
+					packages.push(malformedEntry(name, value, lines.get(name)));
+					continue;
+				}
 				const version = str(value.version);
 				// v1 records git and file dependencies in `version`.
 				const spec = version && !/^\d/.test(version) ? version : undefined;
 				packages.push({
 					name,
 					version: spec ? undefined : version,
-					source: str(value.resolved) ?? spec,
+					source: sourceField(value.resolved) ?? spec,
 					integrity: str(value.integrity),
 					bundled: value.bundled === true,
 					line: lines.get(name),
 				});
-				if (isRecord(value.dependencies)) visit(value.dependencies, depth + 1);
+				if (isRecord(value.dependencies)) stack.push(value.dependencies);
 			}
-		};
-		visit(json.dependencies, 0);
 	}
 	return {
 		path: file.path,
@@ -515,6 +650,7 @@ export const parseNpmLock = (file: SourceFile): Lockfile | undefined => {
 		packages,
 		importers,
 		recordsInstallScripts: isRecord(json.packages),
+		problems: versionProblem(json.lockfileVersion, [1, 2, 3]),
 	};
 };
 
@@ -531,10 +667,12 @@ export const parseBunLock = (file: SourceFile): Lockfile | undefined => {
 	const lines = jsonKeyLines(file.text, "packages");
 	const packages: LockedPackage[] = [];
 	for (const [key, value] of Object.entries(json.packages)) {
-		if (!Array.isArray(value) || typeof value[0] !== "string") continue;
-		const ident = value[0];
-		const at = ident.indexOf("@", 1);
-		if (at === -1) continue;
+		const ident = Array.isArray(value) ? str(value[0]) : undefined;
+		const at = ident?.indexOf("@", 1) ?? -1;
+		if (!Array.isArray(value) || !ident || at === -1) {
+			packages.push(malformedEntry(key, value, lines.get(key)));
+			continue;
+		}
 		const name = ident.slice(0, at);
 		const spec = ident.slice(at + 1);
 		const registryVersion = /^\d/.test(spec);
@@ -542,7 +680,7 @@ export const parseBunLock = (file: SourceFile): Lockfile | undefined => {
 			name,
 			...(registryVersion ? { version: spec } : {}),
 			// Registry entries carry the tarball URL ("" for registry.npmjs.org).
-			source: registryVersion ? str(value[1]) || undefined : spec,
+			source: registryVersion ? sourceField(value[1]) || undefined : spec,
 			integrity: str(value[value.length - 1]),
 			line: lines.get(key),
 		});
@@ -558,6 +696,7 @@ export const parseBunLock = (file: SourceFile): Lockfile | undefined => {
 		importers,
 		recordsInstallScripts: false,
 		trusted: strings(json.trustedDependencies),
+		problems: versionProblem(json.lockfileVersion, [0, 1, 2]),
 	};
 };
 
@@ -646,7 +785,13 @@ const mergeLockfiles = (
 		importers,
 		recordsInstallScripts: locks.some((l) => l.recordsInstallScripts),
 		trusted: [...new Set(locks.flatMap((l) => l.trusted ?? []))],
+		problems: uniqueProblems(locks.flatMap((l) => l.problems ?? [])),
 	};
+};
+
+const uniqueProblems = (problems: ReadonlyArray<Problem>): Problem[] => {
+	const seen = new Set<string>();
+	return problems.filter((p) => !seen.has(p.what) && seen.add(p.what));
 };
 
 interface ConflictSide {
@@ -728,7 +873,8 @@ interface Fetch {
  * Unknown shapes become an unknown source, which is reported.
  */
 const pnpmFetches = (res: unknown, depth = 0): Fetch[] => {
-	if (!isRecord(res)) return [{}];
+	if (!isRecord(res))
+		return [{ source: res === undefined ? undefined : sourceField(res) }];
 	const integrity = str(res.integrity);
 	switch (res.type) {
 		case undefined:
@@ -737,7 +883,7 @@ const pnpmFetches = (res: unknown, depth = 0): Fetch[] => {
 					source:
 						typeof res.directory === "string"
 							? `file:${res.directory}`
-							: str(res.tarball),
+							: (sourceField(res.directory) ?? sourceField(res.tarball)),
 					integrity,
 				},
 			];
@@ -748,7 +894,9 @@ const pnpmFetches = (res: unknown, depth = 0): Fetch[] => {
 				{ source: `git+${str(res.repo) ?? ""}#${str(res.commit) ?? ""}` },
 			];
 		case "binary":
-			return [{ source: str(res.url) ?? "binary:", integrity, runtime: true }];
+			return [
+				{ source: sourceField(res.url) ?? "binary:", integrity, runtime: true },
+			];
 		case "variations":
 			if (depth > 2 || !Array.isArray(res.variants))
 				return [{ source: "variations:" }];
@@ -832,13 +980,22 @@ const parsePnpmDocument = (file: SourceFile): Lockfile | undefined => {
 	const packageLines = yamlKeyLines(file.text, "packages");
 	for (const [key, value] of Object.entries(declared))
 		if (isRecord(value)) add(key, value, packageLines.get(key));
+		else
+			packages.push(
+				malformedEntry(pnpmName(key), value, packageLines.get(key)),
+			);
 	// v9 lockfiles install what `snapshots` lists; pnpm fills each snapshot in
 	// from `packages`, so a snapshot without a package (or a package without a
 	// resolution) brings its own fields.
 	if (isRecord(doc.snapshots)) {
 		const snapshotLines = yamlKeyLines(file.text, "snapshots");
 		for (const [key, snapshot] of Object.entries(doc.snapshots)) {
-			if (!isRecord(snapshot)) continue;
+			if (!isRecord(snapshot)) {
+				packages.push(
+					malformedEntry(pnpmName(key), snapshot, snapshotLines.get(key)),
+				);
+				continue;
+			}
 			const id = withoutPeerSuffix(key);
 			const pkg = declared[id];
 			if (isRecord(pkg) && pkg.resolution !== undefined) continue;
@@ -855,6 +1012,7 @@ const parsePnpmDocument = (file: SourceFile): Lockfile | undefined => {
 		packages,
 		importers,
 		recordsInstallScripts: major > 0 && major < 9,
+		problems: versionProblem(doc.lockfileVersion, [5, 6, 9]),
 	};
 };
 
@@ -1138,14 +1296,21 @@ export const parseYarnLock = (file: SourceFile): Lockfile | undefined => {
 	const lineOf = lineFinder(text);
 	const packages: LockedPackage[] = [];
 	const workspaces = new Map<string, Importer>();
-	const rootSpecs: Importer = new Map();
+	const rootSpecs = new Map<string, string[]>();
+	const problems: Problem[] = [];
 	let berry = false;
 	for (const { obj, lines } of docs) {
-		if (isRecord(obj.__metadata)) berry = true;
+		if (isRecord(obj.__metadata)) {
+			berry = true;
+			problems.push(...versionProblem(obj.__metadata.version, [4, 5, 6, 7, 8]));
+		}
 		for (const [key, value] of Object.entries(obj)) {
 			if (key === "__metadata" || !isRecord(value)) continue;
 			const line = lines.get(key) ?? lineOf(key);
-			const resolution = scalar(value.resolution);
+			const malformed = sourceField(value.resolution);
+			const resolution =
+				scalar(value.resolution) ??
+				(malformed && `${nameOfSpec(key)}@${malformed}`);
 			if (resolution !== undefined) {
 				const name = nameOfSpec(resolution);
 				const spec = resolution.slice(name.length + 1);
@@ -1160,11 +1325,17 @@ export const parseYarnLock = (file: SourceFile): Lockfile | undefined => {
 					const params = spec.indexOf("::");
 					const bare = params === -1 ? spec : spec.slice(0, params);
 					const isPath = /^(file|link|portal):/.test(bare);
+					// npm: packages outside the registry's usual tarball path
+					// are downloaded from the URL in their locator.
+					const archiveUrl =
+						params === -1
+							? null
+							: new URLSearchParams(spec.slice(params + 2)).get("__archiveUrl");
 					const checksum = scalar(value.checksum);
 					packages.push({
 						name,
 						version: scalar(value.version),
-						source: isPath ? bare.split("#")[0] : bare,
+						source: archiveUrl ?? (isPath ? bare.split("#")[0] : bare),
 						...(isPath && params !== -1
 							? { base: berryLocatorDir(spec.slice(params + 2)) }
 							: {}),
@@ -1178,13 +1349,14 @@ export const parseYarnLock = (file: SourceFile): Lockfile | undefined => {
 			// Yarn 1's reading of the entry.
 			const first = key.split(",")[0]?.trim() ?? key;
 			const name = nameOfSpec(first);
-			if (obj === classic?.obj)
-				rootSpecs.set(name, [
-					...(rootSpecs.get(name) ?? []),
-					first.slice(name.length + 1),
-				]);
 			const declared = first.slice(name.length + 1);
-			let resolved = scalar(value.resolved);
+			if (obj === classic?.obj) {
+				// Pushed in place: copying the list per entry is quadratic.
+				const specs = rootSpecs.get(name);
+				if (specs) specs.push(declared);
+				else rootSpecs.set(name, [declared]);
+			}
+			let resolved = scalar(value.resolved) ?? sourceField(value.resolved);
 			let integrity = scalar(value.integrity);
 			const source = classifySource(resolved);
 			const hash = resolved?.indexOf("#") ?? -1;
@@ -1215,6 +1387,7 @@ export const parseYarnLock = (file: SourceFile): Lockfile | undefined => {
 		packages,
 		importers: berry ? workspaces : new Map([["", rootSpecs]]),
 		recordsInstallScripts: false,
+		problems: uniqueProblems(problems),
 	};
 };
 
@@ -1340,7 +1513,7 @@ const INI_LINE = /^\[([^\]]*)\]\s*$|^([^=]+)(=(.*))?$/;
  * start comments (also after a value), keys after a `[section]` header are not
  * npm config, and the last value of a key wins.
  */
-const readNpmrc = (file: SourceFile, config: FileConfig) => {
+const readNpmrc = (file: SourceFile, config: FileConfig): boolean => {
 	const values = new Map<
 		string,
 		{ readonly value: unknown; readonly line: number; readonly raw: string }
@@ -1391,12 +1564,13 @@ const readNpmrc = (file: SourceFile, config: FileConfig) => {
 		else if (key === "strict-ssl" && value === false)
 			config.strictSslOff = { ...at, evidence: raw };
 	}
+	return true;
 };
 
 /** Classic `.yarnrc`, read with Yarn 1's lockfile grammar like Yarn does. */
-const readYarnrc = (file: SourceFile, config: FileConfig) => {
+const readYarnrc = (file: SourceFile, config: FileConfig): boolean => {
 	const parsed = parseYarnClassic(stripBom(file.text));
-	if (!parsed) return;
+	if (!parsed) return false;
 	for (const [key, value] of Object.entries(parsed.obj)) {
 		const at = { file: file.path, line: parsed.lines.get(key) };
 		if (
@@ -1416,17 +1590,18 @@ const readYarnrc = (file: SourceFile, config: FileConfig) => {
 		} else if (key === "strict-ssl" && String(value) === "false")
 			config.strictSslOff = { ...at, evidence: "strict-ssl false" };
 	}
+	return true;
 };
 
 /** `.yarnrc.yml` (YAML as Yarn reads it): registries and `enableStrictSsl`. */
-const readYarnrcYml = (file: SourceFile, config: FileConfig) => {
+const readYarnrcYml = (file: SourceFile, config: FileConfig): boolean => {
 	let doc: unknown;
 	try {
 		doc = parseYaml(stripBom(file.text));
 	} catch {
-		return;
+		return false;
 	}
-	if (!isRecord(doc)) return;
+	if (!isRecord(doc)) return doc === null || doc === undefined;
 	const lineOf = lineFinder(file.text);
 	const registry = (value: unknown, scope?: string) => {
 		if (typeof value !== "string") return;
@@ -1448,15 +1623,16 @@ const readYarnrcYml = (file: SourceFile, config: FileConfig) => {
 			line: lineOf("enableStrictSsl"),
 			evidence: "enableStrictSsl: false",
 		};
+	return true;
 };
 
 /** bunfig.toml, parsed with Bun's TOML parser: `install.registry` and `install.scopes`. */
-const readBunfig = (file: SourceFile, config: FileConfig) => {
+const readBunfig = (file: SourceFile, config: FileConfig): boolean => {
 	let doc: unknown;
 	try {
 		doc = Bun.TOML.parse(stripBom(file.text));
 	} catch {
-		return;
+		return false;
 	}
 	const install = isRecord(doc) && isRecord(doc.install) ? doc.install : {};
 	const lineOf = lineFinder(file.text);
@@ -1475,6 +1651,7 @@ const readBunfig = (file: SourceFile, config: FileConfig) => {
 	if (isRecord(install.scopes))
 		for (const [scope, value] of Object.entries(install.scopes))
 			registry(value, scopeOf(scope));
+	return true;
 };
 
 /** pnpm build settings, from pnpm-workspace.yaml or package.json `pnpm`. */
@@ -1504,27 +1681,30 @@ const readPnpmBuildSettings = (
 		};
 };
 
-const readPnpmWorkspace = (file: SourceFile, config: FileConfig) => {
+const readPnpmWorkspace = (file: SourceFile, config: FileConfig): boolean => {
 	let doc: unknown;
 	try {
 		doc = parseYaml(stripBom(file.text));
 	} catch {
-		return;
+		return false;
 	}
 	if (isRecord(doc)) readPnpmBuildSettings(doc, file, config);
+	return isRecord(doc) || doc === null || doc === undefined;
 };
 
 /** package.json: `pnpm.*` build settings and Bun's `trustedDependencies`. */
-const readPackageJson = (file: SourceFile, config: FileConfig) => {
+const readPackageJson = (file: SourceFile, config: FileConfig): boolean => {
 	const json = parseJson(file.text);
-	if (!isRecord(json)) return;
+	if (!isRecord(json)) return false;
 	if (isRecord(json.pnpm)) readPnpmBuildSettings(json.pnpm, file, config);
 	if (Array.isArray(json.trustedDependencies))
 		config.trusted = strings(json.trustedDependencies);
+	return true;
 };
 
+/** Reads a config file into `config`; false when the file does not parse. */
 const CONFIG_READERS: Readonly<
-	Record<string, (file: SourceFile, config: FileConfig) => void>
+	Record<string, (file: SourceFile, config: FileConfig) => boolean>
 > = {
 	".npmrc": readNpmrc,
 	".yarnrc": readYarnrc,
@@ -1792,7 +1972,7 @@ const sourceFinding = (
 			if (source.insecure)
 				return insecureFinding(file, p.line, p.name, evidence(shown));
 			if (DEFAULT_REGISTRY_HOSTS.has(source.host)) return undefined;
-			if (p.runtime && RUNTIME_HOSTS.has(source.host)) return undefined;
+			if (p.runtime && isOfficialRuntime(p.name, source.url)) return undefined;
 			// A scoped registry only serves its own scope.
 			const scope = scopeOfPackage(p.name);
 			const registry = configs
@@ -2103,20 +2283,24 @@ const driftFinding = (
 	const drifted: Array<{ name: string; text: string; evidence: string }> = [];
 	for (const [name, specs] of declaredSpecs(json)) {
 		const spec = specs?.[0] ?? "";
+		// Specs can carry credentials (git+https://user:token@…).
+		const shown = displaySpec(spec);
 		if (!importer.has(name))
 			drifted.push({
 				name,
 				text: `${name} is missing`,
-				evidence: `${name}: ${spec} (not locked)`,
+				evidence: `${name}: ${shown} (not locked)`,
 			});
 		else {
 			const locked = importer.get(name);
-			if (locked && !locked.includes(spec))
+			if (locked && !locked.includes(spec)) {
+				const lockedShown = displaySpec(locked[0] ?? "");
 				drifted.push({
 					name,
-					text: `${name} is "${spec}" but locked as "${locked[0]}"`,
-					evidence: `${name}: ${spec} (locked ${locked[0]})`,
+					text: `${name} is "${shown}" but locked as "${lockedShown}"`,
+					evidence: `${name}: ${shown} (locked ${lockedShown})`,
 				});
+			}
 		}
 	}
 	const first = drifted[0];
@@ -2164,6 +2348,33 @@ const uncheckedFinding = (
 	remediation:
 		"Regenerate the lockfile with the package manager and check it with lockfile-lint.",
 	references: [LOCKFILE_LINT],
+	tags: ["lockfile"],
+});
+
+/** A lockfile that was read, but not all of it. */
+const partlyCheckedFinding = (
+	file: string,
+	problem: Problem,
+): FindingInput => ({
+	...uncheckedFinding("unparseable-lockfile", file, ""),
+	title: `${baseName(file)} was only partly checked`,
+	severity: problem.severity,
+	message: `${problem.reason} The rest of ${file} was checked.`,
+	evidence: `${file}: ${problem.what}`,
+});
+
+/** A package-manager config (or manifest) that was not checked. */
+const unparsedConfigFinding = (file: string, reason: string): FindingInput => ({
+	...base,
+	ruleId: rule("unparseable-config"),
+	title: `${baseName(file)} was not checked`,
+	severity: "low",
+	message: `${file} ${reason}, so the registries and install settings in it were not checked. A package manager that reads it differently may still apply them.`,
+	location: { file },
+	evidence: file,
+	remediation:
+		"Fix the file so it parses, or remove it if the package manager does not use it.",
+	references: [NPM_REGISTRY, LOCKFILE_LINT],
 	tags: ["lockfile"],
 });
 
@@ -2222,6 +2433,8 @@ export const lockfileFindings = (
 		if (f) perEntry.push(f);
 	}
 	const findings = capPerRule(perEntry);
+	for (const problem of lock.problems ?? [])
+		findings.push(partlyCheckedFinding(lock.path, problem));
 	for (const c of custom.values()) findings.push(customSourceFinding(lock, c));
 	findings.push(...integrityFindings(lock, lock.packages));
 	findings.push(...installScriptFindings(lock, lock.packages, configs));
@@ -2351,6 +2564,25 @@ const pipLongOption = (name: string): string | undefined => {
 	return matches.length === 1 ? matches[0] : undefined;
 };
 
+/**
+ * The host Python's urllib.parse.urlsplit sees, which pip uses for auth and
+ * trusted hosts: the authority ends at the first `/`, `?` or `#` (not a backslash),
+ * and the host follows its last `@`.
+ */
+const pythonHost = (url: string): string | undefined => {
+	const authority = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(url)?.[1];
+	if (authority === undefined) return undefined;
+	const host = authority.slice(authority.lastIndexOf("@") + 1);
+	const end = host.startsWith("[") ? host.indexOf("]") + 1 : host.indexOf(":");
+	return (end > 0 ? host.slice(0, end) : host).toLowerCase();
+};
+
+/** A PyPI URL by both WHATWG's and Python's reading; one they disagree on is not. */
+const onPypi = (url: string): boolean => {
+	const host = hostOf(url);
+	return host !== undefined && PYPI_HOSTS.has(host) && pythonHost(url) === host;
+};
+
 const isInsecureUrl = (s: string) => {
 	const l = s.toLowerCase();
 	return (
@@ -2377,22 +2609,6 @@ const logicalLines = (text: string): Array<readonly [string, number]> => {
 	});
 	if (buffer) out.push([buffer, start]);
 	return out;
-};
-
-/** A repository path for `rel` relative to `dir`, or undefined if it leaves the repository. */
-const resolveInRepo = (dir: string, rel: string): string | undefined => {
-	const p = rel.replace(/\\/g, "/");
-	if (p.startsWith("/") || p.startsWith("~") || /^[a-z]:/i.test(p))
-		return undefined;
-	const out = dir ? dir.split("/") : [];
-	for (const seg of p.split("/")) {
-		if (!seg || seg === ".") continue;
-		if (seg === "..") {
-			if (!out.length) return undefined;
-			out.pop();
-		} else out.push(seg);
-	}
-	return out.join("/");
 };
 
 const pipSourceFinding = (
@@ -2461,8 +2677,7 @@ const pipDirectReference = (
 		);
 	}
 	if (lower.startsWith("https://")) {
-		const host = hostOf(url);
-		return host && PYPI_HOSTS.has(host)
+		return onPypi(url)
 			? undefined
 			: pipSourceFinding(
 					file.path,
@@ -2473,8 +2688,9 @@ const pipDirectReference = (
 				);
 	}
 	if (lower.startsWith("file:")) {
-		const path = url.replace(/^file:(\/\/)?/i, "");
-		return escapesRoot(dirOf(file.path), path)
+		// `file://host/path` (localhost included) names an absolute path.
+		const path = url.slice("file:".length);
+		return path.startsWith("//") || escapesRoot(dirOf(file.path), path)
 			? pathFinding(file.path, line, what, evidence)
 			: undefined;
 	}
@@ -2555,7 +2771,7 @@ export const requirementsFindings = (
 						);
 					const host = hostOf(value);
 					if (option === "--index-url") {
-						if (host && !PYPI_HOSTS.has(host) && !isInsecureUrl(value))
+						if (host && !onPypi(value) && !isInsecureUrl(value))
 							out.push({
 								...base,
 								ruleId: rule("custom-registry"),
@@ -2616,6 +2832,15 @@ export const requirementsFindings = (
 								`the ${option.slice(2)} file`,
 								value,
 								"a remote file whose contents can change between installs",
+							),
+						);
+					else if (resolveInRepo(dirOf(file.path), value) === undefined)
+						out.push(
+							pathFinding(
+								file.path,
+								line,
+								`The ${option.slice(2)} file ${truncate(value, 60)}`,
+								`${option.slice(2)} file: ${truncate(value, 120)}`,
 							),
 						);
 					else includes.push(value);
@@ -2680,7 +2905,8 @@ const GIT_REPOSITORY_TYPES = new Set([
 /** composer.json `repositories` and `config.secure-http`. */
 export const composerJsonFindings = (file: SourceFile): FindingInput[] => {
 	const json = parseJson(file.text);
-	if (!isRecord(json)) return [];
+	if (!isRecord(json))
+		return [unparsedConfigFinding(file.path, "is not a JSON object")];
 	const lineOf = lineFinder(file.text);
 	const out: FindingInput[] = [];
 	const repos = Array.isArray(json.repositories)
@@ -2751,7 +2977,14 @@ export const composerJsonFindings = (file: SourceFile): FindingInput[] => {
 /** composer.lock `dist`/`source` URLs over plain HTTP. */
 export const composerLockFindings = (file: SourceFile): FindingInput[] => {
 	const json = parseJson(file.text);
-	if (!isRecord(json)) return [];
+	if (!isRecord(json))
+		return [
+			uncheckedFinding(
+				"unparseable-lockfile",
+				file.path,
+				`${file.path} could not be parsed.`,
+			),
+		];
 	const lineOf = lineFinder(file.text);
 	const out: FindingInput[] = [];
 	const list = [
@@ -2795,6 +3028,21 @@ const OTHER_READERS: Readonly<
 	"composer.lock": composerLockFindings,
 };
 
+/** A file that could not be decoded or read, reported by kind. */
+const unreadFinding = (f: {
+	readonly path: string;
+	readonly unreadable: string;
+}): FindingInput => {
+	const name = baseName(f.path);
+	return name in LOCKFILE_PARSERS || name === "composer.lock"
+		? uncheckedFinding(
+				"unparseable-lockfile",
+				f.path,
+				`${f.path} ${f.unreadable}.`,
+			)
+		: unparsedConfigFinding(f.path, f.unreadable);
+};
+
 /** Lockfiles in binary formats that package managers install from but cannot be read here. */
 const BINARY_LOCKFILES = new Set(["bun.lockb"]);
 
@@ -2822,11 +3070,25 @@ export const parseLockfile = (file: SourceFile): Lockfile | undefined => {
 	if (!parse) return undefined;
 	const text = stripBom(file.text);
 	const whole = parse({ path: file.path, text });
-	const sides = conflictSides(text).flatMap((side) => {
+	const sides = conflictSides(text).map((side) => {
 		const lock = parse({ path: file.path, text: side.text });
-		return lock ? [shiftLines(lock, (l) => side.lines[l - 1] ?? l)] : [];
+		return lock && shiftLines(lock, (l) => side.lines[l - 1] ?? l);
 	});
-	return mergeLockfiles([...(whole ? [whole] : []), ...sides]);
+	const parsed = [whole, ...sides].filter((l) => l !== undefined);
+	const merged = mergeLockfiles(parsed);
+	if (!merged || !sides.includes(undefined)) return merged;
+	return {
+		...merged,
+		problems: [
+			...(merged.problems ?? []),
+			{
+				severity: "medium",
+				what: "merge conflict side",
+				reason:
+					"One side of a merge conflict in it could not be parsed, and package managers may install from either side.",
+			},
+		],
+	};
 };
 
 /** Reads a file up to `MAX_LOCKFILE_BYTES` (Workspace.readText stops at 2 MB). */
@@ -2834,16 +3096,25 @@ const readLarge = (
 	ws: Workspace,
 	path: string,
 ): Effect.Effect<
-	SourceFile | { readonly path: string; readonly size: number } | undefined
+	| SourceFile
+	| { readonly path: string; readonly size: number }
+	| { readonly path: string; readonly unreadable: string }
+	| undefined
 > =>
 	Effect.gen(function* () {
 		const size = yield* ws.size(path);
 		if (size === 0) return undefined;
 		if (size > MAX_LOCKFILE_BYTES) return { path, size };
 		const bytes = yield* ws.readBytes(path);
-		const text = new TextDecoder().decode(bytes);
-		return text.includes("\u0000") ? undefined : { path, text };
-	}).pipe(Effect.orElseSucceed(() => undefined));
+		// Read as UTF-8 like the package managers do, NUL bytes included:
+		// Yarn and npm's ini parser accept them in comments.
+		return (bytes[0] === 0xff && bytes[1] === 0xfe) ||
+			(bytes[0] === 0xfe && bytes[1] === 0xff)
+			? { path, unreadable: "is UTF-16 encoded" }
+			: { path, text: new TextDecoder().decode(bytes) };
+	}).pipe(
+		Effect.orElseSucceed(() => ({ path, unreadable: "could not be read" })),
+	);
 
 export const lockfiles = defineAuditor({
 	id: LOCKFILES_ID,
@@ -2876,6 +3147,7 @@ export const lockfiles = defineAuditor({
 			for (const f of read) {
 				if (!f) continue;
 				if ("text" in f) files.push(f);
+				else if ("unreadable" in f) findings.push(unreadFinding(f));
 				else
 					findings.push(
 						uncheckedFinding(
@@ -2904,7 +3176,8 @@ export const lockfiles = defineAuditor({
 				const reader = CONFIG_READERS[name];
 				if (reader) {
 					const config: FileConfig = { file: f.path, registries: [] };
-					reader(f, config);
+					if (!reader(f, config))
+						findings.push(unparsedConfigFinding(f.path, "could not be parsed"));
 					configs.set(f.path, config);
 					findings.push(...configFindings(config));
 				}
@@ -2916,16 +3189,41 @@ export const lockfiles = defineAuditor({
 			// pip follows -r/-c includes, whatever their names, so do we.
 			const queue = files.filter((f) => isRequirements(f.path));
 			const seen = new Set(queue.map((f) => f.path));
+			let capped = false;
 			for (let f = queue.shift(); f; f = queue.shift()) {
 				const result = requirementsFindings(f);
 				findings.push(...result.findings);
 				for (const include of result.includes) {
 					const path = resolveInRepo(dirOf(f.path), include);
-					if (!path || seen.has(path) || seen.size >= MAX_REQUIREMENTS_FILES)
+					if (path === undefined || seen.has(path)) continue;
+					if (seen.size >= MAX_REQUIREMENTS_FILES) {
+						if (!capped)
+							findings.push(
+								uncheckedFinding(
+									"truncated",
+									path,
+									`${f.path} includes ${path}, beyond the ${MAX_REQUIREMENTS_FILES} requirements files openaudit reads.`,
+								),
+							);
+						capped = true;
 						continue;
+					}
 					seen.add(path);
+					// pip fails on a missing include, so there is nothing to check.
+					if (!(yield* ws.exists(path))) continue;
 					const included = yield* readLarge(ws, path);
-					if (included && "text" in included) queue.push(included);
+					if (!included) continue;
+					if ("text" in included) queue.push(included);
+					else if ("unreadable" in included)
+						findings.push(unreadFinding(included));
+					else
+						findings.push(
+							uncheckedFinding(
+								"truncated",
+								path,
+								`${path} is above the ${MAX_LOCKFILE_BYTES / 1024 / 1024} MB limit.`,
+							),
+						);
 				}
 			}
 
