@@ -8,6 +8,7 @@
 		"build": "bun scripts/prepare.ts && astro build && bun scripts/postbuild.ts",
 		"preview": "wrangler dev",
 		"check-types": "bun scripts/prepare.ts --data-only && astro check",
+		"test": "bun test worker",
 		"deploy": "wrangler deploy"
 	},
 	"dependencies": {
