@@ -60,8 +60,8 @@ const PAGES: Record<string, string> = {
 };
 
 const EXTERNAL: Record<string, string> = {
-	"https://wezter96.github.io/openaudit/report/": "/report/",
-	"https://wezter96.github.io/openaudit/architecture.html": "/architecture/",
+	"https://openaudit.se/report/": "/report/",
+	"https://openaudit.se/architecture/": "/architecture/",
 };
 
 /** Resolve a link found in `from` (a repo path) to a site or GitHub URL. */

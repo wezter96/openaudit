@@ -20,11 +20,11 @@ import { capPoint, clamp, segments, ticks } from "../src/lib/dial";
 const site = join(import.meta.dir, "..");
 const dist = join(site, "dist");
 // Same defaults as astro.config.ts.
-const SITE = (process.env.SITE_URL ?? "https://wezter96.github.io").replace(
+const SITE = (process.env.SITE_URL ?? "https://openaudit.se").replace(
 	/\/$/,
 	"",
 );
-const BASE = (process.env.BASE_PATH ?? "/openaudit").replace(/\/$/, "");
+const BASE = (process.env.BASE_PATH ?? "/").replace(/\/$/, "");
 /** dist-relative path of a URL pathname under the base path. */
 const unbase = (pathname: string) =>
 	BASE && pathname.startsWith(`${BASE}/`)

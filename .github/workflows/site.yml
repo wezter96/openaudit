@@ -1,11 +1,13 @@
 name: Site
 
-# Builds the website (apps/site) for openaudit.se and deploys it to Cloudflare
-# Workers static assets. For now the site is published to GitHub Pages by
-# pages.yml, so this runs only by hand; see apps/site/README.md before
-# switching it to run on push.
+# Builds the website (apps/site) and deploys it to openaudit.se as a Cloudflare
+# Worker with static assets. The build audits this repository for /report/
+# (the interactive HTML report plus the JSON, SARIF and Markdown versions) and
+# regenerates /architecture/, so both are current on every push.
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -19,6 +21,10 @@ jobs:
   site:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # Build-time settings the web app and API validate (see .env.schema).
+      VITE_SERVER_URL: http://localhost:3000
+      CORS_ORIGIN: http://localhost:3001
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -27,6 +33,11 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
+      - name: Generate types
+        # Creates the generated files (env typings, Astro and router types,
+        # project-reference declarations) so the self-audit's type check sees
+        # the same project a developer does. This also type-checks the site.
+        run: bun run check-types
 
       - name: Audit this repository for /report/
         # Published whatever the result; CI is where the gate lives.
@@ -34,9 +45,6 @@ jobs:
       - name: Regenerate the architecture page
         run: bun docs/architecture.ts
 
-      - name: Type-check the site
-        working-directory: apps/site
-        run: bun run check-types
       - name: Build the site
         working-directory: apps/site
         env:
@@ -51,7 +59,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "::notice title=Site not deployed::Add the CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID repository secrets to deploy openaudit.se (see apps/site/README.md)."
-            exit 0
+            echo "::error title=Site not deployed::Add the CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID repository secrets (see apps/site/README.md)."
+            exit 1
           fi
           bunx wrangler deploy

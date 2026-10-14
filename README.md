@@ -5,17 +5,17 @@
 **One scored audit of everything you ship.** Code, websites, running apps, APIs, containers, infrastructure, cloud accounts and mobile builds, from your terminal, your CI or your AI agent.
 
 [![CI](https://github.com/wezter96/openaudit/actions/workflows/ci.yml/badge.svg)](https://github.com/wezter96/openaudit/actions/workflows/ci.yml)
-[![Live report](https://img.shields.io/badge/live%20report-openaudit%20on%20itself-2340d0)](https://wezter96.github.io/openaudit/report/)
+[![Live report](https://img.shields.io/badge/live%20report-openaudit%20on%20itself-2340d0)](https://openaudit.se/report/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-<a href="https://wezter96.github.io/openaudit/report/">
+<a href="https://openaudit.se/report/">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/report-dark.webp">
   <img alt="The openaudit HTML report for this repository: an overall grade dial with one arc per category, severity counts and a navigation rail listing every audit area" src="docs/assets/report-light.webp" width="900">
 </picture>
 </a>
 
-**[Open the interactive report](https://wezter96.github.io/openaudit/report/)**: openaudit's audit of this repository, rebuilt on every push.
+**[Open the interactive report](https://openaudit.se/report/)**: openaudit's audit of this repository, rebuilt on every push.
 
 </div>
 
@@ -101,7 +101,7 @@ The built-in hidden-Unicode check (`code.unicode`) flags Trojan Source bidirecti
 
 The opt-in `code.dependency-health` auditor looks your pinned dependencies up on [deps.dev](https://deps.dev) and flags deprecated packages, yanked releases, dependencies whose source repository is archived, and direct dependencies with no release in years.
 
-`bunx @openaudit/cli list` shows every auditor and playbook. The [architecture page](https://wezter96.github.io/openaudit/architecture.html) maps every auditor to the targets and areas it covers.
+`bunx @openaudit/cli list` shows every auditor and playbook. The [architecture page](https://openaudit.se/architecture/) maps every auditor to the targets and areas it covers.
 
 ## The report
 
@@ -144,7 +144,7 @@ steps:
 
 Inputs: `target`, `fail-on`, `diff` (defaults to the PR base; `none` audits everything), `only`, `exclude`, `config`, `upload-sarif`, `upload-report`. Outputs: `score`, `grade`, `report-dir`.
 
-Elsewhere, run the CLI: `bunx @openaudit/cli . --diff origin/main -f html,sarif -o openaudit-report --fail-on high`. `--fail-on <severity>` sets the exit code, and `--baseline previous.json` reports only findings that are new since an earlier run. This repository audits itself in [`ci.yml`](.github/workflows/ci.yml) and publishes the result with [`pages.yml`](.github/workflows/pages.yml).
+Elsewhere, run the CLI: `bunx @openaudit/cli . --diff origin/main -f html,sarif -o openaudit-report --fail-on high`. `--fail-on <severity>` sets the exit code, and `--baseline previous.json` reports only findings that are new since an earlier run. This repository audits itself in [`ci.yml`](.github/workflows/ci.yml) and publishes the result to [openaudit.se/report](https://openaudit.se/report/) with [`site.yml`](.github/workflows/site.yml).
 
 ## Configuration
 

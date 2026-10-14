@@ -2,12 +2,12 @@ import sitemap from "@astrojs/sitemap";
 import { defineConfig } from "astro/config";
 
 /*
- * Where the site is served. GitHub Pages by default; for openaudit.se set
- * SITE_URL=https://openaudit.se and BASE_PATH=/ (and CUSTOM_DOMAIN for the
- * CNAME file, see scripts/postbuild.ts).
+ * Where the site is served: https://openaudit.se at the root by default.
+ * Override SITE_URL and BASE_PATH to host it elsewhere (CUSTOM_DOMAIN writes
+ * a CNAME file for GitHub Pages, see scripts/postbuild.ts).
  */
-const site = process.env.SITE_URL ?? "https://wezter96.github.io";
-const base = (process.env.BASE_PATH ?? "/openaudit").replace(/\/$/, "");
+const site = process.env.SITE_URL ?? "https://openaudit.se";
+const base = (process.env.BASE_PATH ?? "/").replace(/\/$/, "");
 
 export default defineConfig({
 	site,
