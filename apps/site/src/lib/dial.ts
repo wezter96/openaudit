@@ -49,6 +49,9 @@ export const capPoint = (c: number, r: number, score: number) => {
 	return { x: f(c + r * Math.sin(a)), y: f(c - r * Math.cos(a)) };
 };
 
+/** Average glyph advance of a segment label at its font size (10 units), measured in Inter. */
+export const LABEL_EM = 5.1;
+
 export interface Segment {
 	readonly label: string;
 	readonly score: number | null;
@@ -72,13 +75,18 @@ export const segments = (
 		const a1 = (i + 1) * span - gap / 2;
 		const mid = (a0 + a1) / 2;
 		const bottom = mid > 90 && mid < 270;
-		const r = bottom ? 126 : 120;
-		const room = (2 * Math.PI * r * (a1 - a0)) / 360;
+		// the label baseline: outside the segment on top, and further out at
+		// the bottom, where the upright text hangs inwards from it
+		const r = bottom ? 128 : 119;
+		// labels may use the gap too, so long names fit at a readable size
+		const l0 = i * span + 0.5;
+		const l1 = (i + 1) * span - 0.5;
+		const room = (2 * Math.PI * r * (l1 - l0)) / 360;
 		return {
 			...s,
 			d: arc(c, 110, a0, a1),
-			labelPath: bottom ? arcReverse(c, r, a0, a1) : arc(c, r, a0, a1),
-			showLabel: list.length <= 12 && s.label.length * 4.1 <= room,
+			labelPath: bottom ? arcReverse(c, r, l0, l1) : arc(c, r, l0, l1),
+			showLabel: list.length <= 12 && s.label.length * LABEL_EM <= room,
 		};
 	});
 };

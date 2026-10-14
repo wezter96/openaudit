@@ -999,6 +999,18 @@ html:not(.js) .needs-js {
 	line-height: 0.98;
 }
 
+/* headings end on a full stop in the brand blue */
+.stop,
+.sheet-head h2::after,
+.closing h2::after {
+	color: var(--accent);
+}
+
+.sheet-head h2::after,
+.closing h2::after {
+	content: ".";
+}
+
 .sheet-head p {
 	max-width: 36rem;
 	color: var(--graphite);
@@ -1119,6 +1131,79 @@ html:not(.js) .needs-js {
 	top: 0;
 	width: 1px;
 	height: 1px;
+}
+
+/* ---------------------------------------------------------------- folds */
+
+/* A sheet's detail, folded under one row so the page stays short */
+.fold {
+	border-block: 1px solid var(--ink);
+}
+
+.fold > summary {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	min-height: 3.5rem;
+	padding: 0.9rem 0;
+	font-size: 1.125rem;
+	font-weight: 650;
+	letter-spacing: -0.015em;
+	cursor: pointer;
+	list-style: none;
+	transition: color 0.2s;
+}
+
+.fold > summary::-webkit-details-marker {
+	display: none;
+}
+
+.fold > summary:hover {
+	color: var(--accent);
+}
+
+.fold > summary:focus-visible {
+	outline-offset: 2px;
+}
+
+.fold .plus {
+	flex: none;
+	width: 1.15rem;
+	height: 1.15rem;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.8;
+	stroke-linecap: round;
+	transition: transform 0.5s var(--settle);
+}
+
+.fold[open] .plus {
+	transform: rotate(45deg);
+}
+
+.fold[open] {
+	padding-bottom: 1.5rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	@supports (interpolate-size: allow-keywords) {
+		.fold {
+			interpolate-size: allow-keywords;
+		}
+
+		.fold::details-content {
+			height: 0;
+			overflow: clip;
+			transition:
+				height 0.5s var(--soft),
+				content-visibility 0.5s allow-discrete;
+		}
+
+		.fold[open]::details-content {
+			height: auto;
+		}
+	}
 }
 
 /* --------------------------------------------------------------- tables */

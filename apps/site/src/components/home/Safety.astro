@@ -20,19 +20,25 @@ const items: { glyph: Glyph; lead: string; body: string }[] = [
 			<p class="rise">Every target is treated as hostile. Nothing it scans gets built or run.</p>
 			<p class="rise more"><a href={u("/docs/safety/")}>Safety model</a></p>
 		</div>
-		<ul class="guards">
-			{
-				items.map((i) => (
-					<li class="rise">
-						<Icon name={i.glyph} class="g" />
-						<div>
-							<h3>{i.lead}</h3>
-							<p>{i.body}</p>
-						</div>
-					</li>
-				))
-			}
-		</ul>
+		<details class="fold rise">
+			<summary>
+				<span>Five guards against hostile targets</span>
+				<svg class="plus" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h14M12 5v14" /></svg>
+			</summary>
+			<ul class="guards">
+				{
+					items.map((i) => (
+						<li>
+							<Icon name={i.glyph} class="g" />
+							<div>
+								<h3>{i.lead}</h3>
+								<p>{i.body}</p>
+							</div>
+						</li>
+					))
+				}
+			</ul>
+		</details>
 	</div>
 </section>
 
@@ -45,10 +51,6 @@ const items: { glyph: Glyph; lead: string; body: string }[] = [
 	.more {
 		font-weight: 600;
 		font-size: 0.9375rem;
-	}
-
-	.guards {
-		border-top: 1px solid var(--ink);
 	}
 
 	.guards li {

@@ -16,94 +16,100 @@ const radius = (n: number) => (n ? (2.6 + 6.4 * Math.sqrt(n / matrixMax)).toFixe
 			<h2 id="coverage-title" class="rise">Point it at anything you ship</h2>
 			<p class="rise">It detects what you point it at and runs what applies.</p>
 		</div>
-		<div class="cov" data-tabs>
-			<div class="tablist cov-tabs needs-js" role="tablist" aria-label="Coverage">
-				<button class="tab" type="button" role="tab" id="tab-cov-targets" aria-controls="cov-targets" aria-selected="true" tabindex="0">By target</button>
-				<button class="tab" type="button" role="tab" id="tab-cov-langs" aria-controls="cov-langs" aria-selected="false" tabindex="-1">By language</button>
-				<span class="tab-ink" aria-hidden="true"></span>
-			</div>
-			<div class="panels">
-				<section class="panel" id="cov-targets" role="tabpanel" aria-labelledby="tab-cov-targets">
-					<h3 class="panel-title">By target</h3>
-					<div class="matrix-wrap">
-						<table class="matrix">
-							<caption class="sr-only">Number of auditors for each target and area</caption>
-							<thead>
-								<tr>
-									<th scope="col" class="corner">Target</th>
+		<details class="fold rise">
+			<summary>
+				<span>Coverage by target and language</span>
+				<svg class="plus" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h14M12 5v14" /></svg>
+			</summary>
+			<div class="cov" data-tabs>
+				<div class="tablist cov-tabs needs-js" role="tablist" aria-label="Coverage">
+					<button class="tab" type="button" role="tab" id="tab-cov-targets" aria-controls="cov-targets" aria-selected="true" tabindex="0">By target</button>
+					<button class="tab" type="button" role="tab" id="tab-cov-langs" aria-controls="cov-langs" aria-selected="false" tabindex="-1">By language</button>
+					<span class="tab-ink" aria-hidden="true"></span>
+				</div>
+				<div class="panels">
+					<section class="panel" id="cov-targets" role="tabpanel" aria-labelledby="tab-cov-targets">
+						<h3 class="panel-title">By target</h3>
+						<div class="matrix-wrap">
+							<table class="matrix">
+								<caption class="sr-only">Number of auditors for each target and area</caption>
+								<thead>
+									<tr>
+										<th scope="col" class="corner">Target</th>
+										{
+											CATEGORIES.map((c) => (
+												<th scope="col" class="area-col" title={CATEGORY_LABEL[c]}>
+													<span class="long">{CATEGORY_LABEL[c]}</span>
+													<abbr class="short" title={CATEGORY_LABEL[c]}>
+														{AREA_SHORT[c]}
+													</abbr>
+												</th>
+											))
+										}
+									</tr>
+								</thead>
+								<tbody>
 									{
-										CATEGORIES.map((c) => (
-											<th scope="col" class="area-col" title={CATEGORY_LABEL[c]}>
-												<span class="long">{CATEGORY_LABEL[c]}</span>
-												<abbr class="short" title={CATEGORY_LABEL[c]}>
-													{AREA_SHORT[c]}
-												</abbr>
-											</th>
+										matrix.map((r) => (
+											<tr>
+												<th scope="row">
+													<span class="tname">{r.label}</span>
+													<code class="tcmd">{TARGET_COMMAND[r.id]}</code>
+												</th>
+												{r.cells.map((n, i) => (
+													<td>
+														<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+															{n ? (
+																<circle class="dot" cx="10" cy="10" r={radius(n)}>
+																	<title>{`${r.label}, ${CATEGORY_LABEL[CATEGORIES[i] ?? ""]}: ${n} auditors`}</title>
+																</circle>
+															) : (
+																<line class="none" x1="7" y1="10" x2="13" y2="10" />
+															)}
+														</svg>
+														<span class="sr-only">{n ? `${n} auditors` : "none"}</span>
+													</td>
+												))}
+											</tr>
 										))
 									}
-								</tr>
-							</thead>
-							<tbody>
-								{
-									matrix.map((r) => (
-										<tr>
-											<th scope="row">
-												<span class="tname">{r.label}</span>
-												<code class="tcmd">{TARGET_COMMAND[r.id]}</code>
-											</th>
-											{r.cells.map((n, i) => (
-												<td>
-													<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-														{n ? (
-															<circle class="dot" cx="10" cy="10" r={radius(n)}>
-																<title>{`${r.label}, ${CATEGORY_LABEL[CATEGORIES[i] ?? ""]}: ${n} auditors`}</title>
-															</circle>
-														) : (
-															<line class="none" x1="7" y1="10" x2="13" y2="10" />
-														)}
-													</svg>
-													<span class="sr-only">{n ? `${n} auditors` : "none"}</span>
-												</td>
-											))}
-										</tr>
-									))
-								}
-							</tbody>
-						</table>
-					</div>
-					<p class="footnote">Bigger dot, more auditors.</p>
-				</section>
-				<section class="panel" id="cov-langs" role="tabpanel" aria-labelledby="tab-cov-langs">
-					<h3 class="panel-title">By language</h3>
-					<div class="table langs">
-						<table>
-							<thead>
-								<tr>{languages.header.map((h) => <th scope="col">{h}</th>)}</tr>
-							</thead>
-							<tbody>
-								{
-									languages.rows.map(([lang = "", ...cells]) => (
-										<tr>
-											<th scope="row">{lang}</th>
-											{cells.map((c, i) =>
-												c.trim() ? (
-													<td data-label={languages.header[i + 1]} set:html={inline(c)} />
-												) : (
-													<td class="empty" data-label={languages.header[i + 1]}>
-														<span class="sr-only">None</span>
-													</td>
-												),
-											)}
-										</tr>
-									))
-								}
-							</tbody>
-						</table>
-					</div>
-					<p class="footnote" set:html={note} />
-				</section>
+								</tbody>
+							</table>
+						</div>
+						<p class="footnote">Bigger dot, more auditors.</p>
+					</section>
+					<section class="panel" id="cov-langs" role="tabpanel" aria-labelledby="tab-cov-langs">
+						<h3 class="panel-title">By language</h3>
+						<div class="table langs">
+							<table>
+								<thead>
+									<tr>{languages.header.map((h) => <th scope="col">{h}</th>)}</tr>
+								</thead>
+								<tbody>
+									{
+										languages.rows.map(([lang = "", ...cells]) => (
+											<tr>
+												<th scope="row">{lang}</th>
+												{cells.map((c, i) =>
+													c.trim() ? (
+														<td data-label={languages.header[i + 1]} set:html={inline(c)} />
+													) : (
+														<td class="empty" data-label={languages.header[i + 1]}>
+															<span class="sr-only">None</span>
+														</td>
+													),
+												)}
+											</tr>
+										))
+									}
+								</tbody>
+							</table>
+						</div>
+						<p class="footnote" set:html={note} />
+					</section>
+				</div>
 			</div>
-		</div>
+		</details>
 	</div>
 </section>
 

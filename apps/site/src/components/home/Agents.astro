@@ -44,24 +44,30 @@ const points = [
 				<a href={u("/docs/agents/")}>Agent setup</a>
 			</div>
 		</div>
-		<figure class="session" data-arrive>
+		<figure class="session" data-session>
 			<figcaption>Example session in Claude Code</figcaption>
-			<ol class="log">
-				<li class="you">Audit this repo and fix what matters.</li>
-				<li class="call"><b>openaudit</b> run_audit <span>target: "."</span></li>
-				<li class="out">78/100, grade C. 1 critical and 3 high findings from 41 auditors.</li>
-				<li class="call"><b>openaudit</b> get_playbook <span>id: "agent.authz"</span></li>
-				<li class="out">Authentication and authorization review: inventory every route, then check who can reach it.</li>
-				<li class="tool">Read src/routes/admin.ts</li>
-				<li class="call"><b>openaudit</b> submit_findings <span>2 findings</span></li>
-				<li class="out">Merged into the report. Security 61 to 54.</li>
-				<li class="tool">Edit src/routes/admin.ts, src/config.ts</li>
-				<li class="call"><b>openaudit</b> compare_reports</li>
-				<li class="out good">3 fixed, 0 new.</li>
-			</ol>
+			<div class="screen">
+				<ol class="log">
+					<li class="you">Audit this repo and fix what matters.</li>
+					<li class="call"><b>openaudit</b> run_audit <span>target: "."</span></li>
+					<li class="out">78/100, grade C. 1 critical and 3 high findings from 41 auditors.</li>
+					<li class="call"><b>openaudit</b> get_playbook <span>id: "agent.authz"</span></li>
+					<li class="out">Authentication and authorization review: inventory every route, then check who can reach it.</li>
+					<li class="tool">Read src/routes/admin.ts</li>
+					<li class="call"><b>openaudit</b> submit_findings <span>2 findings</span></li>
+					<li class="out">Merged into the report. Security 61 to 54.</li>
+					<li class="tool">Edit src/routes/admin.ts, src/config.ts</li>
+					<li class="call"><b>openaudit</b> compare_reports</li>
+					<li class="out good">3 fixed, 0 new.</li>
+				</ol>
+			</div>
 		</figure>
 	</div>
 </section>
+
+<script>
+	import "../../scripts/session";
+</script>
 
 <style>
 	.agents {
@@ -218,57 +224,31 @@ const points = [
 		color: #4fd49b;
 	}
 
-	@media (prefers-reduced-motion: no-preference) {
-		:global(.js) .log li {
-			transition:
-				opacity 0.4s var(--soft),
-				transform 0.6s var(--soft);
-		}
+	/* with motion, the session plays in a window of a few lines, like a
+	   terminal, instead of standing at full height */
+	.session:global(.play) .screen {
+		position: relative;
+		height: 8.75rem;
+		overflow: hidden;
+		mask-image: linear-gradient(to bottom, transparent, #000 2rem);
+	}
 
-		.log li:nth-child(2) {
-			transition-delay: 0.45s;
-		}
+	.session:global(.play) .log {
+		position: relative;
+		transition: transform 0.7s var(--settle);
+	}
 
-		.log li:nth-child(3) {
-			transition-delay: 0.85s;
-		}
+	.session:global(.play) .log li {
+		opacity: 0;
+		transform: translateY(6px);
+		transition:
+			opacity 0.4s var(--soft),
+			transform 0.6s var(--soft);
+	}
 
-		.log li:nth-child(4) {
-			transition-delay: 1.25s;
-		}
-
-		.log li:nth-child(5) {
-			transition-delay: 1.65s;
-		}
-
-		.log li:nth-child(6) {
-			transition-delay: 2s;
-		}
-
-		.log li:nth-child(7) {
-			transition-delay: 2.4s;
-		}
-
-		.log li:nth-child(8) {
-			transition-delay: 2.8s;
-		}
-
-		.log li:nth-child(9) {
-			transition-delay: 3.15s;
-		}
-
-		.log li:nth-child(10) {
-			transition-delay: 3.55s;
-		}
-
-		.log li:nth-child(11) {
-			transition-delay: 3.95s;
-		}
-
-		:global(.js) .session:not(.in) .log li {
-			opacity: 0;
-			transform: translateY(6px);
-		}
+	.session:global(.play) .log li:global(.on) {
+		opacity: 1;
+		transform: none;
 	}
 
 	@media (max-width: 60rem) {

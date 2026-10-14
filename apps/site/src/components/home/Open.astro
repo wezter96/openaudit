@@ -8,20 +8,26 @@ import { BLOB, OPENSVERIGE, REPO, u } from "../../lib/site";
 			<h2 id="open-title" class="rise">Free and open source</h2>
 			<p class="rise">No account, no key, no hosted service.</p>
 		</div>
-		<ul class="terms">
-			<li class="rise">
-				<h3>MIT licensed</h3>
-				<p>Use it, change it, ship it. <a href={`${BLOB}/LICENSE`}>The licence</a></p>
-			</li>
-			<li class="rise">
-				<h3>Free tools only</h3>
-				<p>Every wrapped scanner is free and open source.</p>
-			</li>
-			<li class="rise">
-				<h3>Tokens are the only cost</h3>
-				<p>Only if you turn on the AI features.</p>
-			</li>
-		</ul>
+		<details class="fold rise">
+			<summary>
+				<span>Licence, tools and costs</span>
+				<svg class="plus" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h14M12 5v14" /></svg>
+			</summary>
+			<ul class="terms">
+				<li>
+					<h3>MIT licensed</h3>
+					<p>Use it, change it, ship it. <a href={`${BLOB}/LICENSE`}>The licence</a></p>
+				</li>
+				<li>
+					<h3>Free tools only</h3>
+					<p>Every wrapped scanner is free and open source.</p>
+				</li>
+				<li>
+					<h3>Tokens are the only cost</h3>
+					<p>Only if you turn on the AI features.</p>
+				</li>
+			</ul>
+		</details>
 		<div class="community rise">
 			<p class="community-line">Shared with <a href={OPENSVERIGE}>OpenSverige</a>, Sweden's community for agent builders.</p>
 			<div class="community-links">
