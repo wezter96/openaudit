@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Report } from "@openaudit/core";
+import { Report, VERSION } from "@openaudit/core";
 import { Schema } from "effect";
 
 const BIN = join(import.meta.dir, "..", "src", "bin.ts");
@@ -404,7 +404,7 @@ describe("other commands", () => {
 	test("--version", async () => {
 		const { stdout, code } = await cli(["--version"], dir);
 		expect(code).toBe(0);
-		expect(stdout).toContain("0.1.0");
+		expect(stdout).toContain(VERSION);
 	});
 });
 
