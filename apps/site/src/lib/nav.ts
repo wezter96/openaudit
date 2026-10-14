@@ -5,6 +5,7 @@
 export const REPO = "https://github.com/wezter96/openaudit";
 
 export const NAV = [
+	{ href: "/", label: "Home" },
 	{ href: "/docs/", label: "Docs" },
 	{ href: "/auditors/", label: "Auditors" },
 	{ href: "/report/", label: "Live report" },

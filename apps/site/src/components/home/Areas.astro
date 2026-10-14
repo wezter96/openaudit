@@ -5,6 +5,8 @@ import "../../styles/tabs.css";
 
 const label = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const SHOWN = 7;
+/** Wrapped tools shown before the "All N wrapped tools" disclosure. */
+const TOOLS_SHOWN = 10;
 ---
 
 <section class="sheet" id="areas" aria-labelledby="areas-title">
@@ -91,10 +93,23 @@ const SHOWN = 7;
 									<div class="fact">
 										<h4>Wrapped tools, used when installed</h4>
 										<ul class="chips tools">
-											{a.tools.map((t) => (
+											{a.tools.slice(0, TOOLS_SHOWN).map((t) => (
 												<li>{t}</li>
 											))}
 										</ul>
+										{a.tools.length > TOOLS_SHOWN && (
+											<details class="more-tools">
+												<summary>
+													<span class="when-closed">All {a.tools.length} wrapped tools</span>
+													<span class="when-open">Show the top {TOOLS_SHOWN} only</span>
+												</summary>
+												<ul class="chips tools">
+													{a.tools.slice(TOOLS_SHOWN).map((t) => (
+														<li>{t}</li>
+													))}
+												</ul>
+											</details>
+										)}
 									</div>
 								)}
 								{a.playbooks.length > 0 && (
@@ -301,6 +316,43 @@ const SHOWN = 7;
 	.chips.tools li {
 		font-family: var(--mono);
 		font-size: 0.75rem;
+	}
+
+	.more-tools {
+		margin-top: 0.75rem;
+	}
+
+	.more-tools .chips {
+		margin-top: 0.6rem;
+	}
+
+	.more-tools summary {
+		display: inline-block;
+		list-style: none;
+		cursor: pointer;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: var(--ink);
+		padding: 0.3rem 0.7rem;
+		border: 1px solid var(--hair);
+		border-radius: 999px;
+		transition:
+			border-color 0.2s,
+			background-color 0.2s;
+	}
+
+	.more-tools summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.more-tools summary:hover {
+		border-color: var(--ink);
+		background: var(--paper-2);
+	}
+
+	.more-tools[open] .when-closed,
+	.more-tools:not([open]) .when-open {
+		display: none;
 	}
 
 	.area-side {

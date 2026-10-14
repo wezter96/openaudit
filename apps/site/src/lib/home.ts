@@ -4,6 +4,7 @@
  */
 import { inline, readRepo, tableIn } from "./markdown";
 import {
+	type Auditor,
 	auditors,
 	CATEGORIES,
 	CATEGORY_LABEL,
@@ -107,6 +108,41 @@ const areaText = Object.fromEntries(
 	]),
 );
 
+/**
+ * Wrapped tools people know and look for, most recognised first. An area
+ * lists these ahead of the rest; the others follow, the ones that run by
+ * default before the opt-in ones, alphabetically.
+ */
+const KEY_TOOLS = [
+	"semgrep",
+	"trivy",
+	"gitleaks",
+	"osv-scanner",
+	"trufflehog",
+	"lighthouse",
+	"checkov",
+	"zizmor",
+	"grype",
+	"bandit",
+	"gosec",
+	"govulncheck",
+	"hadolint",
+	"ruff",
+	"oxlint",
+	"eslint",
+	"tsc",
+	"kubescape",
+	"pa11y",
+	"actionlint",
+	"shellcheck",
+];
+const toolRank = (tool: string, own: readonly Auditor[]) => {
+	const key = KEY_TOOLS.indexOf(tool);
+	if (key >= 0) return key;
+	const byDefault = own.some((a) => a.tool === tool && !a.optIn);
+	return KEY_TOOLS.length + (byDefault ? 0 : 1);
+};
+
 export const areas = CATEGORIES.map((id) => {
 	const label = CATEGORY_LABEL[id] ?? id;
 	const own = auditors.filter((a) => a.categories.includes(id));
@@ -124,11 +160,15 @@ export const areas = CATEGORIES.map((id) => {
 		builtin: own
 			.filter((a) => a.engine === "builtin")
 			.map((a) => ({ id: a.id, title: a.title })),
-		tools: [
-			...new Set(
-				own.filter((a) => a.engine === "external" && a.tool).map((a) => a.tool),
-			),
-		].sort() as string[],
+		tools: (
+			[
+				...new Set(
+					own
+						.filter((a) => a.engine === "external" && a.tool)
+						.map((a) => a.tool),
+				),
+			] as string[]
+		).sort((a, b) => toolRank(a, own) - toolRank(b, own) || a.localeCompare(b)),
 		playbooks: playbooks
 			.filter((p) => p.categories.includes(id))
 			.map((p) => p.id),

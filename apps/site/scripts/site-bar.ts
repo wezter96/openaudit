@@ -2,8 +2,8 @@
  * The site's navigation bar for the pages copied in from the CLI (/report/
  * and /architecture/), which have no way back to the rest of the site of
  * their own. Plain HTML and CSS: the report's CSP allows no extra script, so
- * on phones the bar drops to the logo and the section links (which scroll
- * sideways on the narrowest screens) instead of folding into a menu.
+ * on phones the links fold into a <details> menu, next to a breadcrumb that
+ * names the page and leads home.
  */
 import { NAV, REPO } from "../src/lib/nav";
 
@@ -23,13 +23,23 @@ const STYLE = `
 .oa-bar-brand svg{width:1.2rem;height:1.2rem}
 .oa-bar-brand .a{fill:var(--oa-ink)}
 .oa-bar-brand .b{fill:none;stroke:var(--oa-paper);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
-.oa-bar-nav{display:flex;gap:.1rem;min-width:0;margin-left:auto;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
-.oa-bar-nav::-webkit-scrollbar{display:none}
-.oa-bar-nav a{flex:none;padding:.45rem .6rem;white-space:nowrap}
+.oa-bar-nav{display:flex;gap:.1rem;margin-left:auto}
+.oa-bar-nav a{padding:.45rem .6rem;white-space:nowrap}
 .oa-bar-nav a[aria-current=page]{box-shadow:inset 0 -2px 0 var(--oa-ink);border-radius:0}
-@media (max-width:40rem){.oa-bar-in{gap:.35rem}.oa-bar-nav .oa-bar-gh{display:none}.oa-bar-brand span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}.oa-bar-nav a{padding:.45rem .5rem}}
-@media (max-width:23.5rem){.oa-bar-nav a{padding:.45rem .4rem;font-size:.8125rem}}
-@media (max-width:21rem){.oa-bar-nav{-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 1.25rem),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 1.25rem),transparent)}}
+.oa-bar-crumbs,.oa-bar-menu{display:none}
+.oa-bar-crumbs ol{display:flex;align-items:center;gap:.45rem;margin:0;padding:0;list-style:none;white-space:nowrap}
+.oa-bar-crumbs li+li::before{content:"/";margin-right:.45rem;color:var(--oa-hair)}
+.oa-bar-crumbs [aria-current]{color:var(--oa-ink)}
+.oa-bar-menu{position:relative;margin-left:auto}
+.oa-bar-menu summary{list-style:none;cursor:pointer;padding:.45rem .75rem;border:1px solid var(--oa-hair);border-radius:6px;color:var(--oa-ink)}
+.oa-bar-menu summary::-webkit-details-marker{display:none}
+.oa-bar-menu summary:focus-visible{outline:2px solid var(--oa-accent);outline-offset:2px}
+.oa-bar-menu[open] summary{border-color:var(--oa-ink)}
+.oa-bar-menu:not([open]) nav{display:none}
+.oa-bar-menu nav{position:absolute;right:0;top:calc(100% + .45rem);display:grid;min-width:13rem;padding:.35rem;background:var(--oa-paper);border:1px solid var(--oa-hair);border-radius:8px;box-shadow:0 1px 2px rgb(13 21 34/.06),0 10px 28px -14px rgb(13 21 34/.3)}
+.oa-bar-menu nav a{padding:.7rem .75rem}
+.oa-bar-menu nav a[aria-current=page]{background:color-mix(in srgb,var(--oa-hair) 40%,transparent)}
+@media (max-width:50rem){.oa-bar-in{gap:.6rem}.oa-bar-nav{display:none}.oa-bar-crumbs,.oa-bar-menu{display:block}.oa-bar-brand span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}}
 @media print{.oa-bar{display:none}}
 `.trim();
 
@@ -58,14 +68,15 @@ export const withSiteBar = (
 	{ base, current }: { base: string; current: string },
 ): { page: string; style: string } => {
 	const style = current === "/report/" ? `${STYLE}\n${REPORT_STYLE}` : STYLE;
+	const link = (href: string, label: string) =>
+		`<a href="${href}"${href === `${base}${current}` ? ' aria-current="page"' : ""}>${label}</a>`;
 	const links = [
-		...NAV.map(
-			(n) =>
-				`<a href="${base}${n.href}"${n.href === current ? ' aria-current="page"' : ""}>${n.label}</a>`,
-		),
-		`<a class="oa-bar-gh" href="${REPO}">GitHub</a>`,
+		...NAV.map((n) => link(`${base}${n.href}`, n.label)),
+		link(REPO, "GitHub"),
 	].join("");
-	const bar = `<header class="oa-bar"><div class="oa-bar-in"><a class="oa-bar-brand" href="${base}/">${LOGO}<span>openaudit</span></a><nav class="oa-bar-nav" aria-label="Site">${links}</nav></div></header>`;
+	const here = NAV.find((n) => n.href === current)?.label ?? "";
+	const crumbs = `<nav class="oa-bar-crumbs" aria-label="Breadcrumb"><ol><li><a href="${base}/">Home</a></li><li aria-current="page">${here}</li></ol></nav>`;
+	const bar = `<header class="oa-bar"><div class="oa-bar-in"><a class="oa-bar-brand" href="${base}/">${LOGO}<span>openaudit</span></a>${crumbs}<nav class="oa-bar-nav" aria-label="Site">${links}</nav><details class="oa-bar-menu"><summary>Menu</summary><nav aria-label="Site">${links}</nav></details></div></header>`;
 	const skip = /<a class="skip"[^>]*>[^<]*<\/a>/.exec(page);
 	const body = /<body[^>]*>/.exec(page);
 	const anchor = skip ?? body;
