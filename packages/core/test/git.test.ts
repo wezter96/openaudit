@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { changedFilesSince, GitError } from "../src/git";
+import { changedFilesSince, GIT_HARDENING_ENV, GitError } from "../src/git";
 
 const git = (cwd: string, ...args: string[]) => {
 	const r = Bun.spawnSync(["git", "-C", cwd, ...args], {
@@ -112,5 +112,13 @@ describe("changedFilesSince", () => {
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("GIT_HARDENING_ENV", () => {
+	test("blocks lazy fetches from a partial clone's promisor remote", () => {
+		// A lazy fetch would contact a remote the target chose and could run
+		// its core.sshCommand; audits only ever read local objects.
+		expect(GIT_HARDENING_ENV.GIT_NO_LAZY_FETCH).toBe("1");
 	});
 });
