@@ -12,7 +12,6 @@
  */
 export {};
 
-const DATASET = "openaudit_site_visits";
 const days = Math.max(1, Math.min(90, Number(process.argv[2] ?? 7) || 7));
 const account = process.env.CLOUDFLARE_ACCOUNT_ID;
 const token = process.env.CLOUDFLARE_API_TOKEN;
@@ -38,25 +37,33 @@ const sql = async (query: string): Promise<Row[]> => {
 	return (JSON.parse(text) as { data: Row[] }).data;
 };
 
-const since = `timestamp > NOW() - INTERVAL '${days}' DAY`;
-const humans = `${since} AND blob3 = 'human' AND blob2 = 'page'`;
-const views = "SUM(_sample_interval) AS views";
-const ranked = (column: string, where: string, limit = 10) =>
-	sql(
-		`SELECT ${column} AS key, ${views} FROM ${DATASET} WHERE ${where} GROUP BY key ORDER BY views DESC LIMIT ${limit}`,
-	);
+/**
+ * Every query is fixed text. The only value in it is `:days`, a whole number
+ * from 1 to 90 (Analytics Engine's SQL API has no bind parameters).
+ */
+const PAGE_VIEWS =
+	"SUM(_sample_interval) AS views FROM openaudit_site_visits WHERE timestamp > NOW() - INTERVAL ':days' DAY";
+const HUMANS = "AND blob3 = 'human' AND blob2 = 'page'";
+const QUERIES = {
+	daily: `SELECT toStartOfInterval(timestamp, INTERVAL '1' DAY) AS key, ${PAGE_VIEWS} ${HUMANS} GROUP BY key ORDER BY key`,
+	pages: `SELECT blob1 AS key, ${PAGE_VIEWS} ${HUMANS} GROUP BY key ORDER BY views DESC LIMIT 15`,
+	referrers: `SELECT blob5 AS key, ${PAGE_VIEWS} ${HUMANS} AND blob5 != '' GROUP BY key ORDER BY views DESC LIMIT 10`,
+	countries: `SELECT blob6 AS key, ${PAGE_VIEWS} ${HUMANS} GROUP BY key ORDER BY views DESC LIMIT 10`,
+	devices: `SELECT blob7 AS key, ${PAGE_VIEWS} ${HUMANS} GROUP BY key ORDER BY views DESC LIMIT 10`,
+	kinds: `SELECT concat(blob3, ' ', blob2) AS key, ${PAGE_VIEWS} GROUP BY key ORDER BY views DESC LIMIT 10`,
+	bots: `SELECT blob4 AS key, ${PAGE_VIEWS} AND blob3 = 'bot' GROUP BY key ORDER BY views DESC LIMIT 15`,
+};
+const query = (text: string) => sql(text.replaceAll(":days", String(days)));
 
 const [daily, pages, referrers, countries, devices, kinds, bots] =
 	await Promise.all([
-		sql(
-			`SELECT toStartOfInterval(timestamp, INTERVAL '1' DAY) AS key, ${views} FROM ${DATASET} WHERE ${humans} GROUP BY key ORDER BY key`,
-		),
-		ranked("blob1", humans, 15),
-		ranked("blob5", `${humans} AND blob5 != ''`),
-		ranked("blob6", humans),
-		ranked("blob7", humans),
-		ranked("concat(blob3, ' ', blob2)", since),
-		ranked("blob4", `${since} AND blob3 = 'bot'`, 15),
+		query(QUERIES.daily),
+		query(QUERIES.pages),
+		query(QUERIES.referrers),
+		query(QUERIES.countries),
+		query(QUERIES.devices),
+		query(QUERIES.kinds),
+		query(QUERIES.bots),
 	]);
 
 const table = (title: string, rows: Row[], label = (k: string) => k) => {
