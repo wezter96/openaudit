@@ -93,6 +93,28 @@ describe("code.security", () => {
 		expect(mask[text.indexOf("a $")]).toBe(1);
 	});
 
+	describe("lexer ambiguity falls back to code", () => {
+		const rules = (path: string, text: string) =>
+			scanSecurity({ path, text }).map((f) => f.ruleId);
+
+		test("a PHP 8 attribute is not a comment", () => {
+			expect(
+				rules("a.php", "<?php\n#[Pure] function f($x) { eval($x); }\n"),
+			).toEqual(["code.security/code-injection"]);
+		});
+
+		test("a regex after an if condition does not open a string", () => {
+			expect(rules("a.js", 'if (ok) /"/.test(s); eval(input); // "\n')).toEqual(
+				["code.security/code-injection"],
+			);
+		});
+
+		test("template nesting past the lexer's depth limit stays code", () => {
+			const text = `${"`${".repeat(65)}eval(input)${"}`".repeat(65)}\n`;
+			expect(rules("a.js", text)).toEqual(["code.security/code-injection"]);
+		});
+	});
+
 	test("evidence never contains credentials from the flagged line", () => {
 		const password = ["Hk29x", "Lq7Zp"].join("");
 		const text = `const rows = db.query("SELECT * FROM t WHERE id=" + id, "postgres://admin:${password}@db/app");`;

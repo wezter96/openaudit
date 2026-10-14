@@ -349,8 +349,11 @@ export const kebab = (s: string): string =>
 
 /* ---------------------------- string/comment mask --------------------------- */
 
-/** Deeper `${...}` nesting in JS templates is left as template text. */
+/** Past this `${...}` nesting in JS templates the rest of the file is code. */
 const MAX_TEMPLATE_DEPTH = 64;
+
+/** `if (...) /re/`: a regex, not a division, follows these conditions. */
+const CONTROL_KEYWORD = /(?:^|[^\w$])(?:if|while|for|with)$/;
 
 const REGEX_PRECEDER =
 	/[(,=:[!&|?{};+\-*%<>~^]$|(?:^|[^\w$])(?:return|typeof|case|do|else|in|of|void|yield|await|delete|throw|new)$/;
@@ -359,7 +362,8 @@ const REGEX_PRECEDER =
  * Marks characters inside string literals, comments and (JS) regex literals
  * with 1, so pattern matches in prose can be ignored. Opening delimiters stay
  * 0, so rules may still match on a quote. `${...}` inside JS templates is code.
- * Best-effort lexer: it never throws and degrades to "code" on odd input.
+ * Best-effort lexer: it never throws and degrades to "code" on odd input,
+ * including input nested deeper than it tracks.
  */
 export const nonCodeMask = (text: string, lang: string): Uint8Array => {
 	const mask = new Uint8Array(text.length);
@@ -370,8 +374,10 @@ export const nonCodeMask = (text: string, lang: string): Uint8Array => {
 	const triple = lang === "python";
 	// Bounds that keep hostile input linear: template nesting depth, and the
 	// end of a line on which a regex literal already failed to close.
-	let depth = 0;
+	let nesting = 0;
 	let noRegexUntil = -1;
+	/** Where lexing gave up; everything from here on stays code. */
+	let abandonedAt = -1;
 	const fill = (from: number, to: number) =>
 		mask.fill(1, from, Math.min(to, n));
 
@@ -395,16 +401,15 @@ export const nonCodeMask = (text: string, lang: string): Uint8Array => {
 			const ch = text[j];
 			if (ch === "\\") j += 2;
 			else if (ch === "`") break;
-			else if (
-				lang === "js" &&
-				ch === "$" &&
-				text[j + 1] === "{" &&
-				depth < MAX_TEMPLATE_DEPTH
-			) {
+			else if (lang === "js" && ch === "$" && text[j + 1] === "{") {
 				fill(segment, j);
-				depth++;
+				if (nesting >= MAX_TEMPLATE_DEPTH) {
+					abandonedAt = j;
+					return n;
+				}
+				nesting++;
 				j = scanCode(j + 2, true);
-				depth--;
+				nesting--;
 				segment = j;
 			} else j++;
 		}
@@ -432,6 +437,8 @@ export const nonCodeMask = (text: string, lang: string): Uint8Array => {
 		let i = start;
 		let depth = 0;
 		let prev = "";
+		const parens: boolean[] = [];
+		let closedControl = false;
 		while (i < n) {
 			const ch = text[i] ?? "";
 			const next = text[i + 1];
@@ -448,7 +455,12 @@ export const nonCodeMask = (text: string, lang: string): Uint8Array => {
 				i = end;
 				continue;
 			}
-			if (hashComments && ch === "#" && !(lang === "ruby" && next === "{")) {
+			if (
+				hashComments &&
+				ch === "#" &&
+				!(lang === "ruby" && next === "{") &&
+				!(lang === "php" && next === "[") // PHP 8 attribute
+			) {
 				const e = lineEnd(i);
 				fill(i, e);
 				i = e;
@@ -477,7 +489,8 @@ export const nonCodeMask = (text: string, lang: string): Uint8Array => {
 				lang === "js" &&
 				ch === "/" &&
 				i > noRegexUntil &&
-				REGEX_PRECEDER.test(prev.trimEnd())
+				(REGEX_PRECEDER.test(prev.trimEnd()) ||
+					(closedControl && prev.trimEnd().endsWith(")")))
 			) {
 				const after = scanRegex(i);
 				if (after > i + 1) {
@@ -494,6 +507,8 @@ export const nonCodeMask = (text: string, lang: string): Uint8Array => {
 					depth--;
 				}
 			}
+			if (ch === "(") parens.push(CONTROL_KEYWORD.test(prev.trimEnd()));
+			else if (ch === ")") closedControl = parens.pop() ?? false;
 			if (!/\s/.test(ch)) prev = (prev + ch).slice(-8);
 			else if (prev && !prev.endsWith(" ")) prev = `${prev} `.slice(-8);
 			i++;
@@ -502,6 +517,7 @@ export const nonCodeMask = (text: string, lang: string): Uint8Array => {
 	}
 
 	scanCode(0, false);
+	if (abandonedAt >= 0) mask.fill(0, abandonedAt);
 	return mask;
 };
 

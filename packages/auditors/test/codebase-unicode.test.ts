@@ -9,7 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { scanUnicode, unicode } from "../src/codebase/unicode";
+import { decodeTexts, scanUnicode, unicode } from "../src/codebase/unicode";
 import type { SourceFile } from "../src/codebase/util";
 import { fixture, runAuditor } from "./helpers";
 import { UNICODE_FIXTURES } from "./unicode-fixtures";
@@ -142,7 +142,8 @@ describe("code.unicode", () => {
 		});
 		expect(bom).toMatchObject({ severity: "low" });
 		const [note] = scanUnicode({ path: "a.ts", text: "// pass\u200Bword\n" });
-		expect(note).toMatchObject({ severity: "low" });
+		// Code files never go below medium for invisible characters.
+		expect(note).toMatchObject({ severity: "medium" });
 	});
 
 	test("ignores look-alikes in regex literals and ZWSP that guards a comment", () => {
@@ -379,7 +380,8 @@ describe("code.unicode", () => {
 					"app.min.js": ["bidi-control"],
 					"test/fixtures/payload.js": ["tag-characters"],
 					"src/api.generated.ts": ["bidi-control"],
-					"src/long.js": ["bidi-control"],
+					// Quick mode still reports invisible characters that can change code.
+					"src/long.js": ["bidi-control", "invisible-character"],
 					"yarn.lock": ["tag-characters"],
 					"src/utf16.ts": ["bidi-control"],
 					"src/utf16-nobom.ts": ["bidi-control"],
@@ -397,6 +399,111 @@ describe("code.unicode", () => {
 			} finally {
 				rmSync(root, { recursive: true, force: true });
 			}
+		});
+	});
+
+	describe("lexer context only ever raises severity", () => {
+		const sev = (path: string, text: string, rule = "invisible-character") =>
+			scanUnicode({ path, text })
+				.filter((f) => f.ruleId === `code.unicode/${rule}`)
+				.map((f) => f.severity);
+
+		test("code the lexer mistakes for a string or comment stays high", () => {
+			// A regex after `if (...)` used to open a string at its quote.
+			expect(
+				sev("a.js", 'if (ok) /"/.test(s); is\u200BAdmin = 1; // "\n'),
+			).toEqual(["high"]);
+			// JavaScript ends a line comment at a bare CR.
+			expect(sev("a.js", "// note\ris\u200BAdmin = 1;\n")).toEqual(["high"]);
+			// f-string braces are code.
+			expect(sev("a.py", 'x = f"{is\u3164}"\n')).toEqual(["high"]);
+			// Past the lexer's template depth limit.
+			const deep = `${"`${".repeat(65)}is\u200BAdmin${"}`".repeat(65)}\n`;
+			expect(sev("a.js", deep)).toEqual(["high"]);
+		});
+
+		test("only simple, single-line literals and comments are trusted", () => {
+			expect(sev("a.ts", 'const a = "x\u200By";\n')).toEqual(["medium"]);
+			expect(sev("a.ts", "// a\u200Bb\n")).toEqual(["medium"]);
+			expect(sev("a.ts", "const s = `a\u200Bb`;\n")).toEqual(["high"]);
+			expect(sev("a.ts", 'const s = "a" + /x/.source + "\u200B";\n')).toEqual([
+				"high",
+			]);
+		});
+
+		test("script context does not excuse joiners in code", () => {
+			expect(sev("a.js", "const \u0642\u200C = 1;\n")).toEqual(["high"]);
+			expect(sev("a.js", 'const s = "\u0645\u06CC\u200C\u062E";\n')).toEqual(
+				[],
+			);
+		});
+
+		test("homoglyphs are checked wherever the lexer is unsure", () => {
+			expect(
+				sev("a.js", "// note\rsay\u041Dello();\n", "mixed-script-identifier"),
+			).toEqual(["medium"]);
+		});
+
+		test("names that look like docs or vendored code still count as code", () => {
+			const RLO = "\u202E";
+			expect(
+				sev("index.html", `<script>// ${RLO}</script>`, "bidi-control"),
+			).toEqual(["high"]);
+			expect(
+				sev("package.json", `{"scripts":{"x":"${RLO}"}}`, "bidi-control"),
+			).toEqual(["high"]);
+			expect(sev("bin/tool", `echo ${RLO}`, "bidi-control")).toEqual(["high"]);
+			// The invisible backdoor in a minified, generated or fixture path.
+			for (const path of [
+				"src/util.min.js",
+				"src/api.generated.ts",
+				"test/fixtures/a.js",
+			])
+				expect(sev(path, "const { a, \u3164 } = q;\n")).toEqual(["high"]);
+		});
+
+		test("only recommended flag tag sequences are exempt", () => {
+			const tag = (s: string) =>
+				[...s]
+					.map((c) => String.fromCodePoint(0xe0000 + (c.codePointAt(0) ?? 0)))
+					.join("");
+			const flag = (code: string) => `\u{1F3F4}${tag(code)}\u{E007F}`;
+			expect(sev("a.md", flag("gbsct"), "tag-characters")).toEqual([]);
+			expect(
+				sev("a.md", `${flag("rmrf")}${flag("evil")}`, "tag-characters"),
+			).toEqual(["high"]);
+		});
+
+		test("presentation selectors cannot carry bits", () => {
+			const bits = "\uFE0E\uFE0F\uFE0E\uFE0E\uFE0F\uFE0F\uFE0E\uFE0F";
+			expect(sev("a.md", `\u2764${bits}`, "variation-selector-run")).toEqual([
+				"medium",
+			]);
+			// One selector per letter, where no letter takes one.
+			expect(
+				sev("a.ts", 'const s = "a\uFE01b\uFE02c";', "variation-selector-run"),
+			).toEqual(["high"]);
+			expect(sev("a.md", "1\uFE0F\u20E3 \u2764\uFE0F\uFE0F")).toEqual([]);
+			expect(sev("a.html", "<p>Daten\u00ADschutz</p>")).toEqual([]);
+		});
+	});
+
+	describe("decoding", () => {
+		test("a file that reads differently as UTF-8 and UTF-16 is scanned both ways", () => {
+			const bytes = new Uint8Array([0xff, 0xfe, 0xe2, 0x80, 0xae, 0x20]);
+			expect(decodeTexts(bytes, false).join("|")).toContain("\u202E");
+		});
+
+		test("UTF-32 with a BOM is decoded", () => {
+			const le = new Uint8Array([0xff, 0xfe, 0, 0, 0x2e, 0x20, 0, 0]);
+			const be = new Uint8Array([0, 0, 0xfe, 0xff, 0, 0, 0x20, 0x2e]);
+			expect(decodeTexts(le, false)).toContain("\u202E");
+			expect(decodeTexts(be, false)).toContain("\u202E");
+		});
+
+		test("a shebang script is read even with a NUL byte", () => {
+			const bytes = new TextEncoder().encode("#!/bin/sh\n\u0000echo \u202E\n");
+			expect(decodeTexts(bytes, true)).toHaveLength(1);
 		});
 	});
 });
