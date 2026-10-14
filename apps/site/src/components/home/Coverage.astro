@@ -2,6 +2,7 @@
 import { AREA_SHORT, matrix, matrixMax, TARGET_COMMAND } from "../../lib/home";
 import { inline, paragraphsIn, tableIn } from "../../lib/markdown";
 import { CATEGORIES, CATEGORY_LABEL } from "../../lib/site";
+import "../../styles/tabs.css";
 
 const languages = tableIn("README.md", "Languages and ecosystems");
 const note = inline(paragraphsIn("README.md", "Languages and ecosystems")[0] ?? "");
@@ -133,22 +134,6 @@ const radius = (n: number) => (n ? (2.6 + 6.4 * Math.sqrt(n / matrixMax)).toFixe
 	.cov-tabs .tab:hover,
 	.cov-tabs .tab[aria-selected="true"] {
 		color: var(--ink);
-	}
-
-	.tab-ink {
-		position: absolute;
-		left: 0;
-		bottom: -1px;
-		width: 1px;
-		height: 2px;
-		background: var(--accent);
-		transform-origin: 0 0;
-		pointer-events: none;
-		transition: transform 0.6s var(--settle);
-	}
-
-	.cov:not(.ink-ready) .tab-ink {
-		transition: none;
 	}
 
 	.panel-title {

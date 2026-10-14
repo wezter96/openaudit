@@ -1,6 +1,7 @@
 ---
 import { areas } from "../../lib/home";
 import { u } from "../../lib/site";
+import "../../styles/tabs.css";
 
 const label = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const SHOWN = 7;
@@ -181,21 +182,13 @@ const SHOWN = 7;
 		color: var(--graphite);
 	}
 
+	/* A vertical ink bar beside the tablist, horizontal again on narrow screens. */
 	.tab-ink {
-		position: absolute;
-		left: 0;
 		top: 0;
+		bottom: auto;
 		width: 2px;
 		height: 1px;
 		border-radius: 2px;
-		background: var(--accent);
-		transform-origin: 0 0;
-		pointer-events: none;
-		transition: transform 0.6s var(--settle);
-	}
-
-	.areas:not(.ink-ready) .tab-ink {
-		transition: none;
 	}
 
 	.panels {

@@ -1,0 +1,20 @@
+/*
+ * The ink bar that scripts/tabs.ts springs to the selected tab, under a
+ * horizontal tablist by default. It animates only once the script has
+ * placed it.
+ */
+.tab-ink {
+	position: absolute;
+	left: 0;
+	bottom: -1px;
+	width: 1px;
+	height: 2px;
+	background: var(--accent);
+	transform-origin: 0 0;
+	pointer-events: none;
+	transition: transform 0.6s var(--settle);
+}
+
+[data-tabs]:not(.ink-ready) .tab-ink {
+	transition: none;
+}

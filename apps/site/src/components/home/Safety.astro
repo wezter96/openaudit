@@ -2,6 +2,7 @@
 import { inline, listIn } from "../../lib/markdown";
 import { u } from "../../lib/site";
 import Icon from "../Icon.astro";
+import "../../styles/split.css";
 
 type Glyph = "folder" | "globe" | "robot" | "container" | "git";
 const GLYPH: Record<string, Glyph> = {
@@ -22,7 +23,7 @@ const items = listIn("README.md", "Safety")
 ---
 
 <section class="sheet" id="safety" aria-labelledby="safety-title">
-	<div class="frame safety">
+	<div class="frame split">
 		<div class="sheet-head single">
 			<h2 id="safety-title" class="rise">Safe on hostile input</h2>
 			<p class="rise">
@@ -47,16 +48,7 @@ const items = listIn("README.md", "Safety")
 </section>
 
 <style>
-	.safety {
-		display: grid;
-		grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-		gap: 2rem clamp(2rem, 5vw, 5rem);
-		align-items: start;
-	}
-
 	.sheet-head.single {
-		grid-template-columns: 1fr;
-		margin-bottom: 0;
 		position: sticky;
 		top: calc(var(--head) + 2rem);
 	}
@@ -103,10 +95,6 @@ const items = listIn("README.md", "Safety")
 	}
 
 	@media (max-width: 60rem) {
-		.safety {
-			grid-template-columns: minmax(0, 1fr);
-		}
-
 		.sheet-head.single {
 			position: static;
 		}

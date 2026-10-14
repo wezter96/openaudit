@@ -1,0 +1,22 @@
+/*
+ * A sheet with a narrow lead column beside a wider body, stacked below
+ * 60rem. Its .sheet-head.single sits in the lead column, so it drops the
+ * head's two-column grid and bottom margin.
+ */
+.split {
+	display: grid;
+	grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+	gap: 2rem clamp(2rem, 5vw, 5rem);
+	align-items: start;
+}
+
+.sheet-head.single {
+	grid-template-columns: 1fr;
+	margin-bottom: 0;
+}
+
+@media (max-width: 60rem) {
+	.split {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}

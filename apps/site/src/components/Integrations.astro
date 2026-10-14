@@ -6,6 +6,7 @@
 import { integrations } from "../lib/integrations";
 import { u } from "../lib/site";
 import Icon from "./Icon.astro";
+import "../styles/tabs.css";
 ---
 
 <div class="ints" data-tabs>
@@ -113,22 +114,6 @@ import Icon from "./Icon.astro";
 	.tab[aria-selected="true"] :global(.glyph) {
 		color: var(--accent);
 		transform: translateY(-2px);
-	}
-
-	.tab-ink {
-		position: absolute;
-		left: 0;
-		bottom: -1px;
-		width: 1px;
-		height: 2px;
-		background: var(--accent);
-		transform-origin: 0 0;
-		pointer-events: none;
-		transition: transform 0.6s var(--settle);
-	}
-
-	.ints:not(.ink-ready) .tab-ink {
-		transition: none;
 	}
 
 	.panels {

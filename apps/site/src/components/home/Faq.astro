@@ -2,6 +2,7 @@
 import scoring from "../../generated/scoring.json";
 import { wrappedCount } from "../../lib/home";
 import { counts, u } from "../../lib/site";
+import "../../styles/split.css";
 
 const w = scoring.weights as Record<string, number>;
 const ex = (sev: string) => scoring.examples.find((e) => e.severity === sev && e.n === 1)?.score;
@@ -37,7 +38,7 @@ const faqs = [
 ---
 
 <section class="sheet" id="faq" aria-labelledby="faq-title">
-	<div class="frame faq">
+	<div class="frame split">
 		<div class="sheet-head single">
 			<h2 id="faq-title" class="rise">Questions</h2>
 		</div>
@@ -60,18 +61,6 @@ const faqs = [
 </section>
 
 <style>
-	.faq {
-		display: grid;
-		grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-		gap: 2rem clamp(2rem, 5vw, 5rem);
-		align-items: start;
-	}
-
-	.sheet-head.single {
-		grid-template-columns: 1fr;
-		margin-bottom: 0;
-	}
-
 	.qs {
 		border-top: 1px solid var(--ink);
 	}
@@ -155,11 +144,5 @@ const faqs = [
 		padding: 0.05em 0.3em;
 		border-radius: 4px;
 		background: var(--paper-3);
-	}
-
-	@media (max-width: 60rem) {
-		.faq {
-			grid-template-columns: minmax(0, 1fr);
-		}
 	}
 </style>
