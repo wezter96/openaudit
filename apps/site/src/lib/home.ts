@@ -2,14 +2,13 @@
  * Data for the landing page, derived from the registry, the README and the
  * self-audit at build time.
  */
-import { inline, readRepo, tableIn } from "./markdown";
+import { readRepo } from "./markdown";
 import {
 	type Auditor,
 	auditors,
 	CATEGORIES,
 	CATEGORY_LABEL,
 	counts,
-	playbooks,
 	self,
 	TARGET_LABEL,
 	TARGETS,
@@ -100,13 +99,24 @@ const EXAMPLES: Record<string, Example> = {
 	},
 };
 
-const areaRows = tableIn("README.md", "What it audits").rows;
-const areaText = Object.fromEntries(
-	areaRows.map(([name = "", text = ""]) => [
-		name.replace(/\*/g, "").trim(),
-		text,
-	]),
-);
+/** One short line per area for the landing page; README's table has the full list. */
+const AREA_LINE: Record<string, string> = {
+	security:
+		"Secrets, risky code, TLS and headers, exposed files, container and cloud config.",
+	accessibility:
+		"WCAG checks in code, on rendered pages and in Android layouts.",
+	performance: "Page weight, caching, Core Web Vitals, bundle and image size.",
+	seo: "Titles, descriptions, crawlability, sitemaps and broken links.",
+	privacy: "Trackers before consent, analytics SDKs, personal data in logs.",
+	"best-practices":
+		"Repo hygiene, Dockerfile and IaC lint, GitHub Actions hardening.",
+	reliability: "Type errors, broken pages, redirect chains, missing probes.",
+	maintainability: "Lint, strict typing, duplication, dead code, huge files.",
+	"supply-chain":
+		"Vulnerable dependencies, unpinned versions, licences, image CVEs.",
+	compliance:
+		"Licence duties, cookie consent, OWASP and CWE mapping, CIS benchmarks.",
+};
 
 /**
  * Wrapped tools people know and look for, most recognised first. An area
@@ -150,16 +160,10 @@ export const areas = CATEGORIES.map((id) => {
 	return {
 		id,
 		label,
-		text: inline(areaText[label] ?? ""),
+		text: AREA_LINE[id] ?? "",
 		grade: score?.grade ?? null,
 		score: score?.score ?? null,
 		count: own.length,
-		targets: TARGETS.filter((t) => own.some((a) => a.targets.includes(t))).map(
-			(t) => TARGET_LABEL[t] ?? t,
-		),
-		builtin: own
-			.filter((a) => a.engine === "builtin")
-			.map((a) => ({ id: a.id, title: a.title })),
 		tools: (
 			[
 				...new Set(
@@ -169,9 +173,6 @@ export const areas = CATEGORIES.map((id) => {
 				),
 			] as string[]
 		).sort((a, b) => toolRank(a, own) - toolRank(b, own) || a.localeCompare(b)),
-		playbooks: playbooks
-			.filter((p) => p.categories.includes(id))
-			.map((p) => p.id),
 		example: EXAMPLES[id],
 	};
 });

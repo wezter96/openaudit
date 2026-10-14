@@ -1,13 +1,11 @@
 ---
 import { wrappedCount } from "../../lib/home";
-import { auditors, CATEGORIES, playbooks, self, TARGETS, u } from "../../lib/site";
+import { auditors, CATEGORIES, self, u } from "../../lib/site";
 
 const items = [
 	{ n: auditors.length, label: "auditors", href: u("/auditors/") },
-	{ n: wrappedCount, label: "free scanners wrapped", href: u("/auditors/#engine=external") },
+	{ n: wrappedCount, label: "free scanners", href: u("/auditors/#engine=external") },
 	{ n: CATEGORIES.length, label: "audit areas", href: "#areas" },
-	{ n: TARGETS.length, label: "target kinds", href: "#coverage" },
-	{ n: playbooks.length, label: "agent playbooks", href: "#agents" },
 ];
 ---
 
@@ -34,7 +32,7 @@ const items = [
 								<b class={`gm-${self.grade}`}>{self.grade}</b>
 								<span data-count-to={self.score}>{self.score}</span>
 							</span>
-							<span class="l">its own audit score</span>
+							<span class="l">its own score</span>
 						</a>
 					</li>
 				)

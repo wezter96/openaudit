@@ -1,32 +1,29 @@
 ---
-import { inline, paragraphsIn } from "../../lib/markdown";
 import { BLOB, OPENSVERIGE, REPO, u } from "../../lib/site";
-
-const community = inline(paragraphsIn("README.md", "Community")[0] ?? "");
 ---
 
 <section class="sheet" id="open" aria-labelledby="open-title">
 	<div class="frame">
 		<div class="sheet-head">
 			<h2 id="open-title" class="rise">Free and open source</h2>
-			<p class="rise">No account, no licence key and no hosted service in the way.</p>
+			<p class="rise">No account, no key, no hosted service.</p>
 		</div>
 		<ul class="terms">
 			<li class="rise">
 				<h3>MIT licensed</h3>
-				<p>Read the code, run it anywhere, change it. <a href={`${BLOB}/LICENSE`}>The licence</a></p>
+				<p>Use it, change it, ship it. <a href={`${BLOB}/LICENSE`}>The licence</a></p>
 			</li>
 			<li class="rise">
 				<h3>Free tools only</h3>
-				<p>Every scanner openaudit wraps is free and open source, and keeps its own licence.</p>
+				<p>Every wrapped scanner is free and open source.</p>
 			</li>
 			<li class="rise">
 				<h3>Tokens are the only cost</h3>
-				<p>And only if you choose the AI features: AI triage and the headless agentic auditors are opt-in.</p>
+				<p>Only if you turn on the AI features.</p>
 			</li>
 		</ul>
 		<div class="community rise">
-			<p class="community-line" set:html={community} />
+			<p class="community-line">Shared with <a href={OPENSVERIGE}>OpenSverige</a>, Sweden's community for agent builders.</p>
 			<div class="community-links">
 				<a class="btn" href={OPENSVERIGE}>Visit OpenSverige</a>
 				<a class="btn" href={REPO}>Star it on GitHub</a>

@@ -1,44 +1,33 @@
 ---
-import { inline, listIn } from "../../lib/markdown";
 import { u } from "../../lib/site";
 import Icon from "../Icon.astro";
 import "../../styles/split.css";
 
 type Glyph = "folder" | "globe" | "robot" | "container" | "git";
-const GLYPH: Record<string, Glyph> = {
-	Files: "folder",
-	HTTP: "globe",
-	Agents: "robot",
-	"Wrapped tools": "container",
-	Git: "git",
-};
-// README "Safety": "**Files:** reads are confined …"
-const items = listIn("README.md", "Safety")
-	.map((md) => {
-		const m = /^\*\*(.+?):\*\*\s*(.*)$/s.exec(md);
-		return { lead: m?.[1] ?? "", body: m?.[2] ?? md };
-	})
-	.filter((i) => GLYPH[i.lead])
-	.slice(0, 5);
+const items: { glyph: Glyph; lead: string; body: string }[] = [
+	{ glyph: "folder", lead: "Files", body: "Reads stay in the project. Symlinks out are never followed." },
+	{ glyph: "globe", lead: "HTTP", body: "Your headers go only to the target. Redirects drop credentials." },
+	{ glyph: "robot", lead: "Agents", body: "Its own agents get no shell. The browser stays on the target." },
+	{ glyph: "container", lead: "Wrapped tools", body: "Nothing gets built or installed. Linters that run code are opt-in." },
+	{ glyph: "git", lead: "Git", body: "Hooks and fsmonitor are off. Diffs compare commits." },
+];
 ---
 
 <section class="sheet" id="safety" aria-labelledby="safety-title">
 	<div class="frame split">
 		<div class="sheet-head single">
 			<h2 id="safety-title" class="rise">Safe on hostile input</h2>
-			<p class="rise">
-				openaudit treats every target as hostile. Tools that would run project code are opt-in, and nothing builds or installs what it scans.
-			</p>
-			<p class="rise more"><a href={u("/docs/safety/")}>The full safety model</a></p>
+			<p class="rise">Every target is treated as hostile. Nothing it scans gets built or run.</p>
+			<p class="rise more"><a href={u("/docs/safety/")}>Safety model</a></p>
 		</div>
 		<ul class="guards">
 			{
 				items.map((i) => (
 					<li class="rise">
-						<Icon name={GLYPH[i.lead] ?? "folder"} class="g" />
+						<Icon name={i.glyph} class="g" />
 						<div>
 							<h3>{i.lead}</h3>
-							<p set:html={inline(i.body.startsWith("openaudit") ? i.body : i.body.charAt(0).toUpperCase() + i.body.slice(1))} />
+							<p>{i.body}</p>
 						</div>
 					</li>
 				))

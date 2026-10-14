@@ -3,10 +3,10 @@ import { u } from "../../lib/site";
 import Icon from "../Icon.astro";
 
 const callouts = [
-	{ title: "Overview", text: "An overall grade with one arc per area, severity counts and the status of every auditor that ran or was skipped." },
-	{ title: "A tab per area", text: "Each area has its own tab, with filters, search and findings grouped by rule." },
-	{ title: "OWASP and CWE", text: "Findings mapped to the OWASP Top 10 and the CWE Top 25." },
-	{ title: "Downloads", text: "The same audit as JSON, SARIF, Markdown or CSV, straight from the page." },
+	{ title: "Overview", text: "One grade, one arc per area." },
+	{ title: "A tab per area", text: "Filters, search, findings by rule." },
+	{ title: "OWASP and CWE", text: "Mapped to both top lists." },
+	{ title: "Downloads", text: "JSON, SARIF, Markdown or CSV." },
 ];
 ---
 
@@ -14,9 +14,7 @@ const callouts = [
 	<div class="frame">
 		<div class="sheet-head">
 			<h2 id="report-title" class="rise">A report people actually read</h2>
-			<p class="rise">
-				One self-contained HTML file with no external requests. It opens offline, works with JavaScript off and prints cleanly, so it can be attached to a CI run or an email.
-			</p>
+			<p class="rise">One HTML file. Works offline, prints cleanly.</p>
 		</div>
 		<div class="show" data-arrive>
 			<figure class="shot-wrap">
@@ -29,7 +27,7 @@ const callouts = [
 					<span class="pin p4" aria-hidden="true">4</span>
 					<span class="shot-cta"><Icon name="report" />Open the live report</span>
 				</a>
-				<figcaption>The report for openaudit's own repository, from an earlier run. The live one is rebuilt on every push.</figcaption>
+				<figcaption>openaudit's own report.</figcaption>
 			</figure>
 			<ol class="callouts">
 				{

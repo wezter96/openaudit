@@ -11,15 +11,6 @@ const segments = scored.map((c) => ({
 	score: c.score,
 	grade: c.grade,
 }));
-const run = self.finishedAt
-	? new Date(self.finishedAt).toLocaleDateString("en-GB", {
-			day: "numeric",
-			month: "short",
-			year: "numeric",
-			timeZone: "UTC",
-		})
-	: "";
-const ran = self.auditors ? Object.values(self.auditors).reduce((a, b) => a + b, 0) : 0;
 ---
 
 <section class="hero frame" aria-labelledby="hero-title">
@@ -37,7 +28,7 @@ const ran = self.auditors ? Object.values(self.auditors).reduce((a, b) => a + b,
 	</h1>
 	<div class="hero-copy">
 		<p class="hero-sub late">
-			Code, sites, apps, APIs, containers, infrastructure, cloud and mobile builds, audited for security, accessibility, performance and seven more areas. From your terminal, your CI or your AI agent.
+			Code, sites, containers, cloud and mobile apps. One report, a grade per area.
 		</p>
 		<div class="hero-cmd late">
 			<Command command="bunx @openaudit/cli ." />
@@ -62,34 +53,8 @@ const ran = self.auditors ? Object.values(self.auditors).reduce((a, b) => a + b,
 				</a>
 				<figcaption class="late">
 					<p>
-						openaudit audits itself on every push: <b class="num">{self.score}/100</b>
+						Its own score, every push: <b class="num">{self.score}/100</b>
 					</p>
-					<dl class="meta">
-						<div>
-							<dt>Areas</dt>
-							<dd>{scored.length}</dd>
-						</div>
-						<div>
-							<dt>Auditors</dt>
-							<dd>{ran}</dd>
-						</div>
-						{
-							self.durationMs !== undefined && (
-								<div>
-									<dt>Took</dt>
-									<dd>{(self.durationMs / 1000).toFixed(1)} s</dd>
-								</div>
-							)
-						}
-						{
-							run && (
-								<div>
-									<dt>Run</dt>
-									<dd>{run}</dd>
-								</div>
-							)
-						}
-					</dl>
 				</figcaption>
 			</figure>
 		)
@@ -230,30 +195,6 @@ const ran = self.auditors ? Object.values(self.auditors).reduce((a, b) => a + b,
 	.hero-dial figcaption b {
 		color: var(--ink);
 		font-weight: 600;
-	}
-
-	.meta {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.4rem 2rem;
-		margin-top: 0.75rem;
-	}
-
-	.meta div {
-		display: flex;
-		flex-direction: column;
-		gap: 0.1rem;
-	}
-
-	.meta dt {
-		font-size: 0.75rem;
-	}
-
-	.meta dd {
-		font-family: var(--mono);
-		font-size: 0.8125rem;
-		color: var(--ink);
-		font-variant-numeric: tabular-nums;
 	}
 
 	@media (max-width: 60rem) {

@@ -4,7 +4,6 @@ import { u } from "../../lib/site";
 import "../../styles/tabs.css";
 
 const label = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-const SHOWN = 7;
 /** Wrapped tools shown before the "All N wrapped tools" disclosure. */
 const TOOLS_SHOWN = 10;
 ---
@@ -13,9 +12,7 @@ const TOOLS_SHOWN = 10;
 	<div class="frame">
 		<div class="sheet-head">
 			<h2 id="areas-title" class="rise">Ten areas, each with its own grade</h2>
-			<p class="rise">
-				Every finding belongs to one area, and each area scores 0 to 100 from the severity of what was found. Pick an area to see what openaudit checks, where, and with which tools.
-			</p>
+			<p class="rise">Every finding lands in one area. Each area gets a 0 to 100 score.</p>
 		</div>
 		<div class="areas" data-tabs>
 			<div class="tablist area-tabs needs-js" role="tablist" aria-label="Audit areas" aria-orientation="vertical">
@@ -46,34 +43,8 @@ const TOOLS_SHOWN = 10;
 							<div class="area-main">
 								<header class="area-head">
 									<h3>{a.label}</h3>
-									<p class="area-score">
-										<span class="num">{a.count}</span> auditors cover it, across {a.targets.length} kinds of target
-									</p>
 								</header>
-								<p class="checks" set:html={a.text} />
-								<div class="facts">
-									<div class="fact">
-										<h4>Applies to</h4>
-										<ul class="chips">
-											{a.targets.map((t) => (
-												<li>{t}</li>
-											))}
-										</ul>
-									</div>
-									{a.builtin.length > 0 && (
-										<div class="fact">
-											<h4>Built in</h4>
-											<ul class="names">
-												{a.builtin.slice(0, SHOWN).map((b) => (
-													<li>
-														<a href={u(`/auditors/${b.id}/`)}>{b.title}</a>
-													</li>
-												))}
-												{a.builtin.length > SHOWN && <li class="more">and {a.builtin.length - SHOWN} more</li>}
-											</ul>
-										</div>
-									)}
-								</div>
+								<p class="checks">{a.text}</p>
 							</div>
 							<div class="area-side">
 								{a.example && (
@@ -91,7 +62,7 @@ const TOOLS_SHOWN = 10;
 								)}
 								{a.tools.length > 0 && (
 									<div class="fact">
-										<h4>Wrapped tools, used when installed</h4>
+										<h4>Wrapped tools</h4>
 										<ul class="chips tools">
 											{a.tools.slice(0, TOOLS_SHOWN).map((t) => (
 												<li>{t}</li>
@@ -110,16 +81,6 @@ const TOOLS_SHOWN = 10;
 												</ul>
 											</details>
 										)}
-									</div>
-								)}
-								{a.playbooks.length > 0 && (
-									<div class="fact">
-										<h4>Agent playbooks</h4>
-										<ul class="chips tools">
-											{a.playbooks.map((p) => (
-												<li>{p}</li>
-											))}
-										</ul>
 									</div>
 								)}
 								<a class="all" href={u(`/auditors/#area=${a.id}`)}>
@@ -238,19 +199,7 @@ const TOOLS_SHOWN = 10;
 		line-height: 1;
 	}
 
-	.area-score {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: baseline;
-		gap: 0.5rem;
-		margin-top: 0.6rem;
-		font-size: 0.875rem;
-		color: var(--graphite);
-	}
 
-	.area-score .num {
-		color: var(--ink);
-	}
 
 	.checks {
 		margin-top: 1.25rem;
@@ -259,12 +208,6 @@ const TOOLS_SHOWN = 10;
 		text-wrap: pretty;
 	}
 
-	.facts {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
-		gap: 1.5rem 2rem;
-		margin-top: 1.75rem;
-	}
 
 	.fact h4 {
 		font-size: 0.8125rem;
@@ -275,29 +218,10 @@ const TOOLS_SHOWN = 10;
 		border-bottom: 1px solid var(--hair);
 	}
 
-	.names {
-		display: grid;
-		gap: 0.35rem;
-	}
 
-	.names li {
-		font-size: 0.9375rem;
-		line-height: 1.35;
-	}
 
-	.names a {
-		color: var(--ink);
-		text-decoration-color: var(--hair);
-	}
 
-	.names a:hover {
-		color: var(--accent);
-		text-decoration-color: currentColor;
-	}
 
-	.names .more {
-		color: var(--graphite);
-	}
 
 	.chips {
 		display: flex;

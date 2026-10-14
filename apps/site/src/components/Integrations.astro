@@ -36,7 +36,6 @@ import "../styles/tabs.css";
 					<div class="panel-copy">
 						<h3 class="panel-title">{it.name}</h3>
 						<code class="panel-hint">{it.hint}</code>
-						<p class="panel-lede" set:html={it.lede} />
 						{it.more && (
 							<p class="panel-more">
 								<a href={u(it.more.href)}>{it.more.label}</a>
@@ -151,11 +150,6 @@ import "../styles/tabs.css";
 		color: var(--graphite);
 	}
 
-	.panel-lede {
-		margin-top: 0.9rem;
-		color: var(--graphite);
-		text-wrap: pretty;
-	}
 
 	.panel-more {
 		margin-top: 1rem;

@@ -14,14 +14,14 @@ const ring = 2 * Math.PI * 15;
 		<div class="sheet-head">
 			<h2 id="how-title" class="rise">One issue, one finding</h2>
 			<p class="rise">
-				Most audits are a pile of tool outputs that disagree. openaudit runs the tools, merges what they agree on, and hands you one scored result.
+				Many tools, one result.
 			</p>
 		</div>
 		<ol class="steps">
 			<li class="step s1" data-arrive>
 				<span class="no num" aria-hidden="true">1</span>
 				<h3>Run</h3>
-				<p>Point it at a folder, a URL, an image or a cloud account. It picks the auditors that apply and runs them in parallel. A scanner that isn't installed is skipped with an install hint.</p>
+				<p>Point it at a folder, URL, image or cloud account. Missing tools are skipped.</p>
 				<div class="vis term" aria-hidden="true">
 					<p class="cmdline"><span class="pr">$</span> bunx @openaudit/cli .</p>
 					<ul class="runs">
@@ -37,7 +37,7 @@ const ring = 2 * Math.PI * 15;
 			<li class="step s2" data-arrive>
 				<span class="no num" aria-hidden="true">2</span>
 				<h3>Merge and score</h3>
-				<p>When several tools report the same issue, you get one finding that names who confirmed it, scored once. Each area scores 0 to 100 from what remains.</p>
+				<p>Duplicates merge into one finding. Each area scores 0 to 100.</p>
 				<div class="vis merge" aria-hidden="true">
 					<ul class="src">
 						<li><span class="sev sev-critical bare"></span>gitleaks</li>
@@ -70,12 +70,12 @@ const ring = 2 * Math.PI * 15;
 						<span>Security <b class={`gm-${grade}`}>{grade}</b> <span class="num">{score}</span></span>
 					</div>
 				</div>
-				<p class="vis-cap">Example: one leaked key, three tools, one finding. A single critical finding takes an area to {score}.</p>
+				<p class="vis-cap">One leaked key, three tools, one finding.</p>
 			</li>
 			<li class="step s3" data-arrive>
 				<span class="no num" aria-hidden="true">3</span>
 				<h3>Report and gate</h3>
-				<p>One report as HTML, JSON, SARIF, Markdown or CSV. <code>--fail-on</code> sets the exit code for CI, and <code>--diff</code> keeps a pull request to the files it changed.</p>
+				<p>HTML, JSON, SARIF, Markdown or CSV. <code>--fail-on</code> fails the CI run.</p>
 				<div class="vis gate" aria-hidden="true">
 					<ul class="formats">
 						<li>HTML</li>

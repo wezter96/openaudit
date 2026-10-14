@@ -4,20 +4,20 @@ import Command from "../Command.astro";
 
 const points = [
 	{
-		title: "MCP server, over stdio or HTTP",
-		text: "Claude Code, Cursor, Codex and other agents get <code>run_audit</code>, <code>get_finding</code>, <code>compare_reports</code> and the playbook tools. Remote agents connect over Streamable HTTP with a bearer token.",
+		title: "MCP server",
+		text: "For Claude Code, Cursor, Codex and more. Over stdio or HTTP.",
 	},
 	{
-		title: `${playbooks.length} playbooks for judgment calls`,
-		text: "Authorisation, injection paths, privacy data flows, keyboard journeys and more. Your agent does the review with its own tools; its findings merge into the same scored report. No extra API key.",
+		title: `${playbooks.length} playbooks`,
+		text: "For checks that need judgment. Your agent runs them, no extra API key.",
 	},
 	{
-		title: "A JSON agent mode",
-		text: "<code>--json</code> prints one JSON report on stdout and nothing else, and <code>openaudit schema</code> gives its JSON Schema.",
+		title: "JSON mode",
+		text: "<code>--json</code> prints one report and nothing else.",
 	},
 	{
-		title: "A skill for the whole loop",
-		text: `<a href="${BLOB}/skills/openaudit/SKILL.md"><code>skills/openaudit/SKILL.md</code></a> teaches an agent the loop: baseline, triage, run the playbooks, fix, then verify with <code>compare_reports</code>.`,
+		title: "Agent skill",
+		text: `<a href="${BLOB}/skills/openaudit/SKILL.md"><code>SKILL.md</code></a> teaches the audit, fix, verify loop.`,
 	},
 ];
 ---
@@ -27,7 +27,7 @@ const points = [
 		<div class="agents-copy">
 			<div class="sheet-head single">
 				<h2 id="agents-title" class="rise">Built for agents</h2>
-				<p class="rise">Some audits need judgment rather than patterns. openaudit lets the agent you already use drive the whole loop, and checks its fixes.</p>
+				<p class="rise">Your agent runs the audit, fixes what it finds and checks the fix.</p>
 			</div>
 			<ul class="pts">
 				{
@@ -41,7 +41,7 @@ const points = [
 			</ul>
 			<div class="add rise">
 				<Command command="claude mcp add openaudit -- bunx @openaudit/cli mcp" label="Copy the Claude Code setup command" />
-				<a href={u("/docs/agents/")}>MCP, playbooks and agent setup</a>
+				<a href={u("/docs/agents/")}>Agent setup</a>
 			</div>
 		</div>
 		<figure class="session" data-arrive>

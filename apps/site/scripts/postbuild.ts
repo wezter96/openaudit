@@ -543,8 +543,22 @@ if (broken.length) {
 	throw new Error(`Broken internal links:\n${broken.join("\n")}`);
 }
 
+// The landing page stays short: people skim it. Tables, chips and the demo
+// session count too, so this is a ceiling on creep, not a target.
+const LANDING_WORDS = 1700;
+const landing = (await Bun.file(join(dist, "index.html")).text())
+	.replace(/<(script|style|svg|pre)\b[^>]*>[\s\S]*?<\/\1>/g, " ")
+	.replace(/<(header|footer) class="site-[^"]*"[\s\S]*?<\/\1>/g, " ")
+	.replace(/<[^>]+>/g, " ");
+const landingWords = landing.split(/\s+/).filter(Boolean).length;
+if (landingWords > LANDING_WORDS) {
+	throw new Error(
+		`The landing page has ${landingWords} words (limit ${LANDING_WORDS}). Cut copy rather than raise the limit.`,
+	);
+}
+
 const all = await walk(dist);
 const bytes = all.reduce((n, f) => n + Bun.file(f).size, 0);
 console.log(
-	`postbuild: ${html.length} pages, ${og} OG images, ${scriptHashes.size} inline script hash(es), links ok, ${all.length} files, ${(bytes / 1024 / 1024).toFixed(2)} MB`,
+	`postbuild: ${html.length} pages, landing ${landingWords} words, ${og} OG images, ${scriptHashes.size} inline script hash(es), links ok, ${all.length} files, ${(bytes / 1024 / 1024).toFixed(2)} MB`,
 );
