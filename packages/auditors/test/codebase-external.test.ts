@@ -179,6 +179,76 @@ describe("external tool auditors", () => {
 		).toEqual(["settings/prod.py", "src/config.js"]);
 	});
 
+	test("gitleaks ignores build output and dependencies like the built-ins", async () => {
+		const root = fixture("codebase", "external");
+		const leak = (file: string) => ({
+			RuleID: "generic-api-key",
+			Description: "Generic API key",
+			File: `${root}/${file}`,
+			StartLine: 1,
+			Secret: "REDACTED",
+			Match: "key = REDACTED",
+		});
+		const report = await runWithExec(
+			gitleaks,
+			(bin) => `/usr/local/bin/${bin}`,
+			async (cmd) => {
+				const path = cmd[cmd.indexOf("--report-path") + 1] ?? "";
+				await writeFile(
+					path,
+					JSON.stringify([
+						leak("src/config.js"),
+						leak("dist/cli.js"),
+						leak("node_modules/pkg/index.js"),
+					]),
+				);
+				return { code: 0, stdout: "", stderr: "" };
+			},
+		);
+		expect(report.results[0]?.findings.map((f) => f.location?.file)).toEqual([
+			"src/config.js",
+		]);
+	});
+
+	test("trivy skips dependency and build directories", async () => {
+		const misconfig = (Target: string) => ({
+			Target,
+			Class: "config",
+			Type: "dockerfile",
+			Misconfigurations: [
+				{
+					ID: "DS002",
+					AVDID: "AVD-DS-0002",
+					Title: "Image user should not be 'root'",
+					Severity: "HIGH",
+					Status: "FAIL",
+				},
+			],
+		});
+		let args: ReadonlyArray<string> = [];
+		const report = await runWithExec(
+			trivyFs,
+			(bin) => `/usr/local/bin/${bin}`,
+			async (cmd) => {
+				args = cmd;
+				return {
+					code: 0,
+					stdout: JSON.stringify({
+						Results: [
+							misconfig("Dockerfile"),
+							misconfig("node_modules/.bun/pkg/Dockerfile"),
+						],
+					}),
+					stderr: "",
+				};
+			},
+		);
+		expect(args).toContain("**/node_modules");
+		expect(report.results[0]?.findings.map((f) => f.location?.file)).toEqual([
+			"Dockerfile",
+		]);
+	});
+
 	test("semgrep, osv-scanner and trivy parse stdout", async () => {
 		const cases: Array<[Auditor, string, number]> = [
 			[semgrep, "semgrep", 0],

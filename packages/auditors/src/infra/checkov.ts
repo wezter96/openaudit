@@ -8,6 +8,7 @@ import {
 } from "@openaudit/core";
 import { Effect } from "effect";
 
+import { DOCKERFILE_RE } from "./dockerfile";
 import { asArray, asRecord } from "./shared";
 
 const SEVERITY: Record<string, Severity> = {
@@ -44,6 +45,10 @@ export const parseCheckovOutput = (
 				typeof c.file_path === "string"
 					? c.file_path.replace(/^\.?\//, "")
 					: undefined;
+			// Checkov treats any path containing "dockerfile" as one, source files
+			// such as dockerfile.ts included.
+			if (framework === "dockerfile" && file && !DOCKERFILE_RE.test(file))
+				continue;
 			const resource = typeof c.resource === "string" ? c.resource : undefined;
 			const title =
 				typeof c.check_name === "string" ? c.check_name : c.check_id;

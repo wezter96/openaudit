@@ -38,6 +38,15 @@ export const hasMobileSource = (files: ReadonlyArray<string>): boolean =>
 	files.some((f) => MOBILE_SOURCE.test(f));
 
 /**
+ * The file app-level findings (rules with no file match, such as "no
+ * certificate pinning") are pinned to: the first Android manifest or Podfile,
+ * else the first mobile source file.
+ */
+export const appAnchor = (files: ReadonlyArray<string>): string | undefined =>
+	files.find((f) => /(^|\/)(AndroidManifest\.xml|Podfile)$/.test(f)) ??
+	files.find((f) => MOBILE_SOURCE.test(f));
+
+/**
  * mobsfscan reports some files relative to a truncated absolute path (for
  * example `scan-1234/…/app/AndroidManifest.xml` for `/tmp/scan-1234/…`),
  * so try the root and each of its trailing segments before giving up.
@@ -72,10 +81,14 @@ const masvsTag = (value: string | undefined): string[] =>
 const cweNumber = (value: string | undefined) =>
 	/cwe-(\d+)/i.exec(value ?? "")?.[1];
 
-/** Parses `mobsfscan --json` output. `root` is the scanned directory. */
+/**
+ * Parses `mobsfscan --json` output. `root` is the scanned directory; `anchor`
+ * is the workspace file that findings without a file match are attached to.
+ */
 export const parseMobsfscanReport = (
 	json: unknown,
 	root: string,
+	anchor?: string,
 ): FindingInput[] => {
 	if (!isRecord(json) || !isRecord(json.results)) return [];
 	const findings: FindingInput[] = [];
@@ -109,9 +122,10 @@ export const parseMobsfscanReport = (
 			tags: [...cweTag(cwe), ...owaspMobileTag(owasp), ...masvsTag(masvs)],
 		};
 		const files = arr(entry.files).filter(isRecord);
-		// Rules without file matches (none observed) still surface once.
+		// App-level rules (the app lacks a hardening measure) have no file
+		// match; they surface once, on the anchor file when there is one.
 		if (files.length === 0) {
-			findings.push(base);
+			findings.push(anchor ? { ...base, location: { file: anchor } } : base);
 			continue;
 		}
 		for (const f of files.slice(0, MAX_PER_RULE)) {
@@ -198,6 +212,6 @@ export const mobsfscan = defineAuditor({
 					"mobsfscan needs semgrep on PATH. Install: pipx install mobsfscan (bundles semgrep).",
 				);
 			for (const e of errors) yield* ctx.log(`code.mobsfscan: ${e}`);
-			return parseMobsfscanReport(json, ws.root);
+			return parseMobsfscanReport(json, ws.root, appAnchor(files));
 		}),
 });

@@ -2,6 +2,7 @@ import { isAbsolute, relative } from "node:path";
 import {
 	type AuditContext,
 	AuditorError,
+	DEFAULT_IGNORES,
 	type Severity,
 } from "@openaudit/core";
 import { Effect } from "effect";
@@ -34,6 +35,16 @@ export const relPath = (
 		: file.replace(/^\.\//, "");
 	return rel.split("\\").join("/");
 };
+
+const IGNORED_DIRS = new Set(DEFAULT_IGNORES);
+
+/**
+ * True when a workspace-relative path sits in a directory the built-in
+ * auditors skip (dependencies, build output, caches). For tools that walk the
+ * whole tree and have no exclude flag.
+ */
+export const inIgnoredDir = (file: string | undefined): boolean =>
+	file?.split("/").some((part) => IGNORED_DIRS.has(part)) === true;
 
 export const str = (v: unknown): string | undefined =>
 	typeof v === "string" ? v : undefined;

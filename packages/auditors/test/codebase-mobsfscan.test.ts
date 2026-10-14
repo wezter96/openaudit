@@ -190,6 +190,12 @@ describe("code.mobsfscan", () => {
 		expect(
 			files.has("app/src/main/java/com/example/demo/MainActivity.java"),
 		).toBe(true);
+		// App-level rules (no file match) point at the app's manifest, so path
+		// suppressions and --diff can apply to them.
+		const pinning = report.results[0]?.findings.find(
+			(f) => f.ruleId === "code.mobsfscan/android-certificate-pinning",
+		);
+		expect(pinning?.location?.file).toBe("app/src/main/AndroidManifest.xml");
 	});
 
 	test("skips when mobsfscan cannot find semgrep", async () => {

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	AuditorError,
+	DEFAULT_IGNORES,
 	defineAuditor,
 	type FindingInput,
 	redact,
@@ -15,6 +16,7 @@ import { Effect } from "effect";
 import {
 	arr,
 	cweTags,
+	inIgnoredDir,
 	num,
 	owaspTags,
 	parseJson,
@@ -77,7 +79,7 @@ export const gitleaks = defineAuditor({
 	id: "code.gitleaks",
 	title: "gitleaks secret scan",
 	description:
-		"Runs gitleaks over the working tree (no git history) to detect hardcoded secrets.",
+		"Runs gitleaks over the working tree (no git history) to detect hardcoded secrets, skipping dependencies and build output like the built-in auditors.",
 	categories: ["security"],
 	targets: ["codebase"],
 	engine: "external",
@@ -127,10 +129,12 @@ export const gitleaks = defineAuditor({
 				),
 				Effect.ensuring(Effect.promise(() => rm(report, { force: true }))),
 			);
+			// gitleaks has no exclude flag, so drop what the built-ins skip
+			// (gitignored build output in dist/ would otherwise be reported).
 			return parseGitleaksReport(
 				yield* parseJson(text || "[]", "gitleaks"),
 				ws.root,
-			);
+			).filter((f) => !inIgnoredDir(f.location?.file));
 		}),
 });
 
@@ -466,12 +470,16 @@ export const trivyFs = defineAuditor({
 					"json",
 					"--scanners",
 					"vuln,secret,misconfig",
+					...DEFAULT_IGNORES.flatMap((d) => ["--skip-dirs", `**/${d}`]),
 					"--quiet",
 					ws.root,
 				],
 				ws.root,
 				[0],
 			);
-			return parseTrivyReport(yield* parseJson(res.stdout, "trivy"), ws.root);
+			return parseTrivyReport(
+				yield* parseJson(res.stdout, "trivy"),
+				ws.root,
+			).filter((f) => !inIgnoredDir(f.location?.file));
 		}),
 });

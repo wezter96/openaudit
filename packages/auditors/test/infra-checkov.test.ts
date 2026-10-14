@@ -54,6 +54,26 @@ describe("iac.checkov", () => {
 		});
 	});
 
+	test("drops Dockerfile checks on source files that only look like Dockerfiles", () => {
+		const docker = (file_path: string) => ({
+			check_id: "CKV_DOCKER_3",
+			check_name: "Ensure that a user for the container has been created",
+			file_path,
+			file_line_range: [1, 1],
+		});
+		expect(
+			parseCheckovOutput(
+				JSON.stringify(
+					report("dockerfile", [
+						docker("/src/infra/dockerfile.ts"),
+						docker("/Dockerfile.prod"),
+						docker("/api.dockerfile"),
+					]),
+				),
+			).map((f) => f.location?.file),
+		).toEqual(["Dockerfile.prod", "api.dockerfile"]);
+	});
+
 	test("handles a single report and an empty summary", () => {
 		expect(
 			parseCheckovOutput(
