@@ -6,7 +6,6 @@ dist
 # Written by scripts/prepare.ts from the rest of the repository
 src/generated
 public/report
-public/architecture
 public/schema
 public/img/report-*.webp
 public/openapi.json

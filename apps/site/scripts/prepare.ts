@@ -7,7 +7,6 @@
  * - public/report/: openaudit's audit of this repository, as written by the
  *   CLI (unmodified). Reuses an existing report, e.g. one CI just wrote, or
  *   runs the audit when there is none. `--fresh` always re-runs it.
- * - public/architecture/: docs/architecture.html, copied as-is.
  * - public/schema/: the config and report JSON Schemas, as printed by
  *   `openaudit schema`. `openaudit init` points configs at
  *   https://openaudit.se/schema/config.json, so this path is a public contract.
@@ -261,13 +260,6 @@ if (!args.has("--data-only")) {
 	await copyFile(
 		join(reportDir, "openaudit-report.html"),
 		join(reportDir, "index.html"),
-	);
-
-	const arch = join(site, "public", "architecture");
-	await mkdir(arch, { recursive: true });
-	await copyFile(
-		join(repo, "docs", "architecture.html"),
-		join(arch, "index.html"),
 	);
 
 	// Published at stable URLs for editors: keep these paths.

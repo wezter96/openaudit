@@ -101,7 +101,7 @@ The built-in hidden-Unicode check (`code.unicode`) flags Trojan Source bidirecti
 
 The opt-in `code.dependency-health` auditor looks your pinned dependencies up on [deps.dev](https://deps.dev) and flags deprecated packages, yanked releases, dependencies whose source repository is archived, and direct dependencies with no release in years.
 
-`bunx @openaudit/cli list` shows every auditor and playbook. The [architecture page](https://openaudit.se/architecture/) maps every auditor to the targets and areas it covers.
+`bunx @openaudit/cli list` shows every auditor and playbook. The [auditor catalogue](https://openaudit.se/auditors/) lists them by target and area.
 
 ## The report
 
@@ -190,7 +190,7 @@ URL auditors send only low-volume GET/HEAD requests; the opt-in ZAP scans are th
 | `apps/cli` | The `openaudit` binary |
 | `apps/server`, `packages/api` | Hono + oRPC HTTP API (`/api-reference` for OpenAPI docs) |
 | `apps/web` | Website: landing page, live URL audit, report viewer, docs |
-| `docs/` | Architecture page (`bun docs/architecture.ts` regenerates it) and the GitHub Pages landing page |
+| `docs/` | Images for the README and site, and a local architecture overview: `bun docs/architecture.ts` writes `docs/architecture.html` (gitignored) |
 
 ## Contributing
 

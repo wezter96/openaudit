@@ -8,5 +8,5 @@
 - [ ] Tests cover the change (bug fixes include a test that fails without the fix)
 - [ ] Wrapped tools: free to use, never run target code, real recorded fixture with `SOURCE.md`
 - [ ] Rule ids are unchanged, or the PR explains the migration
-- [ ] Docs updated (README tables, `apps/cli/README.md`, `bun docs/architecture.ts`)
+- [ ] Docs updated (README tables, `apps/cli/README.md`)
 - [ ] Report or UI changes: screenshots in light and dark mode

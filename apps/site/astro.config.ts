@@ -24,7 +24,7 @@ export default defineConfig({
 	integrations: [
 		sitemap({
 			// Copied in from the CLI rather than rendered by Astro.
-			customPages: [`${site}${base}/report/`, `${site}${base}/architecture/`],
+			customPages: [`${site}${base}/report/`],
 			filter: (page) => !page.includes("/404"),
 		}),
 	],

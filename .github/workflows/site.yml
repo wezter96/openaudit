@@ -48,8 +48,6 @@ jobs:
           path: apps/site/public/report
           key: site-report-${{ github.sha }}
           restore-keys: site-report-
-      - name: Regenerate the architecture page
-        run: bun docs/architecture.ts
       - name: Build the site
         working-directory: apps/site
         env:
@@ -126,8 +124,6 @@ jobs:
           path: apps/site/public/report
           key: site-report-${{ github.sha }}
 
-      - name: Regenerate the architecture page
-        run: bun docs/architecture.ts
       - name: Build the site
         working-directory: apps/site
         env:

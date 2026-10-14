@@ -3,6 +3,7 @@
  * binding). This Worker runs first on every request to:
  *
  * - send www.openaudit.se to the apex (static assets cannot redirect by host);
+ * - send the retired architecture page to the auditor catalogue;
  * - answer the read-only MCP endpoint at /mcp (worker/mcp.ts);
  * - serve a page's Markdown version when `Accept` prefers text/markdown;
  * - add discovery Link headers and `Vary: Accept` to HTML;
@@ -73,6 +74,9 @@ export default {
 			return Response.redirect(url.toString(), 301);
 		}
 		const path = url.pathname;
+		// Retired: README links and search results still point at it.
+		if (/^\/architecture(?:\/|\.html$|$)/.test(path))
+			return Response.redirect(new URL("/auditors/", url).toString(), 301);
 		const head = request.method === "HEAD";
 		const read = request.method === "GET" || head;
 

@@ -153,7 +153,7 @@ const tools: Tool[] = [
 	{
 		name: "open_docs_page",
 		description:
-			"Navigate this tab to a page of the openaudit site (docs, auditor catalogue, live report, architecture).",
+			"Navigate this tab to a page of the openaudit site (docs, auditor catalogue, guides, live report).",
 		inputSchema: {
 			type: "object",
 			properties: {

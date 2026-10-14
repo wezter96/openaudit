@@ -360,7 +360,6 @@ const homePage = (): MarkdownPage => ({
 				(d) => `- [${d.title}](${pageUrl(docPath(d.slug))}): ${d.description}`,
 			),
 			`- [Auditor catalogue](${pageUrl("/auditors/")}): all ${counts.all} auditors.`,
-			`- [Architecture](${pageUrl("/architecture/")})`,
 			`- [Source on GitHub](${REPO})`,
 		].join("\n"),
 	),
@@ -427,31 +426,12 @@ const auditorPage = (a: Auditor): MarkdownPage => {
 	};
 };
 
-const architecturePage = (): MarkdownPage => {
-	const description =
-		/<meta name="description" content="([^"]*)"/.exec(
-			readRepo("docs/architecture.html"),
-		)?.[1] ?? "";
-	return {
-		path: "/architecture/",
-		title: "openaudit architecture",
-		description,
-		body: join(
-			"# openaudit architecture",
-			description,
-			`The [interactive architecture page](${pageUrl("/architecture/")}) maps every auditor to the targets and areas it covers; the [auditor catalogue](${pageUrl("/auditors/")}) lists them.`,
-			md("README.md", "How it works"),
-		),
-	};
-};
-
 /** Every page with a Markdown version, home first. */
 export const markdownPages = (): MarkdownPage[] => [
 	homePage(),
 	...docsPages(),
 	cataloguePage(),
 	...auditors.map(auditorPage),
-	architecturePage(),
 	...guidePages(),
 ];
 
@@ -504,7 +484,6 @@ export const llmsTxt = (): string =>
 		"## Optional",
 		[
 			`- [llms-full.txt](${pageUrl("/llms-full.txt")}): the docs, the auditor catalogue and the README pitch, concatenated.`,
-			`- [Architecture](${mdUrl("/architecture/")})`,
 			`- [Home page](${mdUrl("/")})`,
 			`- [Source on GitHub](${REPO})`,
 		].join("\n"),
@@ -528,7 +507,7 @@ export const catalogueData = () => ({
 		...DOCS.map((d) => ({ path: docPath(d.slug), title: d.title })),
 		{ path: "/auditors/", title: "Auditor catalogue" },
 		{ path: "/report/", title: "Live report" },
-		{ path: "/architecture/", title: "Architecture" },
+		...guides.map((g) => ({ path: guidePath(g.slug), title: g.heading })),
 	],
 	auditors: auditors.map((a) => ({
 		id: a.id,

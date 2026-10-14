@@ -10,7 +10,7 @@ This guide covers setup, how the code is organised, how to add an auditor, and w
 - **Improve a rule:** sharper detection, better remediation text, correct severity.
 - **Add an auditor:** a new built-in check, or a wrapper for a free, open-source scanner.
 - **Write or improve a playbook** for work that needs judgment (`packages/agent/src/playbooks`).
-- **Docs:** the README, the CLI guide, or the architecture page.
+- **Docs:** the README or the CLI guide.
 
 For anything large, such as a new target kind, a change to the report model or a new dependency, open an issue first so we can agree on the shape before you build it.
 
@@ -92,7 +92,6 @@ Then:
 1. **Put it in the right folder** and add it to that folder's `index.ts`.
 2. **Write tests** in `packages/auditors/test/` against fixtures in `test/fixtures/`. Cover what it finds, what it must not flag, and how it skips. `test/helpers.ts` has `runAuditor` and `ruleIds`.
 3. **Check it on a real project**, e.g. `bun run audit -- ../some-project --only code.env-files`, and fix the false positives you see.
-4. **Regenerate the architecture page** with `bun docs/architecture.ts`.
 
 ### Findings
 
@@ -132,7 +131,7 @@ The HTML report must stay self-contained, with no external requests and a CSP th
 - Keep each pull request focused on one change. Commits follow [Conventional Commits](https://www.conventionalcommits.org) with a scope, e.g. `feat(auditors): …` or `fix(core): …`.
 - Add or update tests. Bug fixes come with a test that fails without the fix.
 - Run the full check from [Setup](#setup).
-- Update the docs your change affects: README tables, `apps/cli/README.md` and the architecture page.
+- Update the docs your change affects: README tables and `apps/cli/README.md`.
 - Explain the change in plain language. For new rules, include an example the rule catches and one it deliberately ignores.
 
 By contributing, you agree that your contributions are licensed under the [MIT License](LICENSE). Everyone taking part is expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md).

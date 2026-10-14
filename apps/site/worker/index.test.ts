@@ -178,6 +178,22 @@ describe("routing", () => {
 		expect(res.headers.get("location")).toBe("https://openaudit.se/docs/?a=1");
 	});
 
+	test("the retired architecture page redirects to the catalogue", async () => {
+		for (const path of [
+			"/architecture/",
+			"/architecture",
+			"/architecture.html",
+			"/architecture/index.md",
+		]) {
+			const res = await get(path);
+			expect(res.status).toBe(301);
+			expect(res.headers.get("location")).toBe(
+				"https://openaudit.se/auditors/",
+			);
+		}
+		expect((await get("/architectures/")).status).toBe(404);
+	});
+
 	test("/mcp is the MCP endpoint", async () => {
 		const res = await worker.fetch(
 			new Request("https://openaudit.se/mcp", {

@@ -11,7 +11,7 @@ Nothing on the site is hand-copied from the rest of the repository. At build tim
 | `/auditors/`, `/auditors/<id>/` | `allAuditors()` from `apps/cli/src/audit.ts` and the playbooks in `packages/agent` |
 | `/guides/<slug>/` | `src/guides/*.md`: short pages that each answer one search (MCP security, AI-generated code, OWASP LLM Top 10, open-source scanner). Front matter holds the title, H1 and description; `src/lib/guides.ts` fails the build on an over-long title or description, or a dash used as punctuation. Listed in the footer and `llms.txt` |
 | `/report/` | `openaudit-report.{html,json,sarif,md}` written by the CLI, copied unmodified |
-| `/architecture/` | `docs/architecture.html`, copied unmodified |
+| `/architecture/`, `/architecture.html` | Retired; the Worker redirects them to `/auditors/` |
 | `/schema/config.json`, `/schema/report-v1.json` | `openaudit schema config` and `openaudit schema report`. `openaudit init` writes `https://openaudit.se/schema/config.json` into configs, so keep these paths |
 | `<page>index.md` | A Markdown version of every page (`/index.md`, `/docs/cli/index.md`, `/auditors/<id>/index.md`, …) composed in `src/lib/llm.ts` from the same sources and data as the HTML. The report's is the CLI's `openaudit-report.md`. Each page links it with `rel="alternate"` |
 | `/llms.txt`, `/llms-full.txt` | `src/lib/llm.ts`: the llmstxt.org index, and the README pitch, docs and auditor catalogue in one file |
@@ -36,15 +36,15 @@ bun run test                     # the Worker's tests (worker/*.test.ts)
 
 `scripts/check-ui.ts` opens the main pages at phone, tablet and desktop widths in WebKit and Chromium and fails on: sideways scrolling, no link home on screen at the bottom of a page, a footer that doesn't fit on screen at the bottom, an overlay menu that moves the page, and console errors. Point it at a local preview, a branch preview or `https://openaudit.se`. Install the browsers once with `bunx playwright install webkit chromium`.
 
-`scripts/prepare.ts` runs before `dev`, `build` and `check-types`. It writes `src/generated/*.json`, the JSON Schemas into `public/schema/`, and copies the report, the architecture page and the report screenshots into `public/`. All of that output is gitignored. If `public/report/` holds no report yet, `prepare` audits the repository (about 10 seconds). `bun scripts/prepare.ts --fresh` re-runs the audit.
+`scripts/prepare.ts` runs before `dev`, `build` and `check-types`. It writes `src/generated/*.json`, the JSON Schemas into `public/schema/`, and copies the report and the report screenshots into `public/`. All of that output is gitignored. If `public/report/` holds no report yet, `prepare` audits the repository (about 10 seconds). `bun scripts/prepare.ts --fresh` re-runs the audit.
 
 `scripts/postbuild.ts` runs after `astro build`. It:
 
 - renders an Open Graph image for every page (`dist/og/*.png`, from each page's `og:title`) and the PNG favicons;
 - adds a Content-Security-Policy `<meta>` to every page, holding the hashes of that page's inline styles and scripts (so the policy holds on hosts that cannot send headers);
 - writes `_headers` for hosts that can send headers (Cloudflare): the same policy plus HSTS, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` and cache rules;
-- adds canonical, Open Graph, Markdown and AI catalog links to the copied `/report/` and `/architecture/` pages (only `<link>` and `<meta>` tags, so their CSP hashes hold);
-- writes `robots.txt` (with `Content-Signal: search=yes, ai-input=yes, ai-train=yes` and an `Agentmap`; the content signals are the owner's choice and live in `postbuild.ts`), `.well-known/security.txt`, a redirect from the old `/architecture.html`, and `CNAME` when `CUSTOM_DOMAIN` is set;
+- adds canonical, Open Graph, Markdown and AI catalog links and the site's navigation bar to the copied `/report/` page, and hashes the bar into its CSP;
+- writes `robots.txt` (with `Content-Signal: search=yes, ai-input=yes, ai-train=yes` and an `Agentmap`; the content signals are the owner's choice and live in `postbuild.ts`), `.well-known/security.txt` and `CNAME` when `CUSTOM_DOMAIN` is set;
 - writes the agent discovery files (`scripts/agents.ts`);
 - fails the build if any internal link or asset reference does not resolve, including each page's Markdown version, the links in `llms.txt` and the discovery files, and the heading anchors the docs search returns.
 
@@ -74,7 +74,7 @@ Every internal link goes through `u()` in `src/lib/site.ts`, so it follows the b
 
 `.github/workflows/site.yml` runs on every push (and by hand):
 
-- `deploy` builds the site with the last self-audit (from the Actions cache) and regenerates `docs/architecture.html`. On `main` it runs `wrangler deploy`, so a change is live in about a minute. On any other branch it uploads a preview version (`wrangler versions upload --preview-alias <branch>`) and prints its URL in the job summary.
+- `deploy` builds the site with the last self-audit (from the Actions cache). On `main` it runs `wrangler deploy`, so a change is live in about a minute. On any other branch it uploads a preview version (`wrangler versions upload --preview-alias <branch>`) and prints its URL in the job summary.
 - `report` (main only) audits the commit inside `ghcr.io/wezter96/openaudit:edge-full`, caches the report for the next deploy and deploys again, unless a newer commit has reached `main` meanwhile.
 - `ui` runs `check:ui` against what `deploy` published.
 
@@ -111,7 +111,7 @@ The Worker runs on every request (for the redirect, Markdown negotiation and hea
 
 ## Quality gates
 
-- **Lighthouse.** Every page, including `/report/` and `/architecture/`, scores 100 in Performance, Accessibility, Best Practices and SEO on desktop and mobile. Build, serve `dist/`, and run:
+- **Lighthouse.** Every page, including `/report/`, scores 100 in Performance, Accessibility, Best Practices and SEO on desktop and mobile. Build, serve `dist/`, and run:
 
   ```sh
   bunx unlighthouse-ci --site http://localhost:<port>/ --urls <every page> --desktop --budget 100

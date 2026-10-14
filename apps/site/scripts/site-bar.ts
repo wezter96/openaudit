@@ -1,7 +1,6 @@
 /**
- * The site's navigation bar for the pages copied in from the CLI (/report/
- * and /architecture/), which have no way back to the rest of the site of
- * their own. It matches the site header: links on wide screens, a burger
+ * The site's navigation bar for the page copied in from the CLI (/report/),
+ * which has no way back to the rest of the site of its own. It matches the site header: links on wide screens, a burger
  * menu (a <details>, so it works without script) and a breadcrumb on narrow
  * ones, and the theme switch everywhere. The theme script shares the site's
  * `theme` key in localStorage; postbuild hashes it and the styles into each

@@ -59,3 +59,6 @@ temp
 
 # Copied from the repository root by apps/cli/scripts/build.ts for npm packaging
 apps/cli/LICENSE
+
+# Generated locally by `bun docs/architecture.ts`; not published.
+docs/architecture.html
