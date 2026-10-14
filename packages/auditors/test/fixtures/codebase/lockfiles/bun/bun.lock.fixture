@@ -18,11 +18,11 @@
     "bufferutil",
   ],
   "packages": {
+    "@corp/pkg": ["@corp/pkg@1.0.0", "https://registry.corp.example/@corp/pkg/-/pkg-1.0.0.tgz", {}, "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="],
+
     "bare-pkg": ["bare-pkg@1.0.0", "", {}],
 
     "bufferutil": ["bufferutil@4.0.8", "", { "dependencies": { "node-gyp-build": "^4.3.0" } }, "sha512-4T53u4PdgsXqKaIctwF8ifXlRTTmEPJ8iEPWFdGZvcf7sbwYo6FKFEX9eNNAnzFZ7EzJAQ3CJeOtCRA4rDp7Pw=="],
-
-    "corp-pkg": ["corp-pkg@1.0.0", "https://registry.corp.example/corp-pkg/-/corp-pkg-1.0.0.tgz", {}, "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="],
 
     "http-pkg": ["http-pkg@1.0.0", "http://registry.example/http-pkg/-/http-pkg-1.0.0.tgz", {}, "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="],
 

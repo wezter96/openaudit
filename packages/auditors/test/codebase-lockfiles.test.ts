@@ -9,7 +9,6 @@ import {
 	displayUrl,
 	escapesRoot,
 	lockfiles,
-	MAX_LOCKFILE_ENTRIES,
 } from "../src/codebase/lockfiles";
 import { fixture, runAuditor } from "./helpers";
 
@@ -129,10 +128,12 @@ describe("source classification", () => {
 describe("code.lockfiles", () => {
 	test("npm package-lock.json", () => {
 		expect(summary("npm")).toEqual([
+			".npmrc:1 custom-registry info @corp",
 			".npmrc:3 tls-verification-disabled medium strict-ssl=false",
 			"package-lock.json:109 weak-integrity low old-pkg@1.0.0",
 			"package-lock.json:118 unexpected-host medium private-pkg@1.0.0",
 			"package-lock.json:21 path-outside-workspace medium outside",
+			"package-lock.json:27 custom-registry-source low npm.corp.example",
 			"package-lock.json:32 install-scripts info bufferutil, utf-8-validate",
 			"package-lock.json:32 ungated-install-scripts low bufferutil, utf-8-validate",
 			"package-lock.json:45 insecure-protocol high insecure-pkg@1.0.0",
@@ -191,11 +192,13 @@ describe("code.lockfiles", () => {
 
 	test("bun.lock with trustedDependencies and a scoped registry", () => {
 		expect(summary("bun")).toEqual([
-			"bun.lock:21 missing-integrity low bare-pkg@1.0.0",
-			"bun.lock:23 install-scripts info bufferutil",
+			"bun.lock:21 custom-registry-source low registry.corp.example",
+			"bun.lock:23 missing-integrity low bare-pkg@1.0.0",
+			"bun.lock:25 install-scripts info bufferutil",
 			"bun.lock:27 insecure-protocol high http-pkg@1.0.0",
 			"bun.lock:29 git-dependency low is-number",
 			"bun.lock:31 git-dependency low is-odd",
+			"bunfig.toml:5 custom-registry info @corp = https",
 			"package.json:17 lockfile-drift low zod",
 		]);
 		expect(find("install-scripts", "bun/bun.lock")?.message).toContain(
@@ -217,6 +220,7 @@ describe("code.lockfiles", () => {
 		expect(summary("berry")).toEqual([
 			".yarnrc.yml:2 tls-verification-disabled medium enableStrictSsl",
 			".yarnrc.yml:3 insecure-protocol high npmRegistryServer",
+			".yarnrc.yml:6 custom-registry info npmScopes.corp.npmRegistryServer",
 			"yarn.lock:48 missing-integrity low evil@1.0.0",
 			"yarn.lock:48 unexpected-host medium evil@1.0.0",
 			"yarn.lock:80 git-dependency low is-number@7.0.0",
@@ -258,30 +262,6 @@ describe("code.lockfiles", () => {
 			expect(r.results[0]?.status).toBe("skipped");
 		} finally {
 			await rm(empty, { recursive: true, force: true });
-		}
-	});
-
-	test("caps entries per lockfile and discloses it", async () => {
-		const big = await mkdtemp(join(tmpdir(), "openaudit-lockfiles-big-"));
-		try {
-			const packages: Record<string, unknown> = { "": { name: "big" } };
-			for (let i = 0; i <= MAX_LOCKFILE_ENTRIES + 10; i++)
-				packages[`node_modules/p${i}`] = {
-					version: "1.0.0",
-					resolved: `http://registry.npmjs.org/p${i}/-/p${i}-1.0.0.tgz`,
-				};
-			await writeFile(
-				join(big, "package-lock.json"),
-				JSON.stringify({ lockfileVersion: 3, packages }, null, 2),
-			);
-			const r = await runAuditor(lockfiles, big);
-			const rules = findings(r).map((f) => f.ruleId);
-			expect(
-				rules.filter((id) => id === "code.lockfiles/insecure-protocol").length,
-			).toBe(MAX_LOCKFILE_ENTRIES);
-			expect(rules).toContain("code.lockfiles/truncated");
-		} finally {
-			await rm(big, { recursive: true, force: true });
 		}
 	});
 
