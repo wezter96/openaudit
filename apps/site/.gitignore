@@ -9,3 +9,4 @@ public/report
 public/architecture
 public/schema
 public/img/report-*.webp
+public/openapi.json

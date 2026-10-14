@@ -8,16 +8,23 @@
  *   that page's inline styles and scripts (GitHub Pages cannot send headers).
  * - _headers for hosts that can (Cloudflare): the same policy as a header
  *   plus the other security headers and cache rules.
- * - robots.txt, security.txt and, when CUSTOM_DOMAIN is set, CNAME.
- * - A link check: every internal href and src must resolve to a file.
+ * - Canonical, Open Graph and Markdown links in the pages copied in from the
+ *   CLI (/report/ and /architecture/), which have none of their own.
+ * - robots.txt (with content signals), security.txt and, when CUSTOM_DOMAIN
+ *   is set, CNAME.
+ * - The agent discovery files (scripts/agents.ts).
+ * - A link check: every internal href and src must resolve to a file, and so
+ *   must every page's Markdown version and the agent files' own links.
  */
 import { createHash } from "node:crypto";
 import { mkdir, readdir } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { Resvg } from "@resvg/resvg-js";
 import { capPoint, clamp, segments, ticks } from "../src/lib/dial";
+import { writeAgentFiles } from "./agents";
 
 const site = join(import.meta.dir, "..");
+const repo = join(site, "..", "..");
 const dist = join(site, "dist");
 // Same defaults as astro.config.ts.
 const SITE = (process.env.SITE_URL ?? "https://openaudit.se").replace(
@@ -207,14 +214,66 @@ const decodeEntities = (s: string) =>
 		.replace(/&gt;/g, ">")
 		.replace(/&amp;/g, "&");
 
+/**
+ * The copied pages get the same head links and social tags as Astro's pages.
+ * Only <link> and <meta> tags are added, so their CSP hashes still hold.
+ */
+const COPIED: Record<
+	string,
+	{ path: string; title: string; markdown: string }
+> = {
+	report: {
+		path: "/report/",
+		title: "openaudit's audit of itself",
+		markdown: "/report/openaudit-report.md",
+	},
+	architecture: {
+		path: "/architecture/",
+		title: "openaudit architecture",
+		markdown: "/architecture/index.md",
+	},
+};
+const attr = (s: string) => esc(s).replace(/"/g, "&quot;");
+for (const f of html.filter(copied)) {
+	const info = COPIED[relative(dist, f).split("/")[0] ?? ""];
+	if (!info) continue;
+	let page = await Bun.file(f).text();
+	if (page.includes('rel="canonical"')) continue;
+	const description = decodeEntities(
+		/<meta name="description" content="([^"]*)"/.exec(page)?.[1] ?? "",
+	);
+	const url = `${SITE}${BASE}${info.path}`;
+	const image = `${SITE}${BASE}/og/${info.path.replace(/^\/|\/$/g, "").replace(/\//g, "-")}.png`;
+	const tags = [
+		`<link rel="canonical" href="${url}">`,
+		`<link rel="alternate" type="text/markdown" href="${BASE}${info.markdown}">`,
+		`<link rel="ai-catalog" href="${BASE}/.well-known/ai-catalog.json">`,
+		'<meta property="og:type" content="website">',
+		'<meta property="og:site_name" content="openaudit">',
+		`<meta property="og:title" content="${attr(info.title)}">`,
+		`<meta property="og:description" content="${attr(description)}">`,
+		`<meta property="og:url" content="${url}">`,
+		`<meta property="og:image" content="${image}">`,
+		'<meta property="og:image:width" content="1200">',
+		'<meta property="og:image:height" content="630">',
+		`<meta property="og:image:alt" content="${attr(`openaudit grade dial beside the title “${info.title}”`)}">`,
+		'<meta name="twitter:card" content="summary_large_image">',
+	].join("\n");
+	page = page.replace("</head>", `${tags}\n</head>`);
+	await Bun.write(f, page);
+}
+
 let og = 0;
+const rendered = new Set<string>();
 for (const f of html) {
-	if (copied(f)) continue;
 	const page = await Bun.file(f).text();
 	const image = meta(page, "og:image");
 	const title = meta(page, "og:title");
 	if (!image || !title) throw new Error(`${relative(dist, f)}: no og:image`);
 	const out = join(dist, unbase(new URL(image).pathname));
+	// The report is served under two names that share one image.
+	if (rendered.has(out)) continue;
+	rendered.add(out);
 	await mkdir(dirname(out), { recursive: true });
 	const pageUrl = (meta(page, "og:url") ?? SITE).replace(/^https?:\/\//, "");
 	await Bun.write(out, png(ogCard(decodeEntities(title), pageUrl)));
@@ -243,10 +302,25 @@ Canonical: ${SITE}${BASE}/.well-known/security.txt
 `,
 );
 
+// Content signals (contentsignals.org) are the owner's choice: the docs are
+// open source and agents are welcome, so every use is allowed. Change them
+// here. Agentmap points agents at the AI catalog.
 await Bun.write(
 	join(dist, "robots.txt"),
-	`User-agent: *\nAllow: /\n\nSitemap: ${SITE}${BASE}/sitemap-index.xml\n`,
+	`User-agent: *
+Content-Signal: search=yes, ai-input=yes, ai-train=yes
+Allow: /
+
+Sitemap: ${SITE}${BASE}/sitemap-index.xml
+Agentmap: ${SITE}${BASE}/.well-known/ai-catalog.json
+`,
 );
+const agentLinks = await writeAgentFiles({
+	dist,
+	repo,
+	root: `${SITE}${BASE}`,
+	base: BASE,
+});
 // The old Pages site served the diagram at /architecture.html; README links
 // still point there.
 await Bun.write(
@@ -422,6 +496,40 @@ for (const f of html) {
 			(!BASE || url.startsWith(`${BASE}/`)) && (await exists(unbase(url)));
 		if (!ok) broken.push(`${relative(dist, f)} -> ${url}`);
 	}
+}
+// The copied pages' own links are theirs; the tags added above are checked.
+for (const f of html.filter(copied)) {
+	const page = await Bun.file(f).text();
+	for (const m of page.matchAll(
+		/<link rel="(?:alternate|ai-catalog)"[^>]*\shref="(\/[^"]*)"/g,
+	)) {
+		if (!(await exists(unbase(m[1] ?? ""))))
+			broken.push(`${relative(dist, f)} -> ${m[1]}`);
+	}
+}
+// Every site link in llms.txt and the discovery files.
+const llms = await Bun.file(join(dist, "llms.txt")).text();
+const prefix = `${SITE}${BASE}`;
+for (const url of [
+	...[...llms.matchAll(/\]\(([^)\s]+)\)/g)].map((m) => m[1] ?? ""),
+	...agentLinks.map((p) => `${prefix}${p}`),
+]) {
+	if (!url.startsWith(`${prefix}/`)) continue;
+	const path = url.slice(prefix.length);
+	if (!(await exists(path))) broken.push(`agent files -> ${url}`);
+}
+// Docs search results (remote MCP) link to headings: each id must exist.
+const docsData = (await Bun.file(join(dist, "data", "docs.json")).json()) as {
+	sections: { url: string }[];
+};
+for (const { url } of docsData.sections) {
+	const { pathname, hash } = new URL(url);
+	if (!hash) continue;
+	const page = await Bun.file(
+		join(dist, unbase(pathname), "index.html"),
+	).text();
+	if (!page.includes(`id="${decodeURIComponent(hash.slice(1))}"`))
+		broken.push(`data/docs.json -> ${url}`);
 }
 if (broken.length) {
 	throw new Error(`Broken internal links:\n${broken.join("\n")}`);

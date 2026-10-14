@@ -156,3 +156,8 @@ if (still || !("IntersectionObserver" in window)) {
 }
 
 root.classList.add("ready");
+
+/* ---- WebMCP: read-only tools for in-browser agents, where supported ---- */
+if ("modelContext" in document || "modelContext" in navigator) {
+	void import("./webmcp");
+}

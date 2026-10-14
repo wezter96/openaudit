@@ -11,7 +11,8 @@
 			"!src/generated",
 			"!public/report",
 			"!public/schema",
-			"!public/architecture"
+			"!public/architecture",
+			"!public/openapi.json"
 		]
 	},
 	"html": {

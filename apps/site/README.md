@@ -7,11 +7,16 @@ Nothing on the site is hand-copied from the rest of the repository. At build tim
 | Page | Built from |
 | --- | --- |
 | `/` | `README.md` (pitch, areas, languages, targets, safety, community), `integrations/README.md` and `apps/cli/README.md` (snippets), the auditor registry, `packages/core/src/scoring.ts`, and the self-audit's scores (hero dial and proof strip) |
-| `/docs/*` | Sections of `README.md`, `apps/cli/README.md`, `packages/agent/README.md`, `integrations/README.md`, `CONTRIBUTING.md` and `SECURITY.md`; `action.yml` (Action inputs and outputs); `openaudit --help` and `openaudit schema config`; `scoring.ts` (scoring examples) |
+| `/docs/*` | Sections of `README.md`, `apps/cli/README.md`, `packages/agent/README.md`, `integrations/README.md`, `CONTRIBUTING.md` and `SECURITY.md`; `action.yml` (Action inputs and outputs); `openaudit --help` and `openaudit schema config`; `scoring.ts` (scoring examples); the HTTP API's OpenAPI document (`/docs/api/`). Titles and descriptions are in `DOCS` (`src/lib/site.ts`) |
 | `/auditors/`, `/auditors/<id>/` | `allAuditors()` from `apps/cli/src/audit.ts` and the playbooks in `packages/agent` |
 | `/report/` | `openaudit-report.{html,json,sarif,md}` written by the CLI, copied unmodified |
 | `/architecture/` | `docs/architecture.html`, copied unmodified |
 | `/schema/config.json`, `/schema/report-v1.json` | `openaudit schema config` and `openaudit schema report`. `openaudit init` writes `https://openaudit.se/schema/config.json` into configs, so keep these paths |
+| `<page>index.md` | A Markdown version of every page (`/index.md`, `/docs/cli/index.md`, `/auditors/<id>/index.md`, …) composed in `src/lib/llm.ts` from the same sources and data as the HTML. The report's is the CLI's `openaudit-report.md`. Each page links it with `rel="alternate"` |
+| `/llms.txt`, `/llms-full.txt` | `src/lib/llm.ts`: the llmstxt.org index, and the README pitch, docs and auditor catalogue in one file |
+| `/data/catalogue.json`, `/data/docs.json` | The registry with playbooks, and the docs split at their headings with install snippets, for the remote MCP server and the WebMCP tools |
+| `/openapi.json` | The self-hosted HTTP API (`apps/server`), generated from its router by `packages/api/src/openapi.ts`. openaudit.se does not serve that API |
+| `/.well-known/*`, `/auth.md` | `scripts/agents.ts`: MCP server card (also `server-cards.json`) and the `/.well-known/mcp` manifest, the agent skills index with `skills/openaudit/SKILL.md`, the RFC 9727 API catalog, the AI catalog, and `auth.md` (no credentials needed anywhere) |
 
 The example findings on the landing page use real rule ids, titles and severities from `packages/auditors`; their file locations are illustrative.
 
@@ -23,6 +28,7 @@ cd apps/site
 bun run dev                      # http://localhost:4321/
 bun run build                    # dist/
 bun run check-types              # astro check, strict
+bun run test                     # the Worker's tests (worker/*.test.ts)
 ```
 
 `scripts/prepare.ts` runs before `dev`, `build` and `check-types`. It writes `src/generated/*.json`, the JSON Schemas into `public/schema/`, and copies the report, the architecture page and the report screenshots into `public/`. All of that output is gitignored. If `public/report/` holds no report yet, `prepare` audits the repository (about 10 seconds). `bun scripts/prepare.ts --fresh` re-runs the audit.
@@ -32,8 +38,10 @@ bun run check-types              # astro check, strict
 - renders an Open Graph image for every page (`dist/og/*.png`, from each page's `og:title`) and the PNG favicons;
 - adds a Content-Security-Policy `<meta>` to every page, holding the hashes of that page's inline styles and scripts (so the policy holds on hosts that cannot send headers);
 - writes `_headers` for hosts that can send headers (Cloudflare): the same policy plus HSTS, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` and cache rules;
-- writes `robots.txt`, `.well-known/security.txt`, a redirect from the old `/architecture.html`, and `CNAME` when `CUSTOM_DOMAIN` is set;
-- fails the build if any internal link or asset reference does not resolve.
+- adds canonical, Open Graph, Markdown and AI catalog links to the copied `/report/` and `/architecture/` pages (only `<link>` and `<meta>` tags, so their CSP hashes hold);
+- writes `robots.txt` (with `Content-Signal: search=yes, ai-input=yes, ai-train=yes` and an `Agentmap`; the content signals are the owner's choice and live in `postbuild.ts`), `.well-known/security.txt`, a redirect from the old `/architecture.html`, and `CNAME` when `CUSTOM_DOMAIN` is set;
+- writes the agent discovery files (`scripts/agents.ts`);
+- fails the build if any internal link or asset reference does not resolve, including each page's Markdown version, the links in `llms.txt` and the discovery files, and the heading anchors the docs search returns.
 
 ## Where it is served
 
@@ -51,7 +59,17 @@ Every internal link goes through `u()` in `src/lib/site.ts`, so it follows the b
 
 `.github/workflows/site.yml` runs on every push to `main` (and by hand). It audits the repository into `public/report/`, regenerates `docs/architecture.html`, builds the site for `https://openaudit.se` with base `/` and runs `wrangler deploy`. Without the Cloudflare secrets, the deploy step fails.
 
-`wrangler.jsonc` deploys a Worker named `openaudit-site` that serves `dist/` as static assets, with `_headers` applied. `worker/index.ts` runs first on every request so it can send `www.openaudit.se` to the apex with a 301. Both hostnames are custom domains, so Cloudflare creates their DNS records and certificates on the first deploy.
+`wrangler.jsonc` deploys a Worker named `openaudit-site` that serves `dist/` as static assets, with `_headers` applied. `worker/index.ts` runs first on every request. It:
+
+- sends `www.openaudit.se` to the apex with a 301;
+- answers `https://openaudit.se/mcp`, a read-only MCP server (`worker/mcp.ts`): stateless Streamable HTTP, JSON-RPC over POST with plain JSON replies, no sessions or SSE (GET is 405). Its tools (`list_auditors`, `get_auditor`, `search_docs`, `get_config_schema`, `get_install_instructions`) read `/data/*.json` and `/schema/config.json` from the build. Bodies over 64 KB and batches over 16 messages are refused, and arguments are validated against each tool's schema. It cannot run audits; `bunx @openaudit/cli mcp` does. The Server Card is also served at `/mcp/server-card`, and the manifest at `/.well-known/mcp`;
+- serves a page's Markdown version at the page's own URL when `Accept` ranks `text/markdown` at least as high as `text/html`, with `x-markdown-tokens` (characters / 4) and `Vary: Accept`. HTML stays the default;
+- adds a `Link` header to HTML (`api-catalog`, `service-desc`, `service-doc`, `describedby`, `ai-catalog` and the page's Markdown `alternate`) and `Vary: Accept`;
+- gives `llms*.txt`, `*.md`, `/.well-known/*`, `/data/*.json` and `/openapi.json` their content types and `Access-Control-Allow-Origin: *` (`worker/agents.ts`).
+
+Pages also register read-only WebMCP tools (`search_auditors`, `get_auditor`, `open_docs_page`, in `src/scripts/webmcp.ts`) when the browser has `document.modelContext`; elsewhere the module is never loaded.
+
+Both hostnames are custom domains, so Cloudflare creates their DNS records and certificates on the first deploy.
 
 One-time setup:
 
@@ -68,7 +86,7 @@ One-time setup:
 
 To deploy from your own machine instead: `bun run build && bunx wrangler login && bunx wrangler deploy`. To try the Cloudflare behaviour locally after a build, run `bunx wrangler dev`.
 
-The Worker runs on every request so it can redirect `www`. On the Workers Free plan that means 100,000 requests a day. If that becomes a limit, delete the `www` route and add a Cloudflare Redirect Rule from `www.openaudit.se/*` to `https://openaudit.se/${1}` instead.
+The Worker runs on every request (for the redirect, Markdown negotiation and headers). On the Workers Free plan that means 100,000 requests a day.
 
 ## Quality gates
 

@@ -11,6 +11,8 @@
  * - public/schema/: the config and report JSON Schemas, as printed by
  *   `openaudit schema`. `openaudit init` points configs at
  *   https://openaudit.se/schema/config.json, so this path is a public contract.
+ * - public/openapi.json: the self-hosted HTTP API's OpenAPI document,
+ *   generated from its router (packages/api).
  *
  * `--data-only` writes src/generated and nothing else (for type checks).
  */
@@ -18,6 +20,7 @@ import { copyFile, mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import * as Agent from "../../../packages/agent/src/index";
+import { openApiDocument } from "../../../packages/api/src/openapi";
 import type { Finding } from "../../../packages/core/src/model";
 import { gradeFor, scoreFor } from "../../../packages/core/src/scoring";
 import { allAuditors } from "../../cli/src/audit";
@@ -77,6 +80,19 @@ const playbooks = Agent.playbooks.map((p) => ({
 	needs: [...p.needs],
 }));
 await writeJson("registry.json", { auditors, playbooks });
+// The full procedures, for the remote MCP server's get_auditor.
+await writeJson(
+	"playbooks.json",
+	Object.fromEntries(
+		Agent.playbooks.map((p) => [p.id, Agent.renderPlaybook(p)]),
+	),
+);
+const cliVersion = (
+	(await Bun.file(join(repo, "apps", "cli", "package.json")).json()) as {
+		version: string;
+	}
+).version;
+await writeJson("version.json", { cli: cliVersion });
 
 /* ------------------------------- CLI help --------------------------------- */
 
@@ -170,6 +186,22 @@ await writeJson("scoring.json", {
 	bands,
 });
 
+/* ------------------------------ HTTP API ---------------------------------- */
+
+// The API is self-hosted only: the server is the default local address
+// (`bun run dev:server`, Bun's default port), never openaudit.se.
+const openapi = await openApiDocument({
+	version: cliVersion,
+	servers: [
+		{
+			url: "http://localhost:3000/api-reference",
+			description:
+				"Self-hosted: your own apps/server (`bun run dev:server`, port 3000 unless PORT is set)",
+		},
+	],
+});
+await writeJson("openapi.json", openapi);
+
 /* ------------------------------ self-audit -------------------------------- */
 
 const reportJson = join(reportDir, "openaudit-report.json");
@@ -245,6 +277,11 @@ if (!args.has("--data-only")) {
 	await Bun.write(
 		join(schemas, "report-v1.json"),
 		await cli("schema", "report"),
+	);
+
+	await Bun.write(
+		join(site, "public", "openapi.json"),
+		`${JSON.stringify(openapi, null, "\t")}\n`,
 	);
 
 	const shots = join(site, "public", "img");

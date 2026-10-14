@@ -1,23 +1,15 @@
 ---
 import scoring from "../../generated/scoring.json";
 import Docs from "../../layouts/Docs.astro";
+import { label, plural, SCORING_INTRO, severities } from "../../lib/docs";
 import { inline, paragraphsIn, readRepo, render, renderSection, section } from "../../lib/markdown";
 import { u } from "../../lib/site";
 
 const lede = paragraphsIn("README.md", "The report")[0] ?? "";
-// CONTRIBUTING: "`critical` for directly exploitable …, `high` for …"
-const severityLine = /\*\*Severity\*\*[^\n]+/.exec(readRepo("CONTRIBUTING.md"))?.[0] ?? "";
-const severities = [...severityLine.matchAll(/`(critical|high|medium|low|info)` for ([^,.]+?)(?=, and |, |\.)/g)].map((m) => ({
-	id: m[1] ?? "",
-	text: m[2] ?? "",
-}));
-const label = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-const plural = (n: number, s: string) => `${n} ${s}${n === 1 ? "" : "s"}`;
 ---
 
 <Docs
-	title="Report and scoring"
-	description="How openaudit scores each area from 0 to 100, how grades and severities are defined, and what the interactive HTML, JSON, SARIF and Markdown reports contain."
+	slug="report"
 	lede={inline(lede)}
 	sources={["README.md", "CONTRIBUTING.md", "packages/core/src/scoring.ts"]}
 >
@@ -25,9 +17,7 @@ const plural = (n: number, s: string) => `${n} ${s}${n === 1 ? "" : "s"}`;
 	<p>See one: <a href={u("/report/")}>openaudit's audit of its own repository</a>, rebuilt on every push.</p>
 
 	<h2 id="scoring">Scoring</h2>
-	<p>
-		Each finding adds a penalty by severity, and an area's score decays as the penalty grows, so the first serious finding costs the most. Info findings never lower a score. The overall score is the average of the areas that were examined. These examples are computed by openaudit's own scoring code when the site is built:
-	</p>
+	<p>{SCORING_INTRO}</p>
 	<div class="table">
 		<table>
 			<thead><tr><th scope="col">Findings in one area</th><th scope="col" class="r">Score</th><th scope="col">Grade</th></tr></thead>

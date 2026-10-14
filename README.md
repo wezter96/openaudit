@@ -121,6 +121,7 @@ Some audits need judgment rather than patterns. openaudit is built so agents can
 - **AI triage.** `--ai` turns the findings into a prioritised fix plan. Only finding metadata is sent, never file contents.
 - **Agent mode CLI.** `--json` prints a single JSON report to stdout, and `openaudit schema` gives its JSON Schema.
 - **Skill.** [`skills/openaudit/SKILL.md`](skills/openaudit/SKILL.md) teaches an agent the loop: baseline, triage, playbooks, fix, then verify with `compare_reports`.
+- **Read-only reference over MCP.** `https://openaudit.se/mcp` answers questions about the auditors, playbooks, docs and config schema without installing anything. It cannot run audits; the local server above does.
 
 Details are in [`apps/cli/README.md`](apps/cli/README.md) (CLI, CI, MCP setup) and [`packages/agent/README.md`](packages/agent/README.md) (playbooks, data handling).
 

@@ -1,7 +1,7 @@
 ---
 import Icon from "../../components/Icon.astro";
 import Base from "../../layouts/Base.astro";
-import { auditors, CATEGORIES, CATEGORY_LABEL, counts, ENGINE_LABEL, ENGINES, TARGET_LABEL, TARGETS, u } from "../../lib/site";
+import { auditors, CATALOGUE_DESCRIPTION, CATEGORIES, CATEGORY_LABEL, counts, ENGINE_LABEL, ENGINES, TARGET_LABEL, TARGETS, u } from "../../lib/site";
 
 const sorted = [...auditors].sort((a, b) => a.id.localeCompare(b.id));
 const optIn = auditors.filter((a) => a.optIn).length;
@@ -9,7 +9,7 @@ const optIn = auditors.filter((a) => a.optIn).length;
 
 <Base
 	title="Auditor catalogue"
-	description={`All ${counts.all} openaudit auditors: ${counts.builtin} built in, ${counts.external} that wrap an external tool and ${counts.agentic} agentic, filterable by target, area and engine.`}
+	description={CATALOGUE_DESCRIPTION}
 >
 	<header class="page-head frame">
 		<h1>Auditor catalogue</h1>

@@ -59,6 +59,79 @@ describe("web.api-exposure parsing", () => {
 		expect(summarizeSpec({ openapi: "3.0.0" })).toBeUndefined();
 	});
 
+	test("a spec is local only when every server is a loopback host", () => {
+		const withServers = (
+			servers: unknown,
+			extra: Record<string, unknown> = {},
+		) =>
+			summarizeSpec({
+				openapi: "3.1.0",
+				info: { title: "Self-hosted", version: "1" },
+				...(servers === undefined ? {} : { servers }),
+				paths: { "/audit": { post: { responses: {} } } },
+				...extra,
+			})?.localOnly;
+		const local = (...urls: string[]) => urls.map((url) => ({ url }));
+
+		expect(
+			withServers(
+				local(
+					"http://localhost:3000/api-reference",
+					"http://127.0.0.1:8080",
+					"http://127.1.2.3/",
+					"http://[::1]:7337",
+					"https://api.localhost",
+				),
+			),
+		).toBe(true);
+		// Any public, private or unknown host keeps the operations in scope.
+		expect(
+			withServers(local("http://localhost:3000", "https://api.example.com")),
+		).toBe(false);
+		expect(withServers(local("http://127.0.0.1.evil.com"))).toBe(false);
+		expect(withServers(local("http://192.168.1.10:3000"))).toBe(false);
+		expect(withServers(local("http://10.0.0.5"))).toBe(false);
+		// A relative URL is the audited origin itself.
+		expect(withServers(local("/"))).toBe(false);
+		expect(withServers(local("/api"))).toBe(false);
+		expect(withServers(local("http://{host}:3000"))).toBe(false);
+		expect(withServers(local("ftp://localhost/"))).toBe(false);
+		expect(withServers([{ description: "no url" }])).toBe(false);
+		expect(withServers(undefined)).toBe(false);
+		expect(withServers([])).toBe(false);
+		// Path- and operation-level overrides count too.
+		expect(
+			withServers(local("http://localhost:3000"), {
+				paths: {
+					"/audit": {
+						servers: local("https://api.example.com"),
+						post: { responses: {} },
+					},
+				},
+			}),
+		).toBe(false);
+		expect(
+			withServers(local("http://localhost:3000"), {
+				paths: {
+					"/audit": {
+						post: { responses: {}, servers: local("https://api.example.com") },
+					},
+				},
+			}),
+		).toBe(false);
+		// Overrides alone are enough when every operation has a loopback one.
+		expect(
+			withServers(undefined, {
+				paths: {
+					"/audit": {
+						servers: local("http://localhost:3000"),
+						post: { responses: {} },
+					},
+				},
+			}),
+		).toBe(true);
+	});
+
 	test("introspection needs a real __schema answer", () => {
 		const res = (body: unknown) =>
 			({ body: JSON.stringify(body) }) as Parameters<
@@ -123,6 +196,50 @@ describe("web.api-exposure on a local site", () => {
 		// Low volume: baseline + 4 specs + ui + 2 graphql + oidc + start page.
 		expect(site.requests.length).toBeLessThanOrEqual(12);
 		expect(site.requests.every((r) => r.startsWith("GET"))).toBe(true);
+	});
+
+	test("a spec for a loopback-only deployment is info, not medium", async () => {
+		const spec = {
+			...SPEC,
+			security: undefined,
+			components: undefined,
+			servers: [{ url: "http://localhost:3000/api-reference" }],
+		};
+		const site = start(
+			{
+				"/": () => html("<html><body>hi</body></html>"),
+				"/openapi.json": () => json(spec),
+			},
+			() => html("not found", 404),
+		);
+		const report = await runAuditor(apiExposure, site.url);
+		const finding = report.results[0]?.findings.find(
+			(f) =>
+				f.ruleId === "web.api-exposure/openapi-operations-without-security",
+		);
+		expect(finding?.severity).toBe("info");
+		expect(finding?.message).toContain("not served at this origin");
+
+		// The same spec with one public server is back in scope.
+		const publicSite = start(
+			{
+				"/": () => html("<html><body>hi</body></html>"),
+				"/openapi.json": () =>
+					json({
+						...spec,
+						servers: [...spec.servers, { url: "https://api.example.com" }],
+					}),
+			},
+			() => html("not found", 404),
+		);
+		const again = await runAuditor(apiExposure, publicSite.url);
+		const medium = again.results[0]?.findings.find(
+			(f) =>
+				f.ruleId === "web.api-exposure/openapi-operations-without-security",
+		);
+		expect(medium?.severity).toBe("medium");
+		// Same rule id and fingerprint inputs either way.
+		expect(medium?.ruleId).toBe(finding?.ruleId);
 	});
 
 	test("a catch-all that answers 200 everywhere yields nothing", async () => {

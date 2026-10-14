@@ -9,6 +9,13 @@ openaudit produces a scored report of findings. Each finding has a `ruleId`, `se
 
 Prefer the MCP tools (`run_audit`, `get_playbook`, `submit_findings`, `compare_reports`, …) when the `openaudit` server is connected. Otherwise use the CLI in agent mode: `bunx @openaudit/cli <target> --json` prints one JSON report to stdout. `bunx @openaudit/cli list --json` and `bunx @openaudit/cli doctor --json` show auditors and available tooling.
 
+## Install
+
+- **CLI.** Needs [Bun](https://bun.sh) 1.4 or later: `bunx @openaudit/cli .` runs without installing; `bun add -g @openaudit/cli` installs `openaudit`. Scanners are optional; a missing one is skipped with an install hint.
+- **MCP server** (runs audits locally, no API key): `claude mcp add openaudit -- bunx @openaudit/cli mcp`. Cursor and VS Code: `{"command": "bunx", "args": ["@openaudit/cli", "mcp"]}` in `mcp.json`. Codex: `[mcp_servers.openaudit]` with the same command in `~/.codex/config.toml`.
+- **CI.** `uses: wezter96/openaudit@main` (pin a commit SHA) with `fail-on: high`, after `actions/checkout` with `fetch-depth: 0`; it uploads SARIF and the reports. Elsewhere: `bunx @openaudit/cli . --diff origin/main -f html,sarif -o openaudit-report --fail-on high`.
+- **Reference only.** `https://openaudit.se/mcp` is a read-only MCP server with the auditor catalogue and docs; it cannot run audits. Docs: https://openaudit.se/llms.txt.
+
 Targets: a directory, a file, `.apk`/`.aab`/`.ipa`, `http(s)://…` (add `--browser` / `browser: true` for a real-browser pass), or `image:<ref>`. Only audit systems the user owns or is authorised to test.
 
 ## Loop

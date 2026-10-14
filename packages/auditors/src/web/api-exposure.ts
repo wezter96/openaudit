@@ -51,9 +51,39 @@ export interface SpecSummary {
 	readonly unsecured: number;
 	readonly unsecuredMutating: number;
 	readonly hasSecuritySchemes: boolean;
+	/**
+	 * Every server the spec names (top level and path or operation
+	 * overrides) is a loopback host, and every operation has one: the API is
+	 * documented for a local or self-hosted deployment, not for this origin.
+	 */
+	readonly localOnly: boolean;
 }
 
 const nonEmptyArray = (v: unknown): boolean => Array.isArray(v) && v.length > 0;
+
+/**
+ * An absolute http(s) server URL on a loopback host: localhost, *.localhost,
+ * 127.0.0.0/8 or [::1], as the WHATWG URL parser normalises them. Relative
+ * URLs (the audited origin), templated hosts, private and public addresses
+ * are not.
+ */
+export const isLoopbackServer = (url: unknown): boolean => {
+	if (typeof url !== "string" || !URL.canParse(url)) return false;
+	const { protocol, hostname } = new URL(url);
+	if (protocol !== "http:" && protocol !== "https:") return false;
+	return (
+		hostname === "localhost" ||
+		hostname.endsWith(".localhost") ||
+		/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+		hostname === "[::1]"
+	);
+};
+
+/** True when `servers` is a non-empty list of loopback server objects. */
+const loopbackServers = (servers: unknown): boolean =>
+	Array.isArray(servers) &&
+	servers.length > 0 &&
+	servers.every((s) => isObject(s) && isLoopbackServer(s.url));
 
 /**
  * Summarises an OpenAPI 3 / Swagger 2 document. Returns `undefined` unless the
@@ -76,12 +106,19 @@ export const summarizeSpec = (doc: Json): SpecSummary | undefined => {
 	let operations = 0;
 	let unsecured = 0;
 	let unsecuredMutating = 0;
+	// Any server list that is present must be all loopback; each operation's
+	// effective list (operation, else path, else top level) must exist.
+	let localOnly = !("servers" in doc) || loopbackServers(doc.servers);
 	for (const item of Object.values(doc.paths)) {
 		if (!isObject(item)) continue;
+		if ("servers" in item && !loopbackServers(item.servers)) localOnly = false;
 		for (const method of METHODS) {
 			const op = item[method];
 			if (!isObject(op)) continue;
 			operations++;
+			if ("servers" in op && !loopbackServers(op.servers)) localOnly = false;
+			const effective = op.servers ?? item.servers ?? doc.servers;
+			if (!loopbackServers(effective)) localOnly = false;
 			// An operation-level `security` replaces the global one; `[]` opts out.
 			const secured =
 				"security" in op ? nonEmptyArray(op.security) : globalSecurity;
@@ -98,6 +135,7 @@ export const summarizeSpec = (doc: Json): SpecSummary | undefined => {
 		unsecured,
 		unsecuredMutating,
 		hasSecuritySchemes,
+		localOnly: localOnly && operations > 0,
 	};
 };
 
@@ -196,20 +234,26 @@ export const apiExposure = defineAuditor({
 					references: [OWASP_API],
 					tags: ["api", "cwe-200", "owasp-api8"],
 				});
+				const declared = `The specification at ${url} lists ${summary.unsecured} operation(s) with no security requirement${summary.unsecuredMutating > 0 ? `, ${summary.unsecuredMutating} of them state-changing (POST/PUT/PATCH/DELETE)` : ""}${summary.hasSecuritySchemes ? "" : " and defines no security schemes at all"}.`;
 				if (summary.unsecured > 0)
 					findings.push({
 						ruleId: "web.api-exposure/openapi-operations-without-security",
 						title: `${summary.unsecured} of ${summary.operations} documented operations declare no security`,
-						severity:
-							summary.unsecuredMutating > 0 && !summary.hasSecuritySchemes
+						// Only loopback servers: documented for a local deployment.
+						severity: summary.localOnly
+							? "info"
+							: summary.unsecuredMutating > 0 && !summary.hasSecuritySchemes
 								? "medium"
 								: "low",
 						category: "security",
-						message: `The specification at ${url} lists ${summary.unsecured} operation(s) with no security requirement${summary.unsecuredMutating > 0 ? `, ${summary.unsecuredMutating} of them state-changing (POST/PUT/PATCH/DELETE)` : ""}${summary.hasSecuritySchemes ? "" : " and defines no security schemes at all"}. This reflects what the document declares, not what the server enforces, so verify each endpoint.`,
+						message: summary.localOnly
+							? `${declared} Every server it names is a loopback address, so the operations are documented for a local or self-hosted deployment and are not served at this origin. Anyone who exposes that deployment beyond the local machine should put authentication in front of it.`
+							: `${declared} This reflects what the document declares, not what the server enforces, so verify each endpoint.`,
 						location: { url },
 						evidence: `${summary.unsecured}/${summary.operations} operations without security; ${summary.unsecuredMutating} mutating`,
-						remediation:
-							"Declare a security scheme and apply it globally, opting individual public operations out explicitly, and enforce authentication on the server.",
+						remediation: summary.localOnly
+							? "Nothing to change at this origin. Where the API is deployed beyond loopback, put authentication in front of it and declare that scheme in the specification."
+							: "Declare a security scheme and apply it globally, opting individual public operations out explicitly, and enforce authentication on the server.",
 						references: [
 							"https://swagger.io/docs/specification/v3_0/authentication/",
 							OWASP_API,

@@ -7,8 +7,7 @@ const security = readRepo("SECURITY.md").replace(/^#[^\n]*\n/, "").trim();
 ---
 
 <Docs
-	title="Safety"
-	description="openaudit treats every target as hostile: confined file reads, origin-scoped HTTP, opt-in for tools that run project code, and agents without a shell."
+	slug="safety"
 	lede={inline(paragraphsIn("README.md", "Safety")[0] ?? "")}
 	sources={["README.md", AGENT, "SECURITY.md"]}
 >
