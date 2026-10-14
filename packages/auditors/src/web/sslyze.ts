@@ -177,6 +177,8 @@ const RULES = {
 			"The server's highest protocol is older than TLS 1.2, so every client connects over a deprecated protocol (RFC 8996).",
 		fix: "Enable TLS 1.2 and TLS 1.3.",
 		cwe: 327,
+		// web.tls/weak-protocol: the best protocol a client can negotiate is legacy.
+		shared: true,
 	},
 	"tls-1-3-not-supported": {
 		severity: "low",
@@ -372,12 +374,12 @@ const day = (t: number) => new Date(t).toISOString().slice(0, 10);
 /**
  * Maps a sslyze 6.x `--json_out` document to findings. Exported for tests.
  *
- * Certificate validity and TLS 1.0/1.1 support repeat checks of the built-in
- * web.tls auditor (`shared` rules): they sit at the bare target URL with
- * web.tls's CWE, so correlation merges the two reports. Everything else
- * points at the TLS endpoint (`selector: "tls:host:port"`), so its CWE tags
- * never merge with unrelated page-level findings at the same URL; CVE tags
- * still merge with testssl.sh.
+ * Certificate validity, TLS 1.0/1.1 support and a pre-TLS 1.2 ceiling repeat
+ * checks of the built-in web.tls auditor (`shared` rules): they sit at the
+ * bare target URL with web.tls's CWE, so correlation merges the two reports.
+ * Everything else points at the TLS endpoint (`selector: "tls:host:port"`), so
+ * its CWE tags never merge with unrelated page-level findings at the same URL;
+ * CVE tags still merge with testssl.sh.
  */
 export const parseSslyzeReport = (
 	json: unknown,

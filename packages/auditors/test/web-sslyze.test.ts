@@ -95,7 +95,7 @@ const jsonOut = (cmd: ReadonlyArray<string>) =>
 	"";
 
 describe("web.sslyze parser", () => {
-	test("reports the protocol ceiling at the TLS endpoint", () => {
+	test("reports the protocol ceiling", () => {
 		const scan = parseSslyzeReport(sample("tls-v1-0"), URL_1010, NOW);
 		expect(scan.connectivityError).toBeUndefined();
 		expect(scan.errors).toEqual([]);
@@ -107,10 +107,8 @@ describe("web.sslyze parser", () => {
 		expect(f?.severity).toBe("high");
 		expect(f?.category).toBe("security");
 		expect(f?.evidence).toBe("highest_tls_version_supported=TLS_1_0");
-		expect(f?.location).toEqual({
-			url: URL_1010,
-			selector: "tls:tls-v1-0.badssl.com:1010",
-		});
+		// Shared with web.tls/weak-protocol: bare URL, so they merge.
+		expect(f?.location).toEqual({ url: URL_1010 });
 		expect(f?.tags).toEqual(["tls", "cwe-327", "owasp-a02"]);
 		expect(f?.references).toContain(
 			"https://wiki.mozilla.org/Security/Server_Side_TLS",
@@ -118,11 +116,17 @@ describe("web.sslyze parser", () => {
 		expect(f?.references).toContain(
 			"https://cwe.mitre.org/data/definitions/327.html",
 		);
-		expect(
-			parseSslyzeReport(sample("cert-expired"), URL_1010, NOW).findings.find(
-				(x) => x.ruleId === "web.sslyze/tls-1-3-not-supported",
-			)?.severity,
-		).toBe("low");
+		const tls13 = parseSslyzeReport(
+			sample("cert-expired"),
+			URL_1010,
+			NOW,
+		).findings.find((x) => x.ruleId === "web.sslyze/tls-1-3-not-supported");
+		expect(tls13?.severity).toBe("low");
+		// web.tls has no such check: located at the TLS endpoint.
+		expect(tls13?.location).toEqual({
+			url: URL_1010,
+			selector: "tls:expired.badssl.com:443",
+		});
 	});
 
 	test("maps certificate validity like web.tls, at the bare URL", () => {
@@ -365,6 +369,56 @@ describe("web.sslyze parser", () => {
 		for (const f of sslyzeResult?.findings ?? [])
 			if (!f.ruleId.endsWith("certificate-expired"))
 				expect(f.duplicateOf).toBeUndefined();
+		// A legacy protocol is not a certificate problem (cwe-327, not cwe-295).
+		expect(
+			tlsResult?.findings.find((f) => f.ruleId === "web.tls/weak-protocol")
+				?.duplicateOf,
+		).toBeUndefined();
+
+		// ...but it is the same issue as sslyze's protocol ceiling.
+		const legacyUrl = "https://tls-v1-0.badssl.com:1010/";
+		const [legacyTls, legacySslyze] = correlate([
+			{
+				auditor: "web.tls",
+				status: "failed",
+				findings: certificateFindings(
+					legacyUrl,
+					{
+						protocol: "TLSv1",
+						authorized: true,
+						authorizationError: undefined,
+						hostnameError: undefined,
+						subject: "*.badssl.com",
+						issuer: "R3",
+						validFrom: new Date("2026-09-29T20:02:56Z"),
+						validTo: new Date("2026-12-28T20:02:55Z"),
+						selfSigned: false,
+					},
+					NOW,
+				).map(asFinding("web.tls")),
+			},
+			{
+				auditor: "web.sslyze",
+				status: "failed",
+				findings: parseSslyzeReport(
+					sample("tls-v1-0"),
+					legacyUrl,
+					NOW,
+				).findings.map(asFinding("web.sslyze")),
+			},
+		] as unknown as AuditorResult[]);
+		expect(legacyTls?.findings.map((f) => f.ruleId)).toEqual([
+			"web.tls/weak-protocol",
+		]);
+		expect(legacySslyze?.findings[0]?.ruleId).toBe(
+			"web.sslyze/tls-1-2-not-supported",
+		);
+		expect(
+			[
+				legacyTls?.findings[0]?.duplicateOf,
+				legacySslyze?.findings[0]?.duplicateOf,
+			].filter(Boolean),
+		).toHaveLength(1);
 	});
 
 	test("maps known vulnerabilities with CVE tags that merge with testssl.sh", () => {
