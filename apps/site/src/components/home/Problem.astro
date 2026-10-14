@@ -1,0 +1,86 @@
+---
+import Icon from "../Icon.astro";
+
+type Glyph = "key" | "lock" | "person";
+const risks: { glyph: Glyph; title: string; text: string }[] = [
+	{
+		glyph: "key",
+		title: "A key left in the code",
+		text: "An API key gets pasted in to make something work. Someone finds it and runs up the bill on your account.",
+	},
+	{
+		glyph: "lock",
+		title: "A door nobody locked",
+		text: "The admin page works, so it ships. Nothing checks who's asking, so anyone with the link gets in.",
+	},
+	{
+		glyph: "person",
+		title: "A site some people can't use",
+		text: "Buttons a screen reader can't name, text too faint to read. In the EU, the Accessibility Act has applied since June 2025.",
+	},
+];
+---
+
+<section class="sheet" id="problem" aria-labelledby="problem-title">
+	<div class="frame">
+		<div class="sheet-head">
+			<p class="eyebrow rise">The problem</p>
+			<h2 id="problem-title" class="rise">AI ships fast. <span class="tone">Its mistakes ship too</span></h2>
+			<p class="rise">Your AI writes code that works. It doesn't check that it's safe, and you can't tell by looking.</p>
+		</div>
+		<ul class="risks">
+			{
+				risks.map((r) => (
+					<li class="rise">
+						<Icon name={r.glyph} class="g" />
+						<h3>{r.title}</h3>
+						<p>{r.text}</p>
+					</li>
+				))
+			}
+		</ul>
+	</div>
+</section>
+
+<style>
+	.risks {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 1.25rem clamp(1.5rem, 3vw, 3rem);
+	}
+
+	.risks li {
+		padding-top: 1.1rem;
+		border-top: 1px solid var(--ink);
+	}
+
+	.risks :global(.g) {
+		width: 1.75rem;
+		height: 1.75rem;
+		fill: none;
+		stroke: var(--accent);
+		stroke-width: 1.5;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+
+	.risks h3 {
+		margin-top: 0.75rem;
+		font-family: var(--display);
+		font-size: clamp(1.25rem, 1.05rem + 0.6vw, 1.5rem);
+		font-weight: 740;
+		letter-spacing: -0.03em;
+	}
+
+	.risks p {
+		margin-top: 0.45rem;
+		color: var(--graphite);
+		text-wrap: pretty;
+	}
+
+	@media (max-width: 52rem) {
+		.risks {
+			grid-template-columns: minmax(0, 1fr);
+		}
+	}
+</style>

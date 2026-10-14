@@ -8,6 +8,12 @@ const languages = tableIn("README.md", "Languages and ecosystems");
 const note = inline(paragraphsIn("README.md", "Languages and ecosystems")[0] ?? "");
 /** Dot radius on a 20-unit cell: area grows with the auditor count. */
 const radius = (n: number) => (n ? (2.6 + 6.4 * Math.sqrt(n / matrixMax)).toFixed(2) : "0");
+
+interface Props {
+	/** Start unfolded, where the reader came for the detail. */
+	readonly open?: boolean;
+}
+const { open = false } = Astro.props;
 ---
 
 <section class="sheet" id="coverage" aria-labelledby="coverage-title">
@@ -16,7 +22,7 @@ const radius = (n: number) => (n ? (2.6 + 6.4 * Math.sqrt(n / matrixMax)).toFixe
 			<h2 id="coverage-title" class="rise">Point it at anything you ship</h2>
 			<p class="rise">It detects what you point it at and runs what applies.</p>
 		</div>
-		<details class="fold rise">
+		<details class="fold rise" open={open}>
 			<summary>
 				<span>Coverage by target and language</span>
 				<svg class="plus" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h14M12 5v14" /></svg>

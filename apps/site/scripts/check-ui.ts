@@ -25,6 +25,7 @@ const base = (process.argv[2] ?? "http://localhost:4321").replace(/\/$/, "");
 const PAGES = [
 	"/",
 	"/docs/",
+	"/developers/",
 	"/docs/cli/",
 	"/docs/configuration/",
 	"/docs/ci/",

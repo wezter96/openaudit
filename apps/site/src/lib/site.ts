@@ -20,6 +20,16 @@ export const IMAGE = "ghcr.io/wezter96/openaudit";
 
 export const PITCH = "One scored audit of everything you ship.";
 
+/** The sentence a visitor pastes into their AI agent; llms.txt tells the agent how. */
+export const HANDOFF =
+	"Audit this project with openaudit (https://openaudit.se/llms.txt). Fix what matters most, then run it again to check.";
+
+export const DEVELOPERS_DESCRIPTION =
+	"openaudit for developers: the CLI, MCP server and CI integrations, the ten audit areas, what runs for each target and language, and how findings merge and score.";
+
+/** Agents that can run commands, so they can follow the handoff. */
+export const HANDOFF_AGENTS = "Claude Code, Cursor, Codex, Windsurf or Copilot";
+
 /** The docs pages, in reading order; titles and descriptions live here only. */
 export const DOCS = [
 	{

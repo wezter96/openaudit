@@ -22,6 +22,7 @@ if (session && pane && log && !still) {
 			? Math.max(0, last.offsetTop + last.offsetHeight - pane.clientHeight)
 			: 0;
 		log.style.transform = shift ? `translateY(${-shift}px)` : "";
+		pane.classList.toggle("scrolled", shift > 0);
 	};
 
 	const step = () => {

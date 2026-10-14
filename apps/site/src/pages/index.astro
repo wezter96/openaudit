@@ -1,17 +1,12 @@
 ---
-import Command from "../components/Command.astro";
-import Agents from "../components/home/Agents.astro";
-import Areas from "../components/home/Areas.astro";
-import Coverage from "../components/home/Coverage.astro";
+import Handoff from "../components/Handoff.astro";
 import Faq from "../components/home/Faq.astro";
-import Flow from "../components/home/Flow.astro";
 import Hero from "../components/home/Hero.astro";
-import Open from "../components/home/Open.astro";
-import Proof from "../components/home/Proof.astro";
-import Safety from "../components/home/Safety.astro";
+import Problem from "../components/home/Problem.astro";
 import Showcase from "../components/home/Showcase.astro";
+import Steps from "../components/home/Steps.astro";
+import Trust from "../components/home/Trust.astro";
 import Icon from "../components/Icon.astro";
-import Integrations from "../components/Integrations.astro";
 import Base from "../layouts/Base.astro";
 import { wrappedCount } from "../lib/home";
 import { counts, PITCH, REPO, SITE, u } from "../lib/site";
@@ -37,32 +32,18 @@ const jsonLd = JSON.stringify({
 <Base title={title} ogTitle={PITCH} description={description} heroDial>
 	<script type="application/ld+json" slot="head" is:inline set:html={jsonLd} />
 	<Hero />
-	<Proof />
-	<Agents />
-	<Areas />
-	<Coverage />
-	<Flow />
-	<Showcase />
-	<section class="sheet" id="integrations" aria-labelledby="integrations-title">
-		<div class="frame">
-			<div class="sheet-head">
-				<h2 id="integrations-title" class="rise">Runs where you already work</h2>
-				<p class="rise">Same report from every route.</p>
-			</div>
-			<Integrations />
-		</div>
-	</section>
-	<Safety />
-	<Open />
+	<Problem />
+	<Steps />
+	<Showcase compact />
+	<Trust />
 	<Faq />
 	<section class="sheet closing" aria-labelledby="try-title">
 		<div class="frame">
-			<h2 id="try-title" class="rise">Audit your own project</h2>
-			<div class="rise"><Command command="bunx @openaudit/cli . -f html -o report" /></div>
-			<p class="rise muted">Then open <code>report/openaudit-report.html</code>.</p>
+			<h2 id="try-title" class="rise">Put it <span class="tone">to work</span></h2>
+			<div class="rise"><Handoff /></div>
 			<div class="rise links">
-				<a class="btn primary" href={u("/docs/")}>Read the docs</a>
-				<a class="btn" href={u("/report/")}><Icon name="report" />See a live report</a>
+				<a class="btn primary" href={u("/report/")}><Icon name="report" />See a live report</a>
+				<a class="btn" href={u("/developers/")}><Icon name="terminal" />For developers</a>
 			</div>
 		</div>
 	</section>
@@ -82,11 +63,6 @@ const jsonLd = JSON.stringify({
 		font-weight: 780;
 		letter-spacing: -0.05em;
 		line-height: 0.95;
-	}
-
-	.closing .muted {
-		max-width: 38rem;
-		font-size: 0.9375rem;
 	}
 
 	.links {

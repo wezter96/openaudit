@@ -1,24 +1,28 @@
 ---
 import scoring from "../../generated/scoring.json";
 import { wrappedCount } from "../../lib/home";
-import { u } from "../../lib/site";
+import { HANDOFF_AGENTS, u } from "../../lib/site";
 import "../../styles/split.css";
 
-const w = scoring.weights as Record<string, number>;
 const ex = (sev: string) => scoring.examples.find((e) => e.severity === sev && e.n === 1)?.score;
 
+const minA = scoring.bands.find((b) => b.grade === "A")?.min ?? 90;
 const faqs = [
+	{
+		q: "Do I need to know how to code?",
+		a: `No. Your AI runs it, reads the results and makes the fixes. You can open the report yourself too: every finding says what's wrong and how to fix it, in plain words. Works in ${HANDOFF_AGENTS}.`,
+	},
 	{
 		q: "Does it upload my code?",
 		a: "No. It runs on your machine. Dependency checks ask OSV.dev and URL audits call the site you name. <code>--offline</code> stops the rest. Code only leaves if you turn on the agentic auditors.",
 	},
 	{
-		q: "What do I need installed?",
-		a: `Just <a href="https://bun.sh">Bun</a> 1.4+. The other ${wrappedCount} scanners are used when installed and skipped when not. The <a href="${u("/docs/ci/#docker")}">Docker image</a> has them all.`,
+		q: "What does the grade mean?",
+		a: `Each area gets a score from 0 to 100, and every problem costs points by how serious it is. ${minA} or more is an A. One critical problem takes an area to ${ex("critical")}. <a href="${u("/docs/report/#scoring")}">How scoring works</a>`,
 	},
 	{
-		q: "How is the score calculated?",
-		a: `Each finding costs points: ${w.critical} for critical, ${w.high} high, ${w.medium} medium, ${w.low} low. One critical takes an area to ${ex("critical")}. <a href="${u("/docs/report/#scoring")}">Scoring</a>`,
+		q: "What do I need installed?",
+		a: `Just <a href="https://bun.sh">Bun</a> 1.4+, and your AI can install that. The other ${wrappedCount} scanners are used when installed and skipped when not. The <a href="${u("/docs/ci/#docker")}">Docker image</a> has them all.`,
 	},
 	{
 		q: "Is it free?",

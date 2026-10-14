@@ -1,0 +1,109 @@
+---
+import { wrappedCount } from "../../lib/home";
+import { auditors, u } from "../../lib/site";
+import Session from "../Session.astro";
+
+const steps = [
+	{
+		title: "Hand it to your AI",
+		text: "Paste one sentence into the agent you already use. It installs openaudit and runs it on your project.",
+	},
+	{
+		title: "It checks everything",
+		text: `${auditors.length} checks and ${wrappedCount} free scanners look at your code, your site and what you depend on. Every problem gets a plain fix.`,
+	},
+	{
+		title: "Your AI fixes it, then checks again",
+		text: "It works through the list, most serious first, and runs the audit again to prove the fixes landed.",
+	},
+];
+---
+
+<section class="sheet" id="how" aria-labelledby="how-title">
+	<div class="frame steps-grid">
+		<div>
+			<div class="sheet-head single">
+				<p class="eyebrow rise">How it works</p>
+				<h2 id="how-title" class="rise">Hand it over. <span class="tone">Get it fixed</span></h2>
+			</div>
+			<ol class="steps">
+				{
+					steps.map((s, i) => (
+						<li class="rise">
+							<span class="n num" aria-hidden="true">
+								{i + 1}
+							</span>
+							<div>
+								<h3>{s.title}</h3>
+								<p>{s.text}</p>
+							</div>
+						</li>
+					))
+				}
+			</ol>
+			<p class="rise more"><a href={u("/docs/agents/")}>How it works with agents</a></p>
+		</div>
+		<Session />
+	</div>
+</section>
+
+<style>
+	.steps-grid {
+		display: grid;
+		grid-template-columns: minmax(0, 6fr) minmax(0, 6fr);
+		gap: 3rem clamp(2rem, 5vw, 5rem);
+		align-items: start;
+	}
+
+	.sheet-head.single {
+		grid-template-columns: 1fr;
+		margin-bottom: 2rem;
+	}
+
+	.steps {
+		border-top: 1px solid var(--hair);
+	}
+
+	.steps li {
+		display: grid;
+		grid-template-columns: 2.25rem minmax(0, 1fr);
+		gap: 1rem;
+		padding: 1.1rem 0 1.2rem;
+		border-bottom: 1px solid var(--hair);
+	}
+
+	.n {
+		font-size: 0.875rem;
+		font-weight: 650;
+		color: var(--accent);
+		padding-top: 0.2rem;
+	}
+
+	.steps h3 {
+		font-size: 1.1875rem;
+		font-weight: 680;
+		letter-spacing: -0.02em;
+	}
+
+	.steps p {
+		margin-top: 0.3rem;
+		color: var(--graphite);
+		text-wrap: pretty;
+	}
+
+	.more {
+		margin-top: 1.25rem;
+		font-weight: 600;
+		font-size: 0.9375rem;
+	}
+
+	@media (max-width: 60rem) {
+		.steps-grid {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.steps-grid :global(.session) {
+			position: static;
+		}
+	}
+</style>

@@ -1,0 +1,84 @@
+---
+import { BLOB, OPENSVERIGE, u } from "../../lib/site";
+import Icon from "../Icon.astro";
+
+type Glyph = "check" | "github" | "folder" | "shield";
+const points: { glyph: Glyph; title: string; text: string }[] = [
+	{ glyph: "check", title: "Free", text: "No account, no key, no plan to pick. The AI features cost tokens, and they're opt-in." },
+	{ glyph: "github", title: "Open source", text: `MIT licensed. <a href="${BLOB}/LICENSE">Read the licence</a> or the code.` },
+	{ glyph: "folder", title: "Runs on your machine", text: "Your code stays with you. Only lookups like known vulnerabilities go out." },
+	{ glyph: "shield", title: "Never runs what it scans", text: `Every project is treated as hostile. <a href="${u("/docs/safety/")}">The safety model</a>` },
+];
+---
+
+<section class="sheet" id="trust" aria-labelledby="trust-title">
+	<div class="frame">
+		<div class="sheet-head">
+			<p class="eyebrow rise">Why trust it</p>
+			<h2 id="trust-title" class="rise">Free, open <span class="tone">and yours</span></h2>
+			<p class="rise">
+				Shared with <a href={OPENSVERIGE}>OpenSverige</a>, Sweden's community for agent builders.
+			</p>
+		</div>
+		<ul class="points">
+			{
+				points.map((p) => (
+					<li class="rise">
+						<Icon name={p.glyph} class="g" />
+						<h3>{p.title}</h3>
+						<p set:html={p.text} />
+					</li>
+				))
+			}
+		</ul>
+	</div>
+</section>
+
+<style>
+	.points {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 1.5rem clamp(1.25rem, 2.5vw, 2.5rem);
+	}
+
+	.points li {
+		padding-top: 1rem;
+		border-top: 1px solid var(--ink);
+	}
+
+	.points :global(.g) {
+		width: 1.5rem;
+		height: 1.5rem;
+		fill: none;
+		stroke: var(--accent);
+		stroke-width: 1.6;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+
+	.points h3 {
+		margin-top: 0.6rem;
+		font-size: 1.125rem;
+		font-weight: 680;
+		letter-spacing: -0.02em;
+	}
+
+	.points p {
+		margin-top: 0.3rem;
+		color: var(--graphite);
+		font-size: 0.9375rem;
+		text-wrap: pretty;
+	}
+
+	@media (max-width: 60rem) {
+		.points {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+
+	@media (max-width: 34rem) {
+		.points {
+			grid-template-columns: minmax(0, 1fr);
+		}
+	}
+</style>

@@ -999,8 +999,8 @@ html:not(.js) .needs-js {
 	line-height: 0.98;
 }
 
-/* headings end on a full stop in the brand blue */
-.stop,
+/* headings end on a full stop in the brand blue; a .tone half shares it */
+.tone,
 .sheet-head h2::after,
 .closing h2::after {
 	color: var(--accent);
@@ -1009,6 +1009,24 @@ html:not(.js) .needs-js {
 .sheet-head h2::after,
 .closing h2::after {
 	content: ".";
+}
+
+/* a small label over a sheet's heading: "The problem", "How it works" */
+.eyebrow {
+	grid-column: 1 / -1;
+	margin-bottom: -0.5rem;
+	font-family: var(--mono);
+	font-size: 0.75rem;
+	font-weight: 650;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	color: var(--accent);
+}
+
+.sheet-head p.eyebrow {
+	max-width: none;
+	font-size: 0.75rem;
+	color: var(--accent);
 }
 
 .sheet-head p {

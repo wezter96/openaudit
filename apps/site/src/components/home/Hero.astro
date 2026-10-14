@@ -1,10 +1,17 @@
 ---
-import { CATEGORY_LABEL, PITCH, REPO, self, u } from "../../lib/site";
-import Command from "../Command.astro";
+import { CATEGORY_LABEL, REPO, self, u } from "../../lib/site";
 import Dial from "../Dial.astro";
+import Handoff from "../Handoff.astro";
 import Icon from "../Icon.astro";
 
-const words = PITCH.split(" ");
+/** The headline's two sentences; the answer half is in the accent. */
+const lines = ["Your AI writes the code.", "Who checks it?"];
+const words = lines.flatMap((line, i) => line.split(" ").map((w) => ({ w, tone: i > 0 })));
+const badges = [
+	{ label: "Free" },
+	{ label: "Open source", href: REPO },
+	{ label: "Runs on your machine" },
+];
 const scored = self.categories ?? [];
 const segments = scored.map((c) => ({
 	label: CATEGORY_LABEL[c.category] ?? c.category,
@@ -16,14 +23,10 @@ const segments = scored.map((c) => ({
 <section class="hero frame" aria-labelledby="hero-title">
 	<h1 id="hero-title" class="hero-title">
 		{
-			words.map((w, i) => (
+			words.map(({ w, tone }, i) => (
 				<>
-					<span class="w">
-						{w.endsWith(".") ? (
-							<span>{w.slice(0, -1)}<span class="stop">.</span></span>
-						) : (
-							<span>{w}</span>
-						)}
+					<span class:list={["w", { tone }]}>
+						<span>{w}</span>
 					</span>
 					{i < words.length - 1 ? " " : ""}
 				</>
@@ -32,15 +35,18 @@ const segments = scored.map((c) => ({
 	</h1>
 	<div class="hero-copy">
 		<p class="hero-sub late">
-			Code, sites, containers, cloud and mobile apps. One report, a grade per area.
+			It checks what you ship for security holes, leaked keys, slow pages and accessibility problems. Then it hands your AI the list to fix.
 		</p>
 		<div class="hero-cmd late">
-			<Command command="bunx @openaudit/cli ." />
+			<Handoff />
 		</div>
 		<div class="hero-links late">
 			<a class="btn primary" href={u("/report/")}><Icon name="report" />See a live report</a>
-			<a class="btn" href={REPO}><Icon name="github" />Open source</a>
+			<a class="btn" href={u("/developers/")}><Icon name="terminal" />For developers</a>
 		</div>
+		<ul class="badges late" aria-label="openaudit is">
+			{badges.map((b) => <li>{b.href ? <a href={b.href}>{b.label}</a> : b.label}</li>)}
+		</ul>
 	</div>
 	{
 		self.available && self.score !== undefined && self.grade && (
@@ -159,6 +165,40 @@ const segments = scored.map((c) => ({
 
 	.hero-cmd {
 		margin-top: 1.75rem;
+	}
+
+	.badges {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem 1.1rem;
+		margin-top: 1.4rem;
+		font-family: var(--mono);
+		font-size: 0.75rem;
+		font-weight: 600;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--graphite);
+	}
+
+	.badges a {
+		color: inherit;
+		text-decoration-color: var(--hair);
+		text-underline-offset: 0.2em;
+	}
+
+	.badges a:hover {
+		color: var(--accent);
+	}
+
+	.badges li::before {
+		content: "";
+		display: inline-block;
+		width: 0.45rem;
+		height: 0.45rem;
+		margin-right: 0.45rem;
+		border-radius: 50%;
+		background: var(--ok);
+		vertical-align: 0.1em;
 	}
 
 	.hero-links {

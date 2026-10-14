@@ -11,6 +11,12 @@ const items: { glyph: Glyph; lead: string; body: string }[] = [
 	{ glyph: "container", lead: "Wrapped tools", body: "Nothing gets built or installed. Linters that run code are opt-in." },
 	{ glyph: "git", lead: "Git", body: "Hooks and fsmonitor are off. Diffs compare commits." },
 ];
+
+interface Props {
+	/** Start unfolded, where the reader came for the detail. */
+	readonly open?: boolean;
+}
+const { open = false } = Astro.props;
 ---
 
 <section class="sheet" id="safety" aria-labelledby="safety-title">
@@ -20,7 +26,7 @@ const items: { glyph: Glyph; lead: string; body: string }[] = [
 			<p class="rise">Every target is treated as hostile. Nothing it scans gets built or run.</p>
 			<p class="rise more"><a href={u("/docs/safety/")}>Safety model</a></p>
 		</div>
-		<details class="fold rise">
+		<details class="fold rise" open={open}>
 			<summary>
 				<span>Five guards against hostile targets</span>
 				<svg class="plus" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h14M12 5v14" /></svg>

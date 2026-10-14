@@ -1,0 +1,152 @@
+---
+/** The example agent session: plays in a short window, like a terminal. */
+import { HANDOFF } from "../lib/site";
+---
+
+<figure class="session" data-session>
+	<figcaption>Example session in Claude Code</figcaption>
+	<div class="screen">
+		<ol class="log">
+			<li class="you">{HANDOFF}</li>
+			<li class="call"><b>openaudit</b> run_audit <span>target: "."</span></li>
+			<li class="out">78/100, grade C. 1 critical and 3 high findings from 41 auditors.</li>
+			<li class="call"><b>openaudit</b> get_playbook <span>id: "agent.authz"</span></li>
+			<li class="out">Authentication and authorization review: inventory every route, then check who can reach it.</li>
+			<li class="tool">Read src/routes/admin.ts</li>
+			<li class="call"><b>openaudit</b> submit_findings <span>2 findings</span></li>
+			<li class="out">Merged into the report. Security 61 to 54.</li>
+			<li class="tool">Edit src/routes/admin.ts, src/config.ts</li>
+			<li class="call"><b>openaudit</b> compare_reports</li>
+			<li class="out good">3 fixed, 0 new.</li>
+		</ol>
+	</div>
+</figure>
+
+<script>
+	import "../scripts/session";
+</script>
+
+<style>
+	.session {
+		position: sticky;
+		top: calc(var(--head) + 2rem);
+		margin: 0;
+		padding: 1.1rem 1.25rem 1.3rem;
+		border-radius: 12px;
+		background: #0d1522;
+		color: #d8e0eb;
+		box-shadow: var(--shot);
+		font-family: var(--mono);
+		font-size: 0.8125rem;
+		line-height: 1.55;
+	}
+
+	:global(:root[data-theme="dark"]) .session {
+		background: #060a11;
+		box-shadow: 0 0 0 1px var(--hair);
+	}
+
+	@media (prefers-color-scheme: dark) {
+		:global(:root:not([data-theme="light"])) .session {
+			background: #060a11;
+			box-shadow: 0 0 0 1px var(--hair);
+		}
+	}
+
+	.session figcaption {
+		font-family: var(--sans);
+		font-size: 0.75rem;
+		color: #9aa7b9;
+		padding-bottom: 0.8rem;
+		margin-bottom: 0.9rem;
+		border-bottom: 1px solid #2a374c;
+	}
+
+	.log li + li {
+		margin-top: 0.45rem;
+	}
+
+	.log .you {
+		color: #fff;
+		font-family: var(--sans);
+		font-size: 0.9375rem;
+		padding-bottom: 0.5rem;
+	}
+
+	.log .you::before {
+		content: "> ";
+		color: #8fa2ff;
+		font-family: var(--mono);
+	}
+
+	.log .call::before,
+	.log .tool::before {
+		content: "";
+		display: inline-block;
+		width: 0.5rem;
+		height: 0.5rem;
+		margin-right: 0.6rem;
+		border-radius: 50%;
+		background: #8fa2ff;
+		vertical-align: 0.05em;
+	}
+
+	.log .tool {
+		color: #9aa7b9;
+	}
+
+	.log .tool::before {
+		background: #4a5668;
+	}
+
+	.log .call b {
+		color: #fff;
+		font-weight: 600;
+	}
+
+	.log .call span {
+		color: #9aa7b9;
+	}
+
+	.log .out {
+		padding-left: 1.1rem;
+		color: #b9c4d3;
+		border-left: 1px solid #2a374c;
+		margin-left: 0.22rem;
+	}
+
+	.log .good {
+		color: #4fd49b;
+	}
+
+	/* with motion, the session plays in a window of a few lines, like a
+	   terminal, instead of standing at full height */
+	.session:global(.play) .screen {
+		position: relative;
+		height: 8.75rem;
+		overflow: hidden;
+	}
+
+	/* lines that scrolled off fade out at the top */
+	.session:global(.play) .screen:global(.scrolled) {
+		mask-image: linear-gradient(to bottom, transparent, #000 2rem);
+	}
+
+	.session:global(.play) .log {
+		position: relative;
+		transition: transform 0.7s var(--settle);
+	}
+
+	.session:global(.play) .log li {
+		opacity: 0;
+		transform: translateY(6px);
+		transition:
+			opacity 0.4s var(--soft),
+			transform 0.6s var(--soft);
+	}
+
+	.session:global(.play) .log li:global(.on) {
+		opacity: 1;
+		transform: none;
+	}
+</style>

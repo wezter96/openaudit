@@ -2,6 +2,12 @@
 import { u } from "../../lib/site";
 import Icon from "../Icon.astro";
 
+interface Props {
+	/** The home page's short version: a plain-language head, no numbered callouts. */
+	readonly compact?: boolean;
+}
+const { compact = false } = Astro.props;
+
 const callouts = [
 	{ title: "Overview", text: "One grade, one arc per area." },
 	{ title: "A tab per area", text: "Filters, search, findings by rule." },
@@ -12,23 +18,40 @@ const callouts = [
 
 <section class="sheet" id="report" aria-labelledby="report-title">
 	<div class="frame">
-		<div class="sheet-head">
-			<h2 id="report-title" class="rise">A report people actually read</h2>
-			<p class="rise">One HTML file. Works offline, prints cleanly.</p>
-		</div>
+		{
+			compact ? (
+				<div class="sheet-head">
+					<p class="eyebrow rise">What you get</p>
+					<h2 id="report-title" class="rise">
+						A report <span class="tone">anyone can read</span>
+					</h2>
+					<p class="rise">One grade per area and a plain fix for every finding. Its Copy for AI button hands the whole thing to your chat.</p>
+				</div>
+			) : (
+				<div class="sheet-head">
+					<h2 id="report-title" class="rise">A report people actually read</h2>
+					<p class="rise">One HTML file. Works offline, prints cleanly.</p>
+				</div>
+			)
+		}
 		<div class="show" data-arrive>
 			<figure class="shot-wrap">
 				<a class="shot" href={u("/report/")}>
 					<img class="shot-light" src={u("/img/report-light.webp")} width="1600" height="1075" loading="lazy" decoding="async" alt="The openaudit HTML report: an overall grade dial with one arc per area, severity counts and a navigation rail listing every area" />
 					<img class="shot-dark" src={u("/img/report-dark.webp")} width="1600" height="1075" loading="lazy" decoding="async" alt="The openaudit HTML report in the dark theme" />
-					<span class="pin p1" aria-hidden="true">1</span>
-					<span class="pin p2" aria-hidden="true">2</span>
-					<span class="pin p3" aria-hidden="true">3</span>
-					<span class="pin p4" aria-hidden="true">4</span>
+					{!compact && (
+						<>
+							<span class="pin p1" aria-hidden="true">1</span>
+							<span class="pin p2" aria-hidden="true">2</span>
+							<span class="pin p3" aria-hidden="true">3</span>
+							<span class="pin p4" aria-hidden="true">4</span>
+						</>
+					)}
 					<span class="shot-cta"><Icon name="report" />Open the live report</span>
 				</a>
 				<figcaption>openaudit's own report.</figcaption>
 			</figure>
+			{!compact && (
 			<ol class="callouts">
 				{
 					callouts.map((c, i) => (
@@ -42,6 +65,7 @@ const callouts = [
 					))
 				}
 			</ol>
+			)}
 		</div>
 	</div>
 </section>
