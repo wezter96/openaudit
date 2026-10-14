@@ -19,7 +19,7 @@
 
 </div>
 
-openaudit runs 33 built-in auditors and wraps 50 established open-source scanners, linters and type checkers when they're installed. Ten agent **playbooks** cover the judgment-heavy work no rule can do, such as authorisation review, keyboard and screen-reader journeys, and privacy data flows. Everything lands in one report with a 0–100 score and an A–F grade per area.
+openaudit runs 37 built-in auditors and wraps 52 established open-source scanners, linters and type checkers when they're installed. Ten agent **playbooks** cover the judgment-heavy work no rule can do, such as authorisation review, keyboard and screen-reader journeys, and privacy data flows. Everything lands in one report with a 0–100 score and an A–F grade per area.
 
 - **One issue, one finding.** When gitleaks, TruffleHog and the built-in secret scan all find the same key, you get one finding that says who confirmed it, scored once.
 - **A report people actually read.** A self-contained interactive HTML page with an overview, a tab per area and an OWASP Top 10 / CWE Top 25 view. It also comes as JSON, SARIF, Markdown and CSV.
