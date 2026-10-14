@@ -316,16 +316,20 @@ export const pnpmAudit = jsAudit({
 	install: "Install: npm install -g pnpm (or corepack enable).",
 	// A project's pnpm-workspace.yaml/.npmrc overrides env config but not
 	// `--config.*` flags. Never run the project's .pnpmfile.cjs (pnpm loads it
-	// even for `audit`) or let its packageManager field download another pnpm.
+	// even for `audit`) or let its packageManager or devEngines.packageManager
+	// field download and switch to another package manager: pnpm 10 obeys
+	// manage-package-manager-versions, pnpm 11 only pm-on-fail.
 	args: [
 		"audit",
 		"--json",
 		"--config.ignore-pnpmfile=true",
 		"--config.manage-package-manager-versions=false",
+		"--config.pm-on-fail=ignore",
 	],
 	env: {
 		npm_config_ignore_pnpmfile: "true",
 		npm_config_manage_package_manager_versions: "false",
+		npm_config_pm_on_fail: "ignore",
 	},
 	parse: (json, root, file) => parsePnpmAuditReport(json, root, file),
 });
