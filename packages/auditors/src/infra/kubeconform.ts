@@ -118,8 +118,8 @@ const RULES = {
 
 /** Maps one JSON-schema validation message to a rule. */
 const ruleOfViolation = (msg: string): Rule => {
-	if (/^additional propert/.test(msg)) return RULES.unknownField;
-	if (/^missing propert/.test(msg)) return RULES.missingField;
+	if (msg.startsWith("additional propert")) return RULES.unknownField;
+	if (msg.startsWith("missing propert")) return RULES.missingField;
 	if (/^got \S+, want /.test(msg)) return RULES.wrongType;
 	if (
 		/^value must be|does not match pattern|is not valid '|^(minimum|maximum|exclusiveMinimum|exclusiveMaximum): got|^(length|minItems|maxItems|minProperties|maxProperties)/.test(

@@ -9,7 +9,7 @@ const STORAGE_KEY = "openaudit-theme";
  */
 export const themeScript = `(function(){try{var t=localStorage.getItem("${STORAGE_KEY}");var d=t?t==="dark":matchMedia("(prefers-color-scheme: dark)").matches;document.documentElement.classList.toggle("dark",d)}catch(e){}})()`;
 
-/** The theme lives in the <html> class; re-render when it changes. */
+/** The theme lives in the root element's class; re-render when it changes. */
 const subscribeTheme = (onChange: () => void) => {
 	const observer = new MutationObserver(onChange);
 	observer.observe(document.documentElement, {
