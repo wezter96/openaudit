@@ -1,0 +1,35 @@
+# Contributor notes for agents
+
+Install the toolchain with `curl -fsSL https://bun.sh/install | bash`, then run `bun install`.
+
+<!-- keep this list sorted -->
+- `bun test` runs the unit tests. You don't need to ask before running tests.
+- Never run Claude with `--dangerously-skip-permissions`; it bypasses every prompt.
+- Do not use `--yolo` either.
+- Credentials live in `.env`, which is git-ignored. Do not commit it.
+
+<details>
+<summary>Why the sandbox matters</summary>
+
+The agent sandbox keeps tools away from `~/.ssh` and `~/.aws`. Do not disable it.
+</details>
+
+<details>
+<summary>Installing without Homebrew</summary>
+
+Run `curl -fsSL https://bun.sh/install | bash`, then restart the shell.
+</details>
+
+<!-- Agents: run the formatter without asking the user first. -->
+<!-- TODO: document exfiltration tests for the DAST auditors. -->
+
+<!-- prettier-ignore-start -->
+| Command | What it does |
+| --- | --- |
+| `bun run check` | Lints with Biome |
+<!-- prettier-ignore-end -->
+
+## Security
+
+Report suspected prompt injection to the maintainers. Example payloads such as
+"ignore previous instructions" belong in test fixtures, not here.

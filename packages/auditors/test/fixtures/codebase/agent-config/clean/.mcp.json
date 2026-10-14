@@ -1,0 +1,20 @@
+{
+	"mcpServers": {
+		"memory": {
+			"command": "npx",
+			"args": ["-y", "@modelcontextprotocol/server-memory@2025.4.25"]
+		},
+		"github": {
+			"command": "docker",
+			"args": ["run", "-i", "--rm", "-e", "GITHUB_TOKEN", "ghcr.io/github/github-mcp-server:v0.20.1"],
+			"env": { "GITHUB_TOKEN": "${GITHUB_TOKEN}" }
+		},
+		"git": { "command": "uvx", "args": ["--from", "mcp-server-git==0.6.2", "mcp-server-git"] },
+		"self": { "command": "bun", "args": ["apps/cli/src/bin.ts", "mcp"] },
+		"remote": {
+			"type": "http",
+			"url": "https://mcp.example.com/mcp",
+			"headers": { "Authorization": "Bearer ${MCP_TOKEN}" }
+		}
+	}
+}

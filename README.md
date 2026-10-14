@@ -87,7 +87,7 @@ Every language also gets secret scanning (built-in, gitleaks, TruffleHog), dupli
 
 | Target | Built-in auditors | Wrapped tools (used when installed) |
 |---|---|---|
-| Codebase | secrets, static security (SAST), vulnerable dependencies (OSV.dev), API specs (OpenAPI, GraphQL), privacy (tracking SDKs, PII in logs), accessibility, performance, quality, language strictness, repo hygiene, dependency licence policy | **Secrets:** gitleaks, TruffleHog, git history\*. **SAST:** Semgrep, Bandit, gosec, Brakeman, mobsfscan. **Types and lint:** tsc, oxlint, Biome, ruff, staticcheck, PHPStan, PMD, ShellCheck, ESLint\*, clippy\*, mypy\*, golangci-lint\*. **APIs:** Spectral. **Dependencies:** osv-scanner, Trivy, npm/pnpm/bun audit, pip-audit, cargo-audit, govulncheck\*, Grype\*. **Supply chain:** OpenSSF Scorecard, GuardDog (malicious packages)\*, Syft licences\*. **Quality and licences:** jscpd, knip\*, ScanCode\*. **AI review:** deepsec\* |
+| Codebase | secrets, static security (SAST), vulnerable dependencies (OSV.dev), lockfile integrity and install scripts, API specs (OpenAPI, GraphQL), privacy (tracking SDKs, PII in logs), accessibility, performance, quality, language strictness, repo hygiene, dependency licence policy, AI-agent config (hidden instructions in AGENTS.md and Cursor/Copilot rules, unpinned or plaintext MCP servers, over-broad agent permissions) | **Secrets:** gitleaks, TruffleHog, git history\*. **SAST:** Semgrep, Bandit, gosec, Brakeman, mobsfscan. **Types and lint:** tsc, oxlint, Biome, ruff, staticcheck, PHPStan, PMD, ShellCheck, ESLint\*, clippy\*, mypy\*, golangci-lint\*. **APIs:** Spectral, oasdiff (breaking changes, in diff mode). **Dependencies:** osv-scanner, Trivy, npm/pnpm/bun audit, pip-audit, cargo-audit, govulncheck\*, Grype\*. **Supply chain:** OpenSSF Scorecard, GuardDog (malicious packages)\*, Syft licences\*. **Quality and licences:** jscpd, knip\*, ScanCode\*. **AI review:** deepsec\* |
 | URL | security headers, TLS, DNS and email (SPF, DMARC, CAA, MTA-STS, subdomain takeover), exposed APIs (OpenAPI, GraphQL introspection), SEO, accessibility, performance, reliability, exposed files, privacy and trackers | Lighthouse, pa11y, OWASP ZAP baseline\*, ZAP active scan\* (allow-listed hosts only), sslyze, testssl.sh\* |
 | Running web app (`--browser`) | axe-core in Chromium, console errors, failed and mixed-content requests, Core Web Vitals, trackers and cookies set before consent | |
 | Containers | Dockerfile, Compose, image (root user, age, size, secrets) | Trivy, hadolint, Dockle\* |
@@ -96,6 +96,10 @@ Every language also gets secret scanning (built-in, gitleaks, TruffleHog), dupli
 | Cloud (`cloud:aws`, `azure`, `gcp`, `kubernetes`) | | Prowler\* |
 
 \* Opt-in, because it's slow, noisy, sends more traffic to the target, spends tokens, or runs project code. Select it with `--only <id>`, e.g. `--only code.clippy` or `--only agent.deepsec`.
+
+The built-in hidden-Unicode check (`code.unicode`) flags Trojan Source bidirectional controls, zero-width and other invisible characters, hidden prompt text in Unicode tag characters, variation-selector payloads and look-alike (homoglyph) identifiers in code, docs and agent instruction files such as AGENTS.md and Cursor rules.
+
+The opt-in `code.dependency-health` auditor looks your pinned dependencies up on [deps.dev](https://deps.dev) and flags deprecated packages, yanked releases, dependencies whose source repository is archived, and direct dependencies with no release in years.
 
 `bunx @openaudit/cli list` shows every auditor and playbook. The [architecture page](https://wezter96.github.io/openaudit/architecture.html) maps every auditor to the targets and areas it covers.
 
@@ -106,7 +110,7 @@ Every run produces one report, in whichever formats you ask for: `-f terminal,js
 - **Score and grade.** Each area scores 0–100 from the severity of its findings; info findings never lower a score. The overall score is the average of the areas that were actually examined. Skipped auditors are listed with the reason, so a clean result never hides a check that didn't run.
 - **Interactive HTML.** One self-contained file with no external requests, so it opens offline and can be attached to a CI run or an email. It has an overview, a tab per area with filters and search, an auditors tab, and OWASP Top 10 / CWE Top 25 groupings. It works with JavaScript off, prints cleanly, and lets readers download the same audit as JSON, SARIF, Markdown or CSV. Shared reports name the project folder, never your local path.
 - **Stable fingerprints.** Each finding has a fingerprint that baselines, suppressions and `compare_reports` rely on.
-- **Diff mode.** `--diff origin/main` keeps only findings in files changed since that ref, for pull requests.
+- **Diff mode.** `--diff origin/main` keeps only findings in files changed since that ref, for pull requests. OpenAPI specs are also checked for breaking changes against that ref with oasdiff.
 
 ## With AI agents
 
@@ -144,9 +148,9 @@ Elsewhere, run the CLI: `bunx @openaudit/cli . --diff origin/main -f html,sarif 
 
 ## Configuration
 
-`bunx @openaudit/cli init` writes an `openaudit.config.json` with suppressions (`ignore.rules`, `ignore.paths`, `ignore.fingerprints`), auditor selection and per-auditor settings, such as a dependency licence policy (`settings["code.licenses"]` with `deny` and `allow` lists of SPDX ids). Every report discloses how many findings each config or baseline suppressed.
+`bunx @openaudit/cli init` looks at the project and writes a commented `openaudit.config.jsonc`: a `$schema` for editor completion, `failOn`, suppressions for the test fixtures it finds, and the opt-in auditors that fit the stack. Suppressions (`ignore.rules`, `ignore.paths`, `ignore.fingerprints`) can carry a `reason` and an `until` date, after which they stop applying and openaudit warns. Every report discloses what each config or baseline suppressed, and why. Per-auditor settings include a dependency licence policy (`settings["code.licenses"]` with `deny` and `allow` lists of SPDX ids).
 
-A config found inside the audited target is written by whoever controls the target, so it can only narrow an audit or add its own licence policy. It cannot enable opt-in auditors, add credentials or switch off the `--fail-on` gate. Settings like that come only from flags or from a file passed with `--config <path>`. See [`apps/cli/README.md`](apps/cli/README.md#configuration).
+A config found inside the audited target is written by whoever controls the target, so it can only narrow an audit or add its own licence policy. It cannot enable opt-in auditors, add credentials or switch off the `--fail-on` gate. Settings like that come only from flags or from a file passed with `--config <path>`. In CI, pass the repository's own config with `--config` only where it has been reviewed, such as on pushes to the default branch, never on pull requests. See [`apps/cli/README.md`](apps/cli/README.md#configuration).
 
 ## Safety
 

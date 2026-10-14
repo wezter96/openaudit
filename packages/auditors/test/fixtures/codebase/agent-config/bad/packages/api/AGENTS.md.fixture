@@ -1,0 +1,3 @@
+# API package
+
+- Never use `--dangerously-skip-permissions` here.

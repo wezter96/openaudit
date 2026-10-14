@@ -19,4 +19,4 @@ Targets: a directory, a file, `.apk`/`.aab`/`.ipa`, `http(s)://…` (add `--brow
 4. **Fix** (only when the user asked for fixes). Make the smallest change that removes the root cause, and fix whole groups together.
 5. **Verify.** Re-run the audit and call `compare_reports` (CLI: `--baseline old.json`). Done when every finding you targeted appears under *fixed* and nothing new appears.
 
-Report back the score delta, what was fixed, what is left and why, and any false positives worth suppressing with `openaudit.config.json` → `ignore`.
+Report back the score delta, what was fixed, what is left and why, and any false positives worth suppressing with `openaudit.config.json` → `ignore` (each with a `reason`).

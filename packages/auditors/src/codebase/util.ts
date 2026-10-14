@@ -1,4 +1,9 @@
-import { type AuditorError, redact, type Workspace } from "@openaudit/core";
+import {
+	type AuditorError,
+	MAX_TEXT_BYTES,
+	redact,
+	type Workspace,
+} from "@openaudit/core";
 import { Effect } from "effect";
 
 /** Shared helpers for codebase auditors: file selection, reading, matching. */
@@ -205,7 +210,12 @@ export const readTextFiles = (
 				Effect.gen(function* () {
 					const size = yield* ws.size(path);
 					if (size === 0 || size > maxBytes) return undefined;
-					const text = yield* ws.readText(path);
+					// readText refuses files over MAX_TEXT_BYTES; callers that allow
+					// more (lockfiles, up to 20 MB) read the bytes instead.
+					const text =
+						size > MAX_TEXT_BYTES
+							? new TextDecoder().decode(yield* ws.readBytes(path))
+							: yield* ws.readText(path);
 					if (text.includes("\u0000")) return undefined;
 					if (
 						!options.allowMinified &&
@@ -267,42 +277,7 @@ export const shannonEntropy = (s: string): number => {
 	return h;
 };
 
-/**
- * Parses JSON with comments and trailing commas (tsconfig, bun.lock).
- * Returns undefined when the text is not valid JSONC.
- */
-export const parseJsonc = (text: string): unknown => {
-	let out = "";
-	let i = 0;
-	const n = text.length;
-	while (i < n) {
-		const ch = text[i];
-		if (ch === '"') {
-			let j = i + 1;
-			while (j < n && text[j] !== '"') j += text[j] === "\\" ? 2 : 1;
-			out += text.slice(i, j + 1);
-			i = j + 1;
-		} else if (ch === "/" && text[i + 1] === "/") {
-			while (i < n && text[i] !== "\n") i++;
-		} else if (ch === "/" && text[i + 1] === "*") {
-			const end = text.indexOf("*/", i + 2);
-			i = end === -1 ? n : end + 2;
-		} else if (ch === ",") {
-			let j = i + 1;
-			while (j < n && /\s/.test(text[j] ?? "")) j++;
-			if (text[j] !== "}" && text[j] !== "]") out += ch;
-			i++;
-		} else {
-			out += ch;
-			i++;
-		}
-	}
-	try {
-		return JSON.parse(out);
-	} catch {
-		return undefined;
-	}
-};
+export { parseJsonc } from "@openaudit/core";
 
 export const isRecord = (v: unknown): v is Record<string, unknown> =>
 	typeof v === "object" && v !== null && !Array.isArray(v);
@@ -328,6 +303,23 @@ const OWASP_2021: Readonly<Record<string, string>> = {
 /** OWASP Top 10 (2021) page for a category such as `a03`. */
 export const owaspUrl = (category: string) =>
 	`https://owasp.org/Top10/${OWASP_2021[category.toLowerCase()] ?? ""}/`;
+
+const OWASP_LLM_2025: Readonly<Record<string, string>> = {
+	llm01: "llm01-prompt-injection",
+	llm02: "llm022025-sensitive-information-disclosure",
+	llm03: "llm032025-supply-chain",
+	llm04: "llm042025-data-and-model-poisoning",
+	llm05: "llm052025-improper-output-handling",
+	llm06: "llm062025-excessive-agency",
+	llm07: "llm072025-system-prompt-leakage",
+	llm08: "llm082025-vector-and-embedding-weaknesses",
+	llm09: "llm092025-misinformation",
+	llm10: "llm102025-unbounded-consumption",
+};
+
+/** OWASP Top 10 for LLM Applications (2025) page for a risk such as `llm01`. */
+export const owaspLlmUrl = (risk: string) =>
+	`https://genai.owasp.org/llmrisk/${OWASP_LLM_2025[risk.toLowerCase()] ?? ""}/`;
 
 const WCAG_SLUGS: Readonly<Record<string, string>> = {
 	"1.1.1": "non-text-content",
@@ -467,7 +459,7 @@ export const nonCodeMask = (text: string, lang: string): Uint8Array => {
 				prev = "x";
 				continue;
 			}
-			if (lang === "js" && ch === "/" && REGEX_PRECEDER.test(prev.slice(-8))) {
+			if (lang === "js" && ch === "/" && REGEX_PRECEDER.test(prev.trimEnd())) {
 				const after = scanRegex(i);
 				if (after > i + 1) {
 					i = after;

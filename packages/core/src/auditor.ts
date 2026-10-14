@@ -32,6 +32,12 @@ export interface AuditOptions {
 	readonly headers?: Record<string, string>;
 	/** Per-auditor settings keyed by auditor id. */
 	readonly settings?: Record<string, Record<string, unknown>>;
+	/**
+	 * Diff mode: the git ref the change is compared against (`--diff <ref>`).
+	 * Callers validate it with `changedFilesSince` first; auditors that compare
+	 * against the base (such as breaking API changes) read it here.
+	 */
+	readonly diffBase?: string;
 }
 
 /**

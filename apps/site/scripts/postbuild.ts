@@ -389,6 +389,12 @@ ${BASE}/apple-touch-icon.png
 ${BASE}/og/*
   Cache-Control: public, max-age=86400
 
+${BASE}/schema/*
+  ! Cross-Origin-Resource-Policy
+  Access-Control-Allow-Origin: *
+  Cross-Origin-Resource-Policy: cross-origin
+  Cache-Control: public, max-age=3600
+
 ${BASE}/report/openaudit-report.*
   Cache-Control: public, max-age=300
 `;

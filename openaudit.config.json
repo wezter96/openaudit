@@ -1,8 +1,27 @@
 {
+	"$schema": "https://openaudit.se/schema/config.json",
 	"failOn": "critical",
 	"ignore": {
-		"paths": ["**/test/**", "**/*.test.ts"],
+		"paths": [
+			{
+				"path": "**/test/**",
+				"reason": "Test suites and fixtures: deliberately vulnerable code, fake secrets and recorded scanner output for the auditors to find"
+			},
+			{
+				"path": "**/*.test.ts",
+				"reason": "Tests outside test/ (packages/api/src) embed the same kind of sample payloads"
+			}
+		],
 		"rules": [],
-		"fingerprints": ["fec97ae0392386ac", "a22c9f9af84aaa4a"]
+		"fingerprints": [
+			{
+				"fingerprint": "fec97ae0392386ac",
+				"reason": "gitleaks generic-api-key false positive: prose in the severity guide of packages/agent/src/playbooks/ux-content.ts"
+			},
+			{
+				"fingerprint": "a22c9f9af84aaa4a",
+				"reason": "gitleaks generic-api-key false positive: the OWASP API Top 10 page slug for api10 in packages/auditors/src/codebase/api.ts"
+			}
+		]
 	}
 }

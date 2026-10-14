@@ -1,0 +1,7 @@
+nodeLinker: node-modules
+enableStrictSsl: false
+npmRegistryServer: "http://registry.corp.example"
+npmScopes:
+  corp:
+    npmRegistryServer: "https://npm.corp.example"
+    npmAuthToken: "${CORP_TOKEN}"

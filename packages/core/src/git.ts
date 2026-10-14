@@ -20,6 +20,9 @@ export const GIT_HARDENING_ENV: Record<string, string> = {
 	GIT_CONFIG_KEY_1: "core.hooksPath",
 	GIT_CONFIG_VALUE_1: "/dev/null",
 	GIT_TERMINAL_PROMPT: "0",
+	// A partial clone's promisor remote is chosen by the target, and fetching
+	// from it can run core.sshCommand; audits only read local objects.
+	GIT_NO_LAZY_FETCH: "1",
 };
 
 /** Refs a user may pass: branch, tag, sha, `origin/main`, `HEAD~3`. */

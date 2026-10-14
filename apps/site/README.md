@@ -11,6 +11,7 @@ Nothing on the site is hand-copied from the rest of the repository. At build tim
 | `/auditors/`, `/auditors/<id>/` | `allAuditors()` from `apps/cli/src/audit.ts` and the playbooks in `packages/agent` |
 | `/report/` | `openaudit-report.{html,json,sarif,md}` written by the CLI, copied unmodified |
 | `/architecture/` | `docs/architecture.html`, copied unmodified |
+| `/schema/config.json`, `/schema/report-v1.json` | `openaudit schema config` and `openaudit schema report`. `openaudit init` writes `https://openaudit.se/schema/config.json` into configs, so keep these paths |
 
 The example findings on the landing page use real rule ids, titles and severities from `packages/auditors`; their file locations are illustrative.
 
@@ -24,7 +25,7 @@ bun run build                    # dist/
 bun run check-types              # astro check, strict
 ```
 
-`scripts/prepare.ts` runs before `dev`, `build` and `check-types`. It writes `src/generated/*.json` and copies the report, the architecture page and the report screenshots into `public/`. All of that output is gitignored. If `public/report/` holds no report yet, `prepare` audits the repository (about 10 seconds). `bun scripts/prepare.ts --fresh` re-runs the audit.
+`scripts/prepare.ts` runs before `dev`, `build` and `check-types`. It writes `src/generated/*.json`, the JSON Schemas into `public/schema/`, and copies the report, the architecture page and the report screenshots into `public/`. All of that output is gitignored. If `public/report/` holds no report yet, `prepare` audits the repository (about 10 seconds). `bun scripts/prepare.ts --fresh` re-runs the audit.
 
 `scripts/postbuild.ts` runs after `astro build`. It:
 

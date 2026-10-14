@@ -1,0 +1,13 @@
+{
+  "name": "lockfile-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "bufferutil": "4.0.8",
+    "is-number": "github:jonschlinkert/is-number",
+    "is-odd": "https://github.com/i-voted-for-trump/is-odd/archive/refs/tags/3.0.1.tar.gz",
+    "local-pkg": "file:./local-pkg",
+    "ms": "2.1.3",
+    "utf-8-validate": "6.0.4"
+  }
+}

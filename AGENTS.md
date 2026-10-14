@@ -11,7 +11,7 @@ Bun + TypeScript + **Effect 4** monorepo (Better-T-Stack). Scripts live in `pack
 ## Auditor conventions
 - `run(ctx)` closes over infrastructure through `AuditContext` (`ctx.workspace`, `ctx.http`, `ctx.exec`), so it has no Effect requirements. Infrastructure is resolved once in the engine.
 - A missing tool, key or irrelevant target is a `SkipAudit` (status `skipped`, with the reason shown to users). `AuditorError` is for genuine failures. The engine also converts defects and timeouts per auditor, so one auditor never sinks a run.
-- Tag findings so the engine can merge the same issue across tools: advisory ids as lowercase tags (`cve-…`, `ghsa-…`), `secrets` plus `cwe-798` for leaked credentials, `cwe-N` and `wcag-x.y.z` where known, and `owasp-aNN` only for the OWASP Top 10 2021. Merging needs a file and line, or a URL and selector (`packages/core/src/correlate.ts`).
+- Tag findings so the engine can merge the same issue across tools: advisory ids as lowercase tags (`cve-…`, `ghsa-…`), `secrets` plus `cwe-798` for leaked credentials, `cwe-N` and `wcag-x.y.z` where known, `owasp-aNN` only for the OWASP Top 10 2021, and `owasp-llmNN` for the OWASP Top 10 for LLM Applications 2025 (`owaspLlmUrl`). Merging needs a file and line, or a URL and selector (`packages/core/src/correlate.ts`).
 - Rule ids are `<auditor id>/<kebab-rule>`; ids and fingerprints are a stable contract that baselines and suppressions depend on. Rename them only with a migration note.
 - Findings carry a location, a remediation and a redacted `evidence` (use `redact`). Mark heuristics `confidence: "low"`.
 - External-tool wrappers set `engine: "external"` and `tool`, skip with an install hint, and have parser tests against recorded JSON.

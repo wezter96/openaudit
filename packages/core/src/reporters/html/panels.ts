@@ -24,12 +24,14 @@ import {
 	escapeHtml as e,
 	formatDuration,
 	formatLocation,
+	hasSuppressionNotice,
 	isWebUrl,
 	plural,
 	SEVERITY_LABEL,
 	type SuppressionSummary,
 	sanitizeText,
 	suppressedTotal,
+	suppressionDetails,
 	suppressionLine,
 } from "../shared";
 import { dial, miniDial, runtimeStrip, spectrum } from "./viz";
@@ -329,15 +331,14 @@ const coverage = (view: View): string => {
 		lines.push(
 			`<li>${ICON.info}<span>Partly covered, because some of their auditors did not run: ${partial.map((c) => `${e(CATEGORY_LABEL[c.category])} <span class="num small">${c.auditors.filter(ran).length}/${c.auditors.length}</span>`).join(", ")}. <a href="#auditors">See why on the Auditors tab</a>.</span></li>`,
 		);
-	const suppressed = view.suppressed
-		.filter((s) => suppressedTotal(s) > 0)
-		.map((s) =>
-			callout(
-				`<strong>${e(suppressionLine(s))}.</strong> Suppressed findings are not listed or scored.`,
-				ICON.alert,
-				"warn",
-			),
+	const suppressed = view.suppressed.filter(hasSuppressionNotice).map((s) => {
+		const details = suppressionDetails(s);
+		return callout(
+			`<strong>${t(suppressionLine(s))}.</strong>${suppressedTotal(s) > 0 ? " Suppressed findings are not listed or scored." : ""}${details.length ? `<ul>${details.map((d) => `<li>${t(d)}</li>`).join("")}</ul>` : ""}`,
+			ICON.alert,
+			"warn",
 		);
+	});
 	return `<div class="sh"><h3>Coverage</h3><p>${plural(report.summary.auditors.skipped, "auditor")} skipped, ${report.summary.auditors.error} errored</p></div><ul class="cov">${lines.join("")}</ul>${suppressed.join("")}`;
 };
 

@@ -1,0 +1,6 @@
+# Internal mirror
+--index-url http://pypi.internal.example/simple
+--extra-index-url https://pypi.corp.example/simple
+--trusted-host pypi.internal.example
+requests==2.31.0
+-i https://pypi.org/simple

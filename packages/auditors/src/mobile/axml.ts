@@ -497,7 +497,7 @@ export const parseAndroidXml = (
 ): XmlElement | undefined => {
 	if (isAxml(bytes)) return decodeAxml(bytes, options);
 	const head = new TextDecoder().decode(bytes.subarray(0, 64)).trimStart();
-	if (head.startsWith("<") || head.startsWith("﻿<"))
+	if (head.startsWith("<") || head.startsWith("\uFEFF<"))
 		return parseXmlText(new TextDecoder().decode(bytes));
 	return decodeProtoXml(bytes);
 };

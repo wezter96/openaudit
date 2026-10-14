@@ -250,11 +250,22 @@ export const main = async (argv: ReadonlyArray<string>): Promise<number> => {
 		"init",
 		{
 			force: bool("force", "Overwrite an existing config"),
-			dir: opt(Flag.String("dir"), "Directory to write into (default: .)"),
+			print: bool("print", "Print the config instead of writing it"),
+			dir: opt(Flag.String("dir"), "Project directory (default: .)"),
 		},
 		(p) =>
-			exit(initCommand({ force: p.force, dir: Option.getOrUndefined(p.dir) })),
-	).pipe(Command.withDescription("Create openaudit.config.json"));
+			exit(
+				initCommand({
+					force: p.force,
+					print: p.print,
+					dir: Option.getOrUndefined(p.dir),
+				}),
+			),
+	).pipe(
+		Command.withDescription(
+			"Create openaudit.config.jsonc, tailored to the project",
+		),
+	);
 
 	const mcp = Command.make(
 		"mcp",

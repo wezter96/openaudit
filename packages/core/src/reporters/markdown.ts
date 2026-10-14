@@ -2,13 +2,14 @@ import { type Finding, type Report, SEVERITIES, type Severity } from "../model";
 import {
 	formatDuration,
 	formatLocation,
+	hasSuppressionNotice,
 	isWebUrl,
 	plural,
 	SEVERITY_LABEL,
 	type SuppressionSummary,
 	sanitizeText,
 	sortedFindings,
-	suppressedTotal,
+	suppressionDetails,
 	suppressionLine,
 	targetLabel,
 } from "./shared";
@@ -103,10 +104,11 @@ export const toMarkdown = (
 		"",
 	);
 
-	const suppressed = (options.suppressed ?? []).filter(
-		(s) => suppressedTotal(s) > 0,
-	);
-	for (const s of suppressed) out.push(`> **Note:** ${md(suppressionLine(s))}`);
+	const suppressed = (options.suppressed ?? []).filter(hasSuppressionNotice);
+	for (const s of suppressed) {
+		out.push(`> **Note:** ${md(suppressionLine(s))}`);
+		for (const d of suppressionDetails(s)) out.push(`> - ${md(d)}`);
+	}
 	if (suppressed.length) out.push("");
 
 	if (summary.categories.length) {
