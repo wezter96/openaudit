@@ -257,9 +257,12 @@ export const launchedPackages = (
 const isReference = (value: string) => /\$\{|^\$[A-Za-z_]|^\{?env:/.test(value);
 
 const CREDENTIAL_KEY = new RegExp(
-	`${SECRET_KEY_NAME.source}|(?:^|[_-])(?:token|credential)s?(?:$|[_-])|^(?:proxy-)?authorization$`,
+	`${SECRET_KEY_NAME.source}|(?:^|[_-])(?:token|credential)s?(?:$|[_-])|^(?:proxy-)?authorization$|^cookie$|^x-[\\w-]*(?:key|token|auth)[\\w-]*$`,
 	"i",
 );
+/** Short query-parameter names that carry credentials in URLs. */
+const QUERY_SECRET =
+	/^(?:key|token|sig|signature|auth|code|secret|pass|password|pwd|apikey|api[_-]?key|access[_-]?token|private[_-]?token)$/i;
 const NOT_A_SECRET_KEY =
 	/(?:_|-|^)(?:url|uri|host|path|file|name|id|type|scopes?|header|length|min|max|ttl|timeout|env|var)$/i;
 
@@ -267,7 +270,31 @@ interface Candidate {
 	readonly where: string;
 	readonly key: string;
 	readonly value: string;
+	readonly query?: boolean;
 }
+
+/** Query parameters and the userinfo password of a URL-shaped string. */
+const urlCandidates = (where: string, value: string): Candidate[] => {
+	if (!/^[a-z][\w+.-]*:\/\//i.test(value)) return [];
+	try {
+		const url = new URL(value);
+		const out: Candidate[] = [...url.searchParams].map(([k, v]) => ({
+			where: `${where} ?${k}`,
+			key: k,
+			value: v,
+			query: true,
+		}));
+		if (url.password)
+			out.push({
+				where: `${where} password`,
+				key: "password",
+				value: decodeURIComponent(url.password),
+			});
+		return out;
+	} catch {
+		return [];
+	}
+};
 
 /** Strings in a server entry that could hold a literal credential. */
 const credentialCandidates = (server: McpServer): Candidate[] => {
@@ -279,7 +306,8 @@ const credentialCandidates = (server: McpServer): Candidate[] => {
 	const args = server.args;
 	for (let i = 0; i < args.length; i++) {
 		const a = args[i] ?? "";
-		const eq = /^(--?[\w-]+)=(.+)$/.exec(a);
+		// `--flag=value`, and `KEY=value` as passed to `docker run -e`.
+		const eq = /^(--?[\w-]+|[A-Za-z_]\w*)=(.+)$/.exec(a);
 		if (eq)
 			out.push({
 				where: `args ${eq[1]}`,
@@ -295,22 +323,11 @@ const credentialCandidates = (server: McpServer): Candidate[] => {
 			out.push({ where: `args ${a}`, key: a, value: args[i + 1] ?? "" });
 			i++;
 		} else out.push({ where: "args", key: "", value: a });
+		out.push(...urlCandidates("args url", eq?.[2] ?? a));
 	}
 	if (server.url) {
 		out.push({ where: "url", key: "", value: server.url });
-		try {
-			const url = new URL(server.url);
-			for (const [k, v] of url.searchParams)
-				out.push({ where: `url ?${k}`, key: k, value: v });
-			if (url.password)
-				out.push({
-					where: "url password",
-					key: "password",
-					value: decodeURIComponent(url.password),
-				});
-		} catch {
-			// Not a URL; the raw string was already checked.
-		}
+		out.push(...urlCandidates("url", server.url));
 	}
 	return out;
 };
@@ -338,8 +355,10 @@ const literalSecret = (c: Candidate): LiteralSecret | undefined => {
 			};
 		}
 	}
-	if (!c.key || !CREDENTIAL_KEY.test(c.key) || NOT_A_SECRET_KEY.test(c.key))
-		return undefined;
+	const named = c.query
+		? QUERY_SECRET.test(c.key) || CREDENTIAL_KEY.test(c.key)
+		: CREDENTIAL_KEY.test(c.key);
+	if (!c.key || !named || NOT_A_SECRET_KEY.test(c.key)) return undefined;
 	const value = c.value.replace(/^(?:bearer|basic|token)\s+/i, "");
 	if (
 		value.length < 8 ||
@@ -355,6 +374,41 @@ const literalSecret = (c: Candidate): LiteralSecret | undefined => {
 		confidence: "medium",
 	};
 };
+
+/**
+ * A command token or URL that is safe to print: URL userinfo and query values
+ * are masked before the usual credential scrubbing, because a password or
+ * `?key=` value need not look like any known token.
+ */
+export const safeText = (s: string): string =>
+	scrubLine(
+		s
+			.replace(/(:\/\/)[^/?#\s@]*@/g, "$1****@")
+			.replace(/([?&][^=&#\s]*=)[^&#\s]*/g, "$1****"),
+	);
+
+const SUBCOMMANDS = new Set(["run", "exec", "x", "dlx", "tool", "container"]);
+
+/**
+ * The launch command up to the package, with flag values and other operands
+ * replaced by `…`: `docker run -i -e … ghcr.io/org/mcp`. Values passed to
+ * flags (`-e TOKEN=…`, `--index-url https://user:pass@…`) never appear.
+ */
+const launchEvidence = (tokens: ReadonlyArray<string>, upTo: number) =>
+	truncate(
+		tokens
+			.slice(0, upTo + 1)
+			.map((t, i) =>
+				i === 0 || i === upTo
+					? safeText(t)
+					: t.startsWith("-")
+						? t.replace(/=[\s\S]*$/, "=…")
+						: i <= 3 && SUBCOMMANDS.has(t)
+							? t
+							: "…",
+			)
+			.join(" "),
+	);
 
 const LOOPBACK =
 	/^(?:localhost|.+\.localhost|127(?:\.\d{1,3}){3}|\[::1\]|0\.0\.0\.0|host\.docker\.internal)$/i;
@@ -392,10 +446,8 @@ export const scanServers = (
 						title: `MCP server "${name}" runs an unpinned ${pkg.ecosystem === "docker" ? "image" : "package"}`,
 						severity: "medium",
 						category: "supply-chain",
-						message: `MCP server "${name}" launches \`${pkg.spec}\` without an exact version, so each start can fetch and run whatever the registry serves at that moment${pkg.autoYes ? " (-y installs it without asking)" : ""}. A compromised or hijacked release then runs with the agent's access to this machine.`,
-						evidence: truncate(
-							scrubLine(tokens.slice(0, pkg.token + 1).join(" ")),
-						),
+						message: `MCP server "${name}" launches \`${safeText(pkg.spec)}\` without an exact version, so each start can fetch and run whatever the registry serves at that moment${pkg.autoYes ? " (-y installs it without asking)" : ""}. A compromised or hijacked release then runs with the agent's access to this machine.`,
+						evidence: launchEvidence(tokens, pkg.token),
 						remediation: REMOTE_INSTALL_REMEDIATION[pkg.ecosystem],
 						references: [
 							owaspLlmUrl("llm03"),
@@ -423,7 +475,7 @@ export const scanServers = (
 						severity: "medium",
 						category: "security",
 						message: `MCP server "${name}" uses ${host} over http://, so tool calls, results and any credentials are sent unencrypted and can be read or altered on the network.`,
-						evidence: truncate(scrubLine(server.url)),
+						evidence: truncate(safeText(server.url)),
 						remediation:
 							"Use https:// for every MCP server that is not on the loopback interface.",
 						references: [cweUrl(319), owaspUrl("a02"), MCP_SECURITY],

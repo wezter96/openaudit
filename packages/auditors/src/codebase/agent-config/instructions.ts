@@ -15,6 +15,7 @@ import {
 	MCP_SECURITY,
 	PROMPT_INJECTION_TAGS,
 } from "./shared";
+import { normalize, sentences } from "./text";
 
 /* -------------------------------------------------------------------------- */
 /*                           Hidden Unicode characters                        */
@@ -264,8 +265,19 @@ const fencedBlocks = (text: string): Region[] => {
 	return blocks;
 };
 
-const within = (regions: ReadonlyArray<Region>, index: number) =>
-	regions.some((r) => index >= r.start && index < r.end);
+/** Whether `index` falls in one of `regions`, which are sorted and disjoint. */
+const within = (regions: ReadonlyArray<Region>, index: number) => {
+	let lo = 0;
+	let hi = regions.length - 1;
+	while (lo <= hi) {
+		const mid = (lo + hi) >> 1;
+		const r = regions[mid] as Region;
+		if (index < r.start) hi = mid - 1;
+		else if (index >= r.end) lo = mid + 1;
+		else return true;
+	}
+	return false;
+};
 
 const DETAILS = "a collapsed <details> block";
 
@@ -281,17 +293,29 @@ export const hiddenRegions = (text: string): Region[] => {
 			kind: "an HTML comment",
 		});
 	}
-	for (const m of text.matchAll(
-		/<details\b(?![^>]*\bopen\b)[^>]*>([\s\S]*?)<\/details>/gi,
-	)) {
-		const body = m[1] ?? "";
-		const summaryEnd = body.search(/<\/summary>/i);
+	// `open` must be an attribute of its own, not text such as data-state="open".
+	// Closing tags are found by a forward-only cursor and tags nested in a
+	// recorded block are skipped, so piles of opening tags cost linear time.
+	const closes = [...text.matchAll(/<\/details\s*>/gi)];
+	let next = 0;
+	let covered = 0;
+	for (const m of text.matchAll(/<details\b([^>]{0,1000})>/gi)) {
+		const open = m.index ?? 0;
+		if (open < covered) continue;
+		const bodyStart = open + m[0].length;
+		while (next < closes.length && (closes[next]?.index ?? 0) < bodyStart)
+			next++;
+		const close = closes[next];
+		if (!close) break;
+		if (/\sopen(?=[\s=/]|$)/i.test(m[1] ?? "")) continue;
+		const body = text.slice(bodyStart, close.index);
+		const summaryEnd = body.search(/<\/summary\s*>/i);
 		const skipSummary =
-			summaryEnd === -1 ? 0 : summaryEnd + "</summary>".length;
-		const start = (m.index ?? 0) + m[0].indexOf(body) + skipSummary;
+			summaryEnd === -1 ? 0 : body.indexOf(">", summaryEnd) + 1;
+		covered = close.index ?? bodyStart;
 		regions.push({
-			start,
-			end: start + body.length - skipSummary,
+			start: bodyStart + skipSummary,
+			end: covered,
 			kind: DETAILS,
 		});
 	}
@@ -385,8 +409,9 @@ const SAFETY_IMPERATIVE =
 
 const NEGATION =
 	/\b(?:never|not|no|avoid|without|unless|forbid\w*|prohibit\w*|disallow\w*|instead\s+of|rather\s+than)\b|n't\b/i;
+/** An imperative opening the sentence ("Run …", "- Always use …"), or "always" anywhere. */
 const IMPERATIVE_CUE =
-	/(?<![\w-])(?:always|use|run|start|launch|enable|set|invoke|execute|pass|add|switch\s+to)(?![\w-])/i;
+	/^(?:[-+>]\s+|\d+[.)]\s+)?(?:please\s+|you\s+(?:should|must)\s+)?(?:use|run|start|launch|enable|set|invoke|execute|pass|add|switch\s+to)(?![\w-])|(?<![\w-])always(?![\w-])/i;
 /** "only in a container", "inside the devcontainer": a scoped, deliberate choice. */
 const ISOLATED_CONTEXT =
 	/\bonly\s+(?:in|inside|within|when|if|for)\b|\b(?:sandbox(?:ed)?|container|devcontainer|vm|virtual\s+machine|isolated|disposable|ephemeral)\b/i;
@@ -404,7 +429,21 @@ const safetyBypass = (
 		const before = sentence.slice(0, m.index);
 		const rest = before + sentence.slice(m.index + m[0].length);
 		if (NEGATION.test(before) || ISOLATED_CONTEXT.test(rest)) continue;
-		if (imperative || IMPERATIVE_CUE.test(before)) return m.index;
+		if (imperative || IMPERATIVE_CUE.test(before.trimStart())) return m.index;
+	}
+	return undefined;
+};
+
+/** Raw offset of the first un-negated safety bypass in `raw`, if any. */
+const bypassIn = (
+	raw: string,
+	offset: number,
+	imperative: boolean,
+): number | undefined => {
+	for (const [start, end] of sentences(raw)) {
+		const norm = normalize(raw.slice(start, end));
+		const i = safetyBypass(norm.text, imperative);
+		if (i !== undefined) return offset + start + (norm.source[i] ?? 0);
 	}
 	return undefined;
 };
@@ -416,32 +455,31 @@ const scanInstructions = (file: SourceFile): FindingInput[] => {
 	const hidden = hiddenRegions(text);
 
 	for (const region of hidden) {
-		const body = text.slice(region.start, region.end);
+		const raw = text.slice(region.start, region.end);
+		const body = normalize(raw);
 		const details = region.kind === DETAILS;
 		const matches = HIDDEN_INSTRUCTIONS.flatMap((p) => {
 			if (details && !p.inDetails) return [];
-			const i = p.test(body);
-			return i === undefined ? [] : [{ label: p.label, index: i }];
+			const i = p.test(body.text);
+			return i === undefined
+				? []
+				: [{ label: p.label, index: region.start + (body.source[i] ?? 0) }];
 		});
-		const bypass = body
-			.split(/(?<=[.;!?])\s+|\n/)
-			.map((s) => ({ s, i: safetyBypass(s, true) }))
-			.find((x) => x.i !== undefined);
-		if (bypass)
+		const bypass = bypassIn(raw, region.start, true);
+		if (bypass !== undefined)
 			matches.push({
 				label: "disables the agent's approval prompts or sandbox",
-				index: body.indexOf(bypass.s) + (bypass.i ?? 0),
+				index: bypass,
 			});
 		if (matches.length === 0) continue;
-		const first = matches.reduce((a, b) => (b.index < a.index ? b : a));
-		const index = region.start + first.index;
+		const index = Math.min(...matches.map((m) => m.index));
 		findings.push(
 			finding("hidden-instruction", path, lineOf(index), {
 				title: "Hidden instruction in an agent instruction file",
 				severity: "high",
 				category: "security",
 				message: `${path} has ${region.kind} that is hidden in the rendered view but read verbatim by the agent, and it ${matches.map((m) => m.label).join("; ")}. This is the shape of an indirect prompt injection.`,
-				evidence: truncate(scrubLine(fullLineAt(text, index))),
+				evidence: visibleLine(text, index),
 				remediation:
 					"Read the raw file. If you did not write this, remove it and find out how it got in. Keep instructions for agents visible so reviewers see exactly what the agent is told.",
 				references: [owaspLlmUrl("llm01"), cweUrl(1427), MCP_SECURITY],
@@ -451,30 +489,39 @@ const scanInstructions = (file: SourceFile): FindingInput[] => {
 		);
 	}
 
-	let lineStart = 0;
-	for (const line of text.split("\n")) {
-		const start = lineStart;
-		lineStart += line.length + 1;
-		if (within(hidden, start)) continue;
-		for (const sentence of line.split(/(?<=[.;!?])\s+/)) {
-			const i = safetyBypass(sentence, false);
-			if (i === undefined) continue;
-			findings.push(
-				finding("instruction-disables-safety", path, lineOf(start), {
-					title: "Agent told to bypass its safety controls",
-					severity: "medium",
-					category: "security",
-					message: `${path} instructs the agent (or whoever starts it) to skip approval prompts or the sandbox, so every command and edit the agent decides on runs unreviewed, including ones planted by a prompt injection.`,
-					evidence: truncate(scrubLine(line)),
-					remediation:
-						"Remove the instruction. Grant narrow allow rules for the commands the agent needs instead, and run fully unattended agents only inside a disposable container or VM.",
-					references: [owaspLlmUrl("llm06"), CLAUDE_PERMISSIONS],
-					confidence: "low",
-					tags: ["owasp-llm06"],
-				}),
-			);
-			break;
-		}
+	// Blank hidden regions (keeping line breaks) so only visible text is read.
+	const parts: string[] = [];
+	let last = 0;
+	for (const r of [...hidden].sort((a, b) => a.start - b.start)) {
+		const start = Math.max(r.start, last);
+		if (r.end <= start) continue;
+		parts.push(
+			text.slice(last, start),
+			text.slice(start, r.end).replace(/[^\n]/g, " "),
+		);
+		last = r.end;
+	}
+	parts.push(text.slice(last));
+	const visible = parts.join("");
+	const flagged = new Set<number>();
+	for (const [start, end] of sentences(visible)) {
+		const index = bypassIn(visible.slice(start, end), start, false);
+		if (index === undefined || flagged.has(lineOf(index))) continue;
+		flagged.add(lineOf(index));
+		findings.push(
+			finding("instruction-disables-safety", path, lineOf(index), {
+				title: "Agent told to bypass its safety controls",
+				severity: "medium",
+				category: "security",
+				message: `${path} instructs the agent (or whoever starts it) to skip approval prompts or the sandbox, so every command and edit the agent decides on runs unreviewed, including ones planted by a prompt injection.`,
+				evidence: visibleLine(text, index),
+				remediation:
+					"Remove the instruction. Grant narrow allow rules for the commands the agent needs instead, and run fully unattended agents only inside a disposable container or VM.",
+				references: [owaspLlmUrl("llm06"), CLAUDE_PERMISSIONS],
+				confidence: "low",
+				tags: ["owasp-llm06"],
+			}),
+		);
 	}
 	return findings;
 };
