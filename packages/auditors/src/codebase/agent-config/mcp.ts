@@ -4,75 +4,57 @@ import { isPlaceholder, SECRET_KEY_NAME, SECRET_RULES } from "../secrets";
 import {
 	baseName,
 	cweUrl,
-	isRecord,
 	lineLocator,
 	owaspLlmUrl,
 	owaspUrl,
-	parseJsonc,
 	type SourceFile,
 	scrubLine,
 	shannonEntropy,
 	truncate,
 } from "../util";
-import { finding, GEMINI_CONFIG, locate, MCP_SECURITY } from "./shared";
+import { fields, type JsonNode, parseJsoncTree } from "./json";
+import { finding, GEMINI_CONFIG, MCP_SECURITY } from "./shared";
 
 /* -------------------------------------------------------------------------- */
 /*                                 MCP servers                                */
 /* -------------------------------------------------------------------------- */
 
+/** One server entry. Duplicate names are separate entries. */
 export interface McpServer {
 	readonly name: string;
-	readonly command?: string;
-	readonly args: ReadonlyArray<string>;
-	readonly env: Readonly<Record<string, string>>;
-	readonly headers: Readonly<Record<string, string>>;
-	readonly url?: string;
-	readonly trust: boolean;
-	/** Offset of the server's entry in the file; values are searched after it. */
-	readonly anchor: number;
+	readonly nameOffset: number;
+	readonly node: JsonNode;
 }
 
-export const strings = (v: unknown): string[] =>
-	Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
-
-const stringMap = (v: unknown): Record<string, string> =>
-	isRecord(v)
-		? Object.fromEntries(
-				Object.entries(v).filter(
-					(e): e is [string, string] => typeof e[1] === "string",
-				),
-			)
-		: {};
-
-const toServer = (
-	name: string,
-	raw: Record<string, unknown>,
-	anchor: number,
-): McpServer => {
-	const url = [raw.httpUrl, raw.url, raw.serverUrl].find(
-		(u) => typeof u === "string",
+/** Servers under every `mcpServers`, `servers` or `mcp_servers` table, duplicates included. */
+export const serversIn = (root: JsonNode | undefined): McpServer[] =>
+	["mcpServers", "servers", "mcp_servers"].flatMap((table) =>
+		fields(root, table).flatMap((t) =>
+			t.kind === "object"
+				? t.entries
+						.filter((e) => e.value.kind === "object")
+						.map((e) => ({
+							name: e.key,
+							nameOffset: e.keyOffset,
+							node: e.value,
+						}))
+				: [],
+		),
 	);
-	return {
-		name,
-		command: typeof raw.command === "string" ? raw.command : undefined,
-		args: strings(raw.args),
-		env: stringMap(raw.env),
-		headers: { ...stringMap(raw.headers), ...stringMap(raw.http_headers) },
-		url: url as string | undefined,
-		trust: raw.trust === true,
-		anchor,
-	};
-};
 
-export const serversOf = (
-	table: unknown,
-	anchorOf: (name: string) => number,
-): McpServer[] =>
-	isRecord(table)
-		? Object.entries(table).flatMap(([name, raw]) =>
-				isRecord(raw) ? [toServer(name, raw, anchorOf(name))] : [],
-			)
-		: [];
+interface Located {
+	readonly value: string;
+	readonly offset: number;
+}
+
+const stringsOf = (nodes: ReadonlyArray<JsonNode>): Located[] =>
+	nodes.flatMap((n) =>
+		n.kind === "string"
+			? [{ value: n.value, offset: n.offset }]
+			: n.kind === "array"
+				? stringsOf(n.items)
+				: [],
+	);
 
 export interface LaunchedPackage {
 	readonly launcher: string;
@@ -254,6 +236,46 @@ export const launchedPackages = (
 	return out;
 };
 
+/* -------------------------------------------------------------------------- */
+/*                               Launch commands                              */
+/* -------------------------------------------------------------------------- */
+
+const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
+const ASSIGNMENT = /^[A-Za-z_]\w*=/;
+
+const split = (loc: Located): Located[] =>
+	loc.value
+		.trim()
+		.split(/\s+/)
+		.filter(Boolean)
+		.map((value) => ({ value, offset: loc.offset }));
+
+/**
+ * The launcher behind the wrappers MCP configs use: leading `KEY=value`
+ * assignments, `env`, `cmd /c` and `sh -c "…"`.
+ */
+const unwrap = (tokens: ReadonlyArray<Located>, depth = 0): Located[] => {
+	let t = [...tokens];
+	for (let guard = 0; guard < 16 && t.length > 0; guard++) {
+		const first = t[0]?.value ?? "";
+		const head = exeName(first);
+		if (ASSIGNMENT.test(first)) t = t.slice(1);
+		else if (head === "env" || head === "cmd") {
+			t = t.slice(1);
+			while (t[0] && /^(?:-|\/[a-z]$|[A-Za-z_]\w*=)/i.test(t[0].value))
+				t = t.slice(1);
+		} else if (SHELLS.has(head) && /^-\w*c$/.test(t[1]?.value ?? "")) {
+			const script = t[2];
+			return script && depth < 2 ? unwrap(split(script), depth + 1) : [];
+		} else break;
+	}
+	return t;
+};
+
+/* -------------------------------------------------------------------------- */
+/*                                 Credentials                                */
+/* -------------------------------------------------------------------------- */
+
 const isReference = (value: string) => /\$\{|^\$[A-Za-z_]|^\{?env:/.test(value);
 
 const CREDENTIAL_KEY = new RegExp(
@@ -270,65 +292,122 @@ interface Candidate {
 	readonly where: string;
 	readonly key: string;
 	readonly value: string;
+	readonly offset: number;
 	readonly query?: boolean;
 }
 
-/** Query parameters and the userinfo password of a URL-shaped string. */
-const urlCandidates = (where: string, value: string): Candidate[] => {
-	if (!/^[a-z][\w+.-]*:\/\//i.test(value)) return [];
+/** Query, fragment and userinfo credentials, parsed the WHATWG way (as clients do). */
+const urlCandidates = (
+	where: string,
+	value: string,
+	offset: number,
+): Candidate[] => {
+	if (!value.includes(":")) return [];
+	let url: URL;
 	try {
-		const url = new URL(value);
-		const out: Candidate[] = [...url.searchParams].map(([k, v]) => ({
-			where: `${where} ?${k}`,
-			key: k,
-			value: v,
-			query: true,
-		}));
-		if (url.password)
-			out.push({
-				where: `${where} password`,
-				key: "password",
-				value: decodeURIComponent(url.password),
-			});
-		return out;
+		url = new URL(value.trim());
 	} catch {
 		return [];
 	}
+	if (!url.host) return [];
+	const params = [
+		...url.searchParams,
+		...new URLSearchParams(url.hash.slice(1)),
+	];
+	const out: Candidate[] = params.map(([key, v]) => ({
+		where: `${where} ?${key}`,
+		key,
+		value: v,
+		offset,
+		query: true,
+	}));
+	if (url.password) {
+		let password = url.password;
+		try {
+			password = decodeURIComponent(password);
+		} catch {
+			// Keep the encoded form.
+		}
+		out.push({
+			where: `${where} password`,
+			key: "password",
+			value: password,
+			offset,
+		});
+	}
+	return out;
 };
 
-/** Strings in a server entry that could hold a literal credential. */
-const credentialCandidates = (server: McpServer): Candidate[] => {
+const KEY_VALUE = /^(--?[\w-]{1,60}|[A-Za-z_]\w{0,60})=([\s\S]+)$/;
+const HEADER = /^([A-Za-z][\w-]{0,60})\s*:\s*([\s\S]+)$/;
+const WINDOWS_SWITCH = /^\/([\w-]{1,60}):([\s\S]+)$/;
+
+/**
+ * Every way one string can carry a named value: `--flag=value`, `KEY=value`,
+ * `Header: value`, `/name:value`, URL parts, and the same for each
+ * whitespace-separated word.
+ */
+const expand = (
+	where: string,
+	key: string,
+	value: string,
+	offset: number,
+	depth = 0,
+): Candidate[] => {
 	const out: Candidate[] = [];
-	for (const [k, v] of Object.entries(server.env))
-		out.push({ where: `env.${k}`, key: k, value: v });
-	for (const [k, v] of Object.entries(server.headers))
-		out.push({ where: `headers.${k}`, key: k, value: v });
-	const args = server.args;
-	for (let i = 0; i < args.length; i++) {
-		const a = args[i] ?? "";
-		// `--flag=value`, and `KEY=value` as passed to `docker run -e`.
-		const eq = /^(--?[\w-]+|[A-Za-z_]\w*)=(.+)$/.exec(a);
-		if (eq)
-			out.push({
-				where: `args ${eq[1]}`,
-				key: eq[1] ?? "",
-				value: eq[2] ?? "",
+	if (depth === 0 && /\s/.test(value.trim()))
+		for (const word of value.trim().split(/\s+/))
+			out.push(...expand(where, "", word, offset, 1));
+	out.push({ where, key, value, offset });
+	if (depth > 3) return out;
+	for (const re of [KEY_VALUE, HEADER, WINDOWS_SWITCH]) {
+		const m = re.exec(value);
+		if (!m || (re === HEADER && (m[2] ?? "").startsWith("//"))) continue;
+		out.push(...expand(where, m[1] ?? "", m[2] ?? "", offset, depth + 1));
+	}
+	out.push(...urlCandidates(where, value, offset));
+	return out;
+};
+
+/** Every string in a server entry, keys and its name included. */
+const candidatesOf = (server: McpServer): Candidate[] => {
+	const out: Candidate[] = [
+		{
+			where: "server name",
+			key: "",
+			value: server.name,
+			offset: server.nameOffset,
+		},
+	];
+	const walk = (node: JsonNode, path: string, key: string, depth: number) => {
+		if (depth > 32) return;
+		if (node.kind === "string")
+			out.push(...expand(path, key, node.value, node.offset));
+		else if (node.kind === "array")
+			node.items.forEach((item, i) => {
+				const at = `${path}[${i}]`;
+				walk(item, at, key, depth + 1);
+				// `--api-key value`, `-H "Authorization: …"`
+				const prev = node.items[i - 1];
+				if (
+					prev?.kind === "string" &&
+					prev.value.startsWith("-") &&
+					item.kind === "string"
+				)
+					out.push(...expand(at, prev.value, item.value, item.offset, 1));
 			});
-		else if (
-			/^--?[\w-]*(?:token|key|secret|password|passwd|credential)[\w-]*$/i.test(
-				a,
-			) &&
-			args[i + 1] !== undefined
-		) {
-			out.push({ where: `args ${a}`, key: a, value: args[i + 1] ?? "" });
-			i++;
-		} else out.push({ where: "args", key: "", value: a });
-		out.push(...urlCandidates("args url", eq?.[2] ?? a));
-	}
-	if (server.url) {
-		out.push({ where: "url", key: "", value: server.url });
-		out.push(...urlCandidates("url", server.url));
-	}
+		else if (node.kind === "object")
+			for (const e of node.entries) {
+				out.push({
+					where: `${path || "server"} key`,
+					key: "",
+					value: e.key,
+					offset: e.keyOffset,
+				});
+				walk(e.value, path ? `${path}.${e.key}` : e.key, e.key, depth + 1);
+			}
+	};
+	walk(server.node, "", "", 0);
 	return out;
 };
 
@@ -359,9 +438,10 @@ const literalSecret = (c: Candidate): LiteralSecret | undefined => {
 		? QUERY_SECRET.test(c.key) || CREDENTIAL_KEY.test(c.key)
 		: CREDENTIAL_KEY.test(c.key);
 	if (!c.key || !named || NOT_A_SECRET_KEY.test(c.key)) return undefined;
-	const value = c.value.replace(/^(?:bearer|basic|token)\s+/i, "");
+	const value = c.value.trim().replace(/^(?:bearer|basic|token)\s+/i, "");
 	if (
 		value.length < 8 ||
+		/\s/.test(value) ||
 		isPlaceholder(value) ||
 		shannonEntropy(value) < 3 ||
 		/^https?:\/\/|^[a-z]+(?:[._-][a-z]+)*$/.test(value)
@@ -375,16 +455,33 @@ const literalSecret = (c: Candidate): LiteralSecret | undefined => {
 	};
 };
 
+/* -------------------------------------------------------------------------- */
+/*                                   Output                                   */
+/* -------------------------------------------------------------------------- */
+
 /**
- * A command token or URL that is safe to print: URL userinfo and query values
- * are masked before the usual credential scrubbing, because a password or
- * `?key=` value need not look like any known token.
+ * Text that is safe to print: URL userinfo (up to the last `@`, as WHATWG
+ * parses it, with `\` as `/`) and every query, fragment and `;` parameter
+ * value are masked, then known secrets and credential shapes are scrubbed.
+ * Bounded quantifiers keep it linear on hostile input.
  */
-export const safeText = (s: string): string =>
+export const safeText = (
+	s: string,
+	known: ReadonlyArray<string> = [],
+): string =>
 	scrubLine(
 		s
-			.replace(/(:\/\/)[^/?#\s@]*@/g, "$1****@")
-			.replace(/([?&][^=&#\s]*=)[^&#\s]*/g, "$1****"),
+			.replace(
+				/([a-z][\w+.-]{0,30}:[\\/]{2})([^/\\?#\s]*)/gi,
+				(_m, scheme: string, authority: string) => {
+					const at = authority.lastIndexOf("@");
+					return at === -1
+						? `${scheme}${authority}`
+						: `${scheme}****@${authority.slice(at + 1)}`;
+				},
+			)
+			.replace(/([?&#;][^=&#;?\s]{0,200}=)[^&#;\s]*/g, "$1****"),
+		known,
 	);
 
 const SUBCOMMANDS = new Set(["run", "exec", "x", "dlx", "tool", "container"]);
@@ -394,15 +491,19 @@ const SUBCOMMANDS = new Set(["run", "exec", "x", "dlx", "tool", "container"]);
  * replaced by `…`: `docker run -i -e … ghcr.io/org/mcp`. Values passed to
  * flags (`-e TOKEN=…`, `--index-url https://user:pass@…`) never appear.
  */
-const launchEvidence = (tokens: ReadonlyArray<string>, upTo: number) =>
+const launchEvidence = (
+	tokens: ReadonlyArray<string>,
+	upTo: number,
+	clean: (s: string) => string,
+) =>
 	truncate(
 		tokens
 			.slice(0, upTo + 1)
 			.map((t, i) =>
 				i === 0 || i === upTo
-					? safeText(t)
+					? clean(t)
 					: t.startsWith("-")
-						? t.replace(/=[\s\S]*$/, "=…")
+						? clean(t.replace(/=[\s\S]*$/, "=…"))
 						: i <= 3 && SUBCOMMANDS.has(t)
 							? t
 							: "…",
@@ -422,6 +523,20 @@ const REMOTE_INSTALL_REMEDIATION: Readonly<
 		"Pin the image by digest (`image@sha256:…`), or at least by a version tag.",
 };
 
+/** WHATWG-parsed http URL (leading spaces, tabs and case as a client sees them). */
+const plainHttpHost = (value: string): string | undefined => {
+	try {
+		const url = new URL(value.trim());
+		return url.protocol === "http:" &&
+			url.hostname &&
+			!LOOPBACK.test(url.hostname)
+			? url.hostname
+			: undefined;
+	} catch {
+		return undefined;
+	}
+};
+
 export const scanServers = (
 	path: string,
 	text: string,
@@ -430,52 +545,73 @@ export const scanServers = (
 	gemini: boolean,
 ): FindingInput[] => {
 	const lineOf = lineLocator(text);
+
+	// Find every literal credential first, so no output string can repeat one.
+	const credentials = servers.map((server) => {
+		const seen = new Set<string>();
+		return candidatesOf(server).flatMap((c) => {
+			const s = literalSecret(c);
+			const id = `${c.offset}:${s?.secret}`;
+			if (!s || seen.has(id)) return [];
+			seen.add(id);
+			return [{ c, s }];
+		});
+	});
+	const known = credentials.flat().map(({ s }) => s.secret);
+	const clean = (s: string) => truncate(safeText(s.slice(0, 2000), known), 120);
+
 	const findings: FindingInput[] = [];
-	for (const server of servers) {
-		const { name, anchor } = server;
-		const at = (value: string) => lineOf(locate(text, value, anchor));
+	servers.forEach((server, i) => {
+		const name = clean(server.name);
+		const { node } = server;
 
-		if (server.command) {
-			const tokens = [...server.command.trim().split(/\s+/), ...server.args];
-			for (const pkg of launchedPackages(tokens)) {
-				if (pkg.pinned) continue;
-				if (pkg.ecosystem === "npm" && localPackages.has(npmName(pkg.spec)))
-					continue;
-				findings.push(
-					finding("mcp-unpinned-server", path, at(pkg.spec), {
-						title: `MCP server "${name}" runs an unpinned ${pkg.ecosystem === "docker" ? "image" : "package"}`,
-						severity: "medium",
-						category: "supply-chain",
-						message: `MCP server "${name}" launches \`${safeText(pkg.spec)}\` without an exact version, so each start can fetch and run whatever the registry serves at that moment${pkg.autoYes ? " (-y installs it without asking)" : ""}. A compromised or hijacked release then runs with the agent's access to this machine.`,
-						evidence: launchEvidence(tokens, pkg.token),
-						remediation: REMOTE_INSTALL_REMEDIATION[pkg.ecosystem],
-						references: [
-							owaspLlmUrl("llm03"),
-							cweUrl(1357),
-							`${MCP_SECURITY}#local-mcp-server-compromise`,
-						],
-						confidence: "high",
-						tags: ["cwe-1357", "owasp-llm03"],
-					}),
-				);
+		const commands = stringsOf(fields(node, "command"));
+		const argLists = fields(node, "args").map((a) => stringsOf([a]));
+		const reported = new Set<string>();
+		for (const command of commands)
+			for (const args of argLists.length > 0 ? argLists : [[]]) {
+				const tokens = unwrap([...split(command), ...args]);
+				const values = tokens.map((t) => t.value);
+				for (const pkg of launchedPackages(values)) {
+					if (pkg.pinned) continue;
+					if (pkg.ecosystem === "npm" && localPackages.has(npmName(pkg.spec)))
+						continue;
+					const offset = tokens[pkg.token]?.offset ?? command.offset;
+					const id = `${offset}:${pkg.spec}`;
+					if (reported.has(id)) continue;
+					reported.add(id);
+					findings.push(
+						finding("mcp-unpinned-server", path, lineOf(offset), {
+							title: `MCP server "${name}" runs an unpinned ${pkg.ecosystem === "docker" ? "image" : "package"}`,
+							severity: "medium",
+							category: "supply-chain",
+							message: `MCP server "${name}" launches \`${clean(pkg.spec)}\` without an exact version, so each start can fetch and run whatever the registry serves at that moment${pkg.autoYes ? " (-y installs it without asking)" : ""}. A compromised or hijacked release then runs with the agent's access to this machine.`,
+							evidence: launchEvidence(values, pkg.token, clean),
+							remediation: REMOTE_INSTALL_REMEDIATION[pkg.ecosystem],
+							references: [
+								owaspLlmUrl("llm03"),
+								cweUrl(1357),
+								`${MCP_SECURITY}#local-mcp-server-compromise`,
+							],
+							confidence: "high",
+							tags: ["cwe-1357", "owasp-llm03"],
+						}),
+					);
+				}
 			}
-		}
 
-		if (server.url && /^http:\/\//i.test(server.url)) {
-			let host = "";
-			try {
-				host = new URL(server.url).hostname;
-			} catch {
-				host = "";
-			}
-			if (host && !LOOPBACK.test(host))
+		for (const url of stringsOf(
+			["url", "httpUrl", "serverUrl"].flatMap((k) => fields(node, k)),
+		)) {
+			const host = plainHttpHost(url.value);
+			if (host)
 				findings.push(
-					finding("mcp-plaintext-http", path, at(server.url), {
+					finding("mcp-plaintext-http", path, lineOf(url.offset), {
 						title: `MCP server "${name}" is reached over plain HTTP`,
 						severity: "medium",
 						category: "security",
-						message: `MCP server "${name}" uses ${host} over http://, so tool calls, results and any credentials are sent unencrypted and can be read or altered on the network.`,
-						evidence: truncate(safeText(server.url)),
+						message: `MCP server "${name}" uses ${clean(host)} over http://, so tool calls, results and any credentials are sent unencrypted and can be read or altered on the network.`,
+						evidence: clean(url.value),
 						remediation:
 							"Use https:// for every MCP server that is not on the loopback interface.",
 						references: [cweUrl(319), owaspUrl("a02"), MCP_SECURITY],
@@ -485,16 +621,17 @@ export const scanServers = (
 				);
 		}
 
-		for (const c of credentialCandidates(server)) {
-			const s = literalSecret(c);
-			if (!s) continue;
+		for (const { c, s } of credentials[i] ?? []) {
+			const where = clean(
+				c.key && !c.where.endsWith(c.key) ? `${c.where} ${c.key}` : c.where,
+			);
 			findings.push(
-				finding("mcp-inline-credential", path, at(c.value), {
+				finding("mcp-inline-credential", path, lineOf(c.offset), {
 					title: `${s.title} in MCP server config`,
 					severity: s.severity,
 					category: "security",
-					message: `MCP server "${name}" has a literal credential in ${c.where}. Anyone who can read the repository can use it, and agents that read the config can leak it.`,
-					evidence: `${c.where}: ${redact(s.secret)}`,
+					message: `MCP server "${name}" has a literal credential in ${where}. Anyone who can read the repository can use it, and agents that read the config can leak it.`,
+					evidence: `${where}: ${redact(s.secret)}`,
 					remediation:
 						// biome-ignore lint/suspicious/noTemplateCurlyInString: MCP config variable syntax
 						"Revoke and rotate the credential, then reference an environment variable instead (`${VAR}` in .mcp.json, `${env:VAR}` in Cursor and VS Code, `env_vars`/`bearer_token_env_var` in Codex).",
@@ -505,46 +642,42 @@ export const scanServers = (
 			);
 		}
 
-		if (gemini && server.trust)
+		const trusted =
+			node.kind === "object"
+				? node.entries.find(
+						(e) =>
+							e.key === "trust" &&
+							e.value.kind === "scalar" &&
+							e.value.value === true,
+					)
+				: undefined;
+		if (gemini && trusted)
 			findings.push(
-				finding(
-					"mcp-server-trusted",
-					path,
-					lineOf(locate(text, '"trust"', anchor)),
-					{
-						title: `MCP server "${name}" bypasses tool confirmations`,
-						severity: "medium",
-						category: "security",
-						message: `\`trust: true\` makes Gemini CLI run every tool of MCP server "${name}" without asking, so a prompt injection can drive that server unchecked.`,
-						evidence: `mcpServers.${name}.trust: true`,
-						remediation:
-							"Remove `trust: true` and allow-list the specific read-only tools you need with `includeTools` or `tools.allowed`.",
-						references: [owaspLlmUrl("llm06"), GEMINI_CONFIG],
-						confidence: "high",
-						tags: ["owasp-llm06"],
-					},
-				),
+				finding("mcp-server-trusted", path, lineOf(trusted.keyOffset), {
+					title: `MCP server "${name}" bypasses tool confirmations`,
+					severity: "medium",
+					category: "security",
+					message: `\`trust: true\` makes Gemini CLI run every tool of MCP server "${name}" without asking, so a prompt injection can drive that server unchecked.`,
+					evidence: `mcpServers.${name}.trust: true`,
+					remediation:
+						"Remove `trust: true` and allow-list the specific read-only tools you need with `includeTools` or `tools.allowed`.",
+					references: [owaspLlmUrl("llm06"), GEMINI_CONFIG],
+					confidence: "high",
+					tags: ["owasp-llm06"],
+				}),
 			);
-	}
+	});
 	return findings;
 };
 
 export const scanMcpJson = (
 	file: SourceFile,
 	localPackages: ReadonlySet<string>,
-): FindingInput[] => {
-	const json = parseJsonc(file.text);
-	if (!isRecord(json)) return [];
-	const key = isRecord(json.mcpServers) ? "mcpServers" : "servers";
-	const tableAt = Math.max(0, file.text.indexOf(`"${key}"`));
-	const servers = serversOf(json[key], (name) =>
-		Math.max(tableAt, file.text.indexOf(JSON.stringify(name), tableAt)),
-	);
-	return scanServers(
+): FindingInput[] =>
+	scanServers(
 		file.path,
 		file.text,
-		servers,
+		serversIn(parseJsoncTree(file.text)),
 		localPackages,
-		/(?:^|\/)\.gemini\/settings\.json$/.test(file.path),
+		/(?:^|\/)\.gemini\/settings\.json$/i.test(file.path),
 	);
-};

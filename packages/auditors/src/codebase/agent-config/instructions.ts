@@ -280,6 +280,7 @@ const within = (regions: ReadonlyArray<Region>, index: number) => {
 };
 
 const DETAILS = "a collapsed <details> block";
+const HIDING_ELEMENTS = new Set(["template", "noscript", "script", "style"]);
 
 /** Parts of a Markdown file that the rendered view hides from a reviewer. */
 export const hiddenRegions = (text: string): Region[] => {
@@ -317,6 +318,48 @@ export const hiddenRegions = (text: string): Region[] => {
 			start: bodyStart + skipSummary,
 			end: covered,
 			kind: DETAILS,
+		});
+	}
+	// Elements a renderer hides: the hidden attribute, display:none or
+	// visibility:hidden, and template/noscript/script/style. Closing tags are
+	// searched forward from each opening, nested ones skipped: linear time.
+	let hiddenUntil = 0;
+	const unclosed = new Set<string>();
+	for (const m of text.matchAll(/<([a-z][\w-]{0,30})\b([^>]{0,1000})>/gi)) {
+		const name = (m[1] ?? "").toLowerCase();
+		const attrs = m[2] ?? "";
+		const open = m.index ?? 0;
+		if (name === "details" || attrs.endsWith("/") || open < hiddenUntil)
+			continue;
+		const hides =
+			HIDING_ELEMENTS.has(name) ||
+			/\shidden(?=[\s=/]|$)/i.test(attrs) ||
+			/display\s*:\s*none|visibility\s*:\s*hidden/i.test(attrs);
+		if (!hides || unclosed.has(name)) continue;
+		const bodyStart = open + m[0].length;
+		const closing = new RegExp(`</${name}\\s*>`, "gi");
+		closing.lastIndex = bodyStart;
+		const close = closing.exec(text);
+		if (!close) {
+			unclosed.add(name);
+			continue;
+		}
+		hiddenUntil = close.index;
+		regions.push({
+			start: bodyStart,
+			end: close.index,
+			kind: `a hidden <${name}> element`,
+		});
+	}
+	// Link reference definitions never render: label, destination and title.
+	for (const m of text.matchAll(
+		/^ {0,3}\[((?:[^\]\\\n]|\\.){1,999})\]:[ \t]*\S+(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?[ \t]*$/gm,
+	)) {
+		const start = (m.index ?? 0) + m[0].indexOf("[");
+		regions.push({
+			start,
+			end: (m.index ?? 0) + m[0].length,
+			kind: "a Markdown link reference definition",
 		});
 	}
 	for (const m of text.matchAll(
@@ -395,13 +438,14 @@ const HIDDEN_INSTRUCTIONS: ReadonlyArray<InstructionPattern> = [
 
 /** Flags and settings that switch off an agent's approval prompts or sandbox. */
 const SAFETY_FLAGS: ReadonlyArray<RegExp> = [
-	/--dangerously-skip-permissions\b/,
-	/--dangerously-bypass-approvals-and-sandbox\b/,
-	/(?:--permission-mode[ =]|defaultMode"?\s*[:=]\s*"?)bypassPermissions\b/,
-	/--approval-mode[ =]yolo\b|(?<![\w-])--yolo\b/,
-	/(?:--sandbox[ =]|sandbox_mode\s*=\s*"?)danger-full-access\b/,
-	/--allow-all-tools\b/,
-	/--trust-all-tools\b/,
+	// One or two dashes (an em dash folds to one), any case, singular too.
+	/(?<![\w-])--?dangerously-skip-permissions?\b/i,
+	/(?<![\w-])--?dangerously-bypass-approvals?-and-sandbox\b/i,
+	/(?:(?<![\w-])--?permission-mode[ =:]\s*|defaultMode"?\s*[:=]\s*"?)bypassPermissions\b/i,
+	/(?<![\w-])--?approval-mode[ =:]\s*yolo\b|(?<![\w-])--?yolo\b/i,
+	/(?:(?<![\w-])--?sandbox[ =:]\s*|sandbox_mode\s*=\s*"?)danger-full-access\b/i,
+	/(?<![\w-])--?allow-all-tools\b/i,
+	/(?<![\w-])--?trust-all-tools\b/i,
 ];
 /** The same thing in words, only as an imperative that opens a sentence. */
 const SAFETY_IMPERATIVE =
@@ -409,12 +453,36 @@ const SAFETY_IMPERATIVE =
 
 const NEGATION =
 	/\b(?:never|not|no|avoid|without|unless|forbid\w*|prohibit\w*|disallow\w*|instead\s+of|rather\s+than)\b|n't\b/i;
-/** An imperative opening the sentence ("Run …", "- Always use …"), or "always" anywhere. */
-const IMPERATIVE_CUE =
-	/^(?:[-+>]\s+|\d+[.)]\s+)?(?:please\s+|you\s+(?:should|must)\s+)?(?:use|run|start|launch|enable|set|invoke|execute|pass|add|switch\s+to)(?![\w-])|(?<![\w-])always(?![\w-])/i;
-/** "only in a container", "inside the devcontainer": a scoped, deliberate choice. */
+/** "Don't forget to", "never hesitate to": negation words that negate nothing. */
+const NOT_NEGATION =
+	/\b(?:do\s+not|don't|dont|never|not)\s+(?:forget|hesitate|fail|neglect|omit)\b|\bnot\s+only\b|\bno\s+matter\b/gi;
+
+const VERB =
+	"(?:use|run|start|launch|enable|set|invoke|execute|pass|add|append|include|call|switch\\s+to)(?![\\w-])";
+const LIST_MARK = "(?:[-+>]\\s+|\\d+[.)]\\s+|#+\\s+)?";
+/**
+ * Something that tells the reader to do it: an imperative opening the
+ * sentence after lead-ins ("Then, run …", "Claude, run …"), a modal ("you
+ * must pass …"), "it's required to …", "make sure to …", a label ("Flags:
+ * --yolo"), or "always" anywhere. Descriptions ("Live runs launch …") are not.
+ */
+const IMPERATIVE_CUE = new RegExp(
+	[
+		`^${LIST_MARK}(?:(?:then|first|next|now|also|finally|just|simply|please|always|instead|so|and)\\b,?\\s+|[\\w-]{1,30},\\s+){0,3}${VERB}`,
+		`\\b(?:you|agents?|claude|codex|gemini|copilot|cursor|the\\s+agent)\\s+(?:should|must|need\\s+to|have\\s+to|are\\s+(?:required|expected)\\s+to)\\s+(?:always\\s+)?${VERB}`,
+		`\\b(?:it's|it\\s+is|this\\s+is)\\s+(?:required|mandatory|necessary|important)\\s+to\\s+${VERB}`,
+		"\\b(?:make\\s+sure|be\\s+sure|remember|don't\\s+forget|do\\s+not\\s+forget|never\\s+forget)\\s+(?:to|you)\\b",
+		`^${LIST_MARK}(?:flags?|options?|args?|arguments?|command|cmd|usage|invocation|launch|run|start)\\s*:`,
+		"(?<![\\w-])always(?![\\w-])",
+	].join("|"),
+	"i",
+);
+/**
+ * A stated, un-negated scope: "only in …", "inside a disposable VM", "in CI".
+ * "we're not in a container" does not count.
+ */
 const ISOLATED_CONTEXT =
-	/\bonly\s+(?:in|inside|within|when|if|for)\b|\b(?:sandbox(?:ed)?|container|devcontainer|vm|virtual\s+machine|isolated|disposable|ephemeral)\b/i;
+	/(?<!(?:\b(?:not|never|no)|n't|\boutside(?:\s+of)?)\s{1,3})\b(?:only\s+(?:in|inside|within|when|if|for|on)\b|(?:in|inside|within|on)\s+(?:an?\s+|the\s+|your\s+|our\s+|its\s+)?(?:[\w-]+\s+){0,2}?(?:sandbox(?:ed)?|containers?|devcontainers?|vms?|virtual\s+machines?|codespaces?|ci)\b)/i;
 
 /** Offset within `sentence` of an un-negated safety bypass, if any. */
 const safetyBypass = (
@@ -428,7 +496,11 @@ const safetyBypass = (
 		if (!m) continue;
 		const before = sentence.slice(0, m.index);
 		const rest = before + sentence.slice(m.index + m[0].length);
-		if (NEGATION.test(before) || ISOLATED_CONTEXT.test(rest)) continue;
+		if (
+			NEGATION.test(before.replace(NOT_NEGATION, " ")) ||
+			ISOLATED_CONTEXT.test(rest)
+		)
+			continue;
 		if (imperative || IMPERATIVE_CUE.test(before.trimStart())) return m.index;
 	}
 	return undefined;
@@ -454,6 +526,7 @@ const scanInstructions = (file: SourceFile): FindingInput[] => {
 	const findings: FindingInput[] = [];
 	const hidden = hiddenRegions(text);
 
+	const reportedLines = new Set<number>();
 	for (const region of hidden) {
 		const raw = text.slice(region.start, region.end);
 		const body = normalize(raw);
@@ -473,6 +546,9 @@ const scanInstructions = (file: SourceFile): FindingInput[] => {
 			});
 		if (matches.length === 0) continue;
 		const index = Math.min(...matches.map((m) => m.index));
+		// Overlapping regions (a comment inside a hidden element) report once.
+		if (reportedLines.has(lineOf(index))) continue;
+		reportedLines.add(lineOf(index));
 		findings.push(
 			finding("hidden-instruction", path, lineOf(index), {
 				title: "Hidden instruction in an agent instruction file",
