@@ -1,6 +1,7 @@
 {
 	"rules": {
 		"no-control-regex": "off",
+		"no-misleading-character-class": "off",
 		"no-unused-vars": [
 			"warn",
 			{

@@ -79,6 +79,8 @@ const REMEDIATION: Readonly<Record<Severity, string>> = {
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const keyAt = (name: string) =>
+	// name is escaped, so it only matches itself.
+	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 	new RegExp(`(?:^|[{,\\s])["']?${escapeRegExp(name)}["']?\\s*:`, "gm");
 /** Any key that looks like an API path, to bound the method search. */
 const PATH_KEY = /(?:^|[{,\s])["']?\/[^"'\s:]*["']?\s*:/gm;

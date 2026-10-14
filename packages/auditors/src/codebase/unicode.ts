@@ -385,9 +385,9 @@ const evidenceAt = (
 		if (!reveal) return part(from, to);
 		const a = Math.min(Math.max(reveal[0], from), to);
 		const b = Math.min(Math.max(reveal[1], from), to);
-		const revealed = [...text.slice(a, b)]
-			.map((c) => (/[\x20-\x7E]/.test(c) ? c : escapeChar(c)))
-			.join("");
+		const revealed = Array.from(text.slice(a, b), (c) =>
+			/[\x20-\x7E]/.test(c) ? c : escapeChar(c),
+		).join("");
 		return part(from, a) + revealed + part(b, to);
 	};
 	if (lineEnd - lineStart <= EVIDENCE_LINE) {

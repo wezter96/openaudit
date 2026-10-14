@@ -259,6 +259,8 @@ export const hiddenRegions = (text: string): Region[] => {
 			/display\s*:\s*none|visibility\s*:\s*hidden/i.test(attrs);
 		if (!hides || visibleCode(open)) continue;
 		const bodyStart = open + m[0].length;
+		// name matched [a-z][\w-]{0,30} above, so it is literal in a pattern.
+		// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 		const closing = new RegExp(`</${name}\\s*>`, "gi");
 		closing.lastIndex = bodyStart;
 		const end = closing.exec(text)?.index ?? text.length;

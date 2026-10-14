@@ -609,11 +609,12 @@ export const parseSslyzeReport = (
 			const key = isRecord(cert.public_key) ? cert.public_key : {};
 			const size = num(key.key_size);
 			const algorithm = str(key.algorithm) ?? "";
-			const min = /^(RSA|DSA)/.test(algorithm)
-				? 2048
-				: /^EllipticCurve/.test(algorithm)
-					? 224
-					: 0;
+			const min =
+				algorithm.startsWith("RSA") || algorithm.startsWith("DSA")
+					? 2048
+					: algorithm.startsWith("EllipticCurve")
+						? 224
+						: 0;
 			if (size !== undefined && size < min)
 				hit("weak-certificate-key", `${subject}: ${algorithm} ${size} bits`);
 		}

@@ -107,7 +107,7 @@ const pypiPinned = (spec: string): boolean | undefined => {
 		/\.(?:whl|tar\.gz|zip)$/.test(spec)
 	)
 		return undefined;
-	if (/^git\+/.test(spec)) return /@[0-9a-f]{40}(?:#.*)?$/i.test(spec);
+	if (spec.startsWith("git+")) return /@[0-9a-f]{40}(?:#.*)?$/i.test(spec);
 	return /^[\w.[\],-]+(?:===?\s*[\w.!+-]+|@\d[\w.!+-]*)$/.test(spec);
 };
 
