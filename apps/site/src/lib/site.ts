@@ -25,16 +25,69 @@ export const NAV = [
 	{ href: "/architecture/", label: "Architecture" },
 ] as const;
 
+/** The docs pages, in reading order; titles and descriptions live here only. */
 export const DOCS = [
-	{ slug: "", title: "Getting started" },
-	{ slug: "cli", title: "CLI reference" },
-	{ slug: "configuration", title: "Configuration" },
-	{ slug: "ci", title: "CI and integrations" },
-	{ slug: "agents", title: "MCP and agents" },
-	{ slug: "report", title: "Report and scoring" },
-	{ slug: "safety", title: "Safety" },
-	{ slug: "contributing", title: "Contributing" },
+	{
+		slug: "",
+		title: "Getting started",
+		description:
+			"Install openaudit, run your first audit and read the report. openaudit needs Bun 1.4 or newer; scanners are optional.",
+	},
+	{
+		slug: "cli",
+		title: "CLI reference",
+		description:
+			"Every openaudit command and flag: targets, output formats, auditor selection, baselines, diff mode, exit codes and agent mode.",
+	},
+	{
+		slug: "configuration",
+		title: "Configuration",
+		description:
+			"openaudit.config.json: suppressions, auditor selection and per-auditor settings, with the full key reference and what a config inside the audited target may change.",
+	},
+	{
+		slug: "ci",
+		title: "CI and integrations",
+		description:
+			"Run openaudit in GitHub Actions, GitLab CI, pre-commit or the Docker image, upload SARIF to code scanning and fail builds on new findings.",
+	},
+	{
+		slug: "agents",
+		title: "MCP and agents",
+		description:
+			"Connect Claude Code, Cursor, Codex or a remote agent to openaudit over MCP, run the ten judgment-heavy playbooks, or run them headless with --agentic.",
+	},
+	{
+		slug: "api",
+		title: "HTTP API",
+		description:
+			"The self-hosted HTTP API in apps/server: URL audits and the auditor and playbook catalogue over REST, with its OpenAPI document.",
+	},
+	{
+		slug: "report",
+		title: "Report and scoring",
+		description:
+			"How openaudit scores each area from 0 to 100, how grades and severities are defined, and what the interactive HTML, JSON, SARIF and Markdown reports contain.",
+	},
+	{
+		slug: "safety",
+		title: "Safety",
+		description:
+			"openaudit treats every target as hostile: confined file reads, origin-scoped HTTP, opt-in for tools that run project code, and agents without a shell.",
+	},
+	{
+		slug: "contributing",
+		title: "Contributing",
+		description:
+			"Set up the openaudit monorepo, add an auditor or wrap a scanner safely, and open a pull request that passes the full check.",
+	},
 ] as const;
+export type DocSlug = (typeof DOCS)[number]["slug"];
+/** A docs page's entry in DOCS. */
+export const doc = (slug: DocSlug) =>
+	DOCS.find((d) => d.slug === slug) ?? DOCS[0];
+/** The site path of a docs page. */
+export const docPath = (slug: string) => `/docs/${slug ? `${slug}/` : ""}`;
 
 export type Category =
 	| "security"
@@ -99,6 +152,8 @@ export const counts = {
 	all: auditors.length,
 };
 
+export const CATALOGUE_DESCRIPTION = `All ${counts.all} openaudit auditors: ${counts.builtin} built in, ${counts.external} that wrap an external tool and ${counts.agentic} agentic, filterable by target, area and engine.`;
+
 export interface CategoryScore {
 	readonly category: string;
 	readonly score: number;
@@ -122,6 +177,14 @@ export const self: SelfAudit = selfAudit;
 
 /** Absolute URL of a site path. */
 export const pageUrl = (path: string) => `${SITE}${u(path)}`;
+
+/**
+ * The Markdown version of a site page: "/docs/cli/" -> "/docs/cli/index.md".
+ * The report has its own, written by the CLI. worker/agents.ts maps paths the
+ * same way.
+ */
+export const markdownPath = (path: string) =>
+	path === "/report/" ? "/report/openaudit-report.md" : `${path}index.md`;
 
 /** `/docs/ci/` -> `docs-ci`, `/` -> `index`; the OG image name of a page. */
 export const ogName = (path: string) =>

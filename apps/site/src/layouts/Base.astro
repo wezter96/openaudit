@@ -3,7 +3,7 @@ import "../styles/global.css";
 import Icon from "../components/Icon.astro";
 import Logo from "../components/Logo.astro";
 import { clamp } from "../lib/dial";
-import { BLOB, NAV, OPENSVERIGE, ogName, pageUrl, REPO, self, u, unbase } from "../lib/site";
+import { BLOB, markdownPath, NAV, OPENSVERIGE, ogName, pageUrl, REPO, self, u, unbase } from "../lib/site";
 
 interface Props {
 	readonly title: string;
@@ -14,9 +14,11 @@ interface Props {
 	/** Use the title as is, without the "| openaudit" suffix. */
 	readonly bareTitle?: boolean;
 	readonly noindex?: boolean;
+	/** Whether the page has a Markdown version (src/pages/[...page].md.ts). */
+	readonly markdown?: boolean;
 }
 
-const { title, heroDial = false, noindex = false, bareTitle = false } = Astro.props;
+const { title, heroDial = false, noindex = false, bareTitle = false, markdown = true } = Astro.props;
 /** Search results show about 160 characters; cut at a sentence or a word. */
 const clip = (text: string, max = 160) => {
 	if (text.length <= max) return text;
@@ -51,6 +53,7 @@ const grade = self.grade ?? "";
 		<link rel="icon" href={u("/favicon-32.png")} type="image/png" sizes="32x32" />
 		<link rel="apple-touch-icon" href={u("/apple-touch-icon.png")} />
 		<link rel="sitemap" href={u("/sitemap-index.xml")} />
+		{markdown && <link rel="alternate" type="text/markdown" href={u(markdownPath(path))} />}
 		<meta property="og:type" content="website" />
 		<meta property="og:site_name" content="openaudit" />
 		<meta property="og:title" content={Astro.props.ogTitle ?? title} />

@@ -1,27 +1,26 @@
 ---
-import { DOCS, REPO, u, unbase } from "../lib/site";
+import { DOCS, type DocSlug, doc, docPath, REPO, u } from "../lib/site";
 import Base from "./Base.astro";
 
 interface Props {
-	readonly title: string;
-	readonly description: string;
+	/** The page's entry in DOCS, which holds its title and description. */
+	readonly slug: DocSlug;
 	readonly lede?: string;
 	/** Repository files this page is built from, linked under "Sources". */
 	readonly sources?: ReadonlyArray<string>;
 }
 
-const { title, description, lede, sources = [] } = Astro.props;
+const { slug, lede, sources = [] } = Astro.props;
+const { title, description } = doc(slug);
 const html = await Astro.slots.render("default");
 // "On this page": every h2 in the rendered content.
 const toc = [...html.matchAll(/<h2 id="([^"]+)"[^>]*>([\s\S]*?)<\/h2>/g)].map((m) => ({
 	id: m[1] ?? "",
 	text: (m[2] ?? "").replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&#39;/g, "'"),
 }));
-const path = unbase(Astro.url.pathname);
-const index = DOCS.findIndex((d) => `/docs/${d.slug ? `${d.slug}/` : ""}` === path);
+const index = DOCS.findIndex((d) => d.slug === slug);
 const prev = index > 0 ? DOCS[index - 1] : undefined;
 const next = index >= 0 && index < DOCS.length - 1 ? DOCS[index + 1] : undefined;
-const href = (slug: string) => `/docs/${slug ? `${slug}/` : ""}`;
 ---
 
 <Base title={title} description={description}>
@@ -32,7 +31,7 @@ const href = (slug: string) => `/docs/${slug ? `${slug}/` : ""}`;
 				{
 					DOCS.map((d) => (
 						<li>
-							<a href={u(href(d.slug))} aria-current={href(d.slug) === path ? "page" : undefined}>
+							<a href={u(docPath(d.slug))} aria-current={d.slug === slug ? "page" : undefined}>
 								{d.title}
 							</a>
 						</li>
@@ -68,7 +67,7 @@ const href = (slug: string) => `/docs/${slug ? `${slug}/` : ""}`;
 				<nav class="pager" aria-label="Previous and next page">
 					{
 						prev && (
-							<a class="prev" href={u(href(prev.slug))}>
+							<a class="prev" href={u(docPath(prev.slug))}>
 								<span>Previous</span>
 								{prev.title}
 							</a>
@@ -76,7 +75,7 @@ const href = (slug: string) => `/docs/${slug ? `${slug}/` : ""}`;
 					}
 					{
 						next && (
-							<a class="next" href={u(href(next.slug))}>
+							<a class="next" href={u(docPath(next.slug))}>
 								<span>Next</span>
 								{next.title}
 							</a>

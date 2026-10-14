@@ -1,7 +1,8 @@
 ---
 import Command from "../../components/Command.astro";
 import Base from "../../layouts/Base.astro";
-import { type Auditor, auditors, CATEGORY_LABEL, ENGINE_LABEL, playbooks, TARGET_LABEL, u } from "../../lib/site";
+import { auditorView } from "../../lib/auditor";
+import { type Auditor, auditors, CATEGORY_LABEL, ENGINE_LABEL, TARGET_LABEL, u } from "../../lib/site";
 
 export const getStaticPaths = () => auditors.map((a) => ({ params: { id: a.id }, props: { auditor: a } }));
 
@@ -9,30 +10,7 @@ interface Props {
 	readonly auditor: Auditor;
 }
 const { auditor: a } = Astro.props;
-const playbook = playbooks.find((p) => p.id === a.id);
-// Two auditors can share a title (a static and a live check); the target tells them apart.
-const shared = auditors.some((o) => o.id !== a.id && o.title === a.title);
-const pageTitle = shared ? `${a.title}, ${TARGET_LABEL[a.targets[0] ?? ""] ?? a.id}` : a.title;
-
-const TARGET_ARG: Record<string, string> = {
-	codebase: ".",
-	url: "https://example.com",
-	webapp: "https://example.com --browser",
-	container: "image:nginx:1.27",
-	iac: ".",
-	mobile: "./app-release.apk",
-	cloud: "cloud:aws",
-};
-const first = a.targets[0] ?? "codebase";
-const command = `bunx @openaudit/cli ${TARGET_ARG[first] ?? "."} --only ${a.id}${a.engine === "agentic" && !a.optIn ? " --agentic" : ""}`;
-const related = auditors
-	.filter((o) => o.id !== a.id && o.categories[0] === a.categories[0] && o.targets.some((t) => a.targets.includes(t)))
-	.slice(0, 8);
-const how = a.engine === "builtin"
-	? "Built into openaudit; nothing to install."
-	: a.engine === "external"
-		? `Wraps ${a.tool ?? "an external tool"}. When it isn't installed, the auditor is skipped with an install hint and the rest of the audit runs.`
-		: "Runs a playbook with the Claude Agent SDK. Needs ANTHROPIC_API_KEY or a Claude Code login; host agents can run the same playbook over MCP without a key.";
+const { pageTitle, playbook, command, how, related, runs, network } = auditorView(a);
 ---
 
 <Base title={`${pageTitle} | openaudit`.length <= 60 ? `${pageTitle} | openaudit` : pageTitle} bareTitle ogTitle={pageTitle} description={a.description}>
@@ -61,8 +39,8 @@ const how = a.engine === "builtin"
 						}
 					</dd>
 				</div>
-				<div><dt>Runs</dt><dd>{a.optIn ? "Opt-in: only when selected with --only" : "By default, when the target applies"}</dd></div>
-				<div><dt>Network</dt><dd>{a.network ? "Contacts services beyond the target" : "Only the target itself"}</dd></div>
+				<div><dt>Runs</dt><dd>{runs}</dd></div>
+				<div><dt>Network</dt><dd>{network}</dd></div>
 			</dl>
 			<div class="use">
 				<h2>Run only this auditor</h2>
