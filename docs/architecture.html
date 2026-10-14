@@ -9,23 +9,28 @@
 <meta name="description" content="How openaudit works: every auditor by target and area, the coverage matrix, the agent playbooks and the trust boundary.">
 <style>
 :root {
-	--bg: #f7f7f5; --panel: #ffffff; --ink: #1c1d21; --muted: #62646d; --line: #dcdcd6;
-	--builtin: #0f766e; --builtin-bg: #e3f4f1;
-	--external: #4338ca; --external-bg: #e8e8fb;
-	--agentic: #9a4306; --agentic-bg: #fdf0dc;
-	--gap: #fbe9e9; --gap-ink: #a12d2d; --accent: #1c1d21;
+	color-scheme: light dark;
+	--bg: light-dark(#f7f7f5, #131417);
+	--panel: light-dark(#ffffff, #1b1c20);
+	--ink: light-dark(#1c1d21, #ececef);
+	--muted: light-dark(#62646d, #9a9ca6);
+	--line: light-dark(#dcdcd6, #2e3036);
+	--builtin: light-dark(#0f766e, #5eead4);
+	--builtin-bg: light-dark(#e3f4f1, #10302c);
+	--external: light-dark(#4338ca, #a5b4fc);
+	--external-bg: light-dark(#e8e8fb, #23244a);
+	--agentic: light-dark(#9a4306, #fbbf24);
+	--agentic-bg: light-dark(#fdf0dc, #3a2a0e);
+	--gap: light-dark(#fbe9e9, #3a1b1b);
+	--gap-ink: light-dark(#a12d2d, #f6a3a3);
+	--accent: light-dark(#1c1d21, #ececef);
 	--heat: 79, 70, 229;
 }
-@media (prefers-color-scheme: dark) {
-	:root:not([data-theme="light"]) {
-		--bg: #131417; --panel: #1b1c20; --ink: #ececef; --muted: #9a9ca6; --line: #2e3036;
-		--builtin: #5eead4; --builtin-bg: #10302c;
-		--external: #a5b4fc; --external-bg: #23244a;
-		--agentic: #fbbf24; --agentic-bg: #3a2a0e;
-		--gap: #3a1b1b; --gap-ink: #f6a3a3; --accent: #ececef;
-		--heat: 129, 140, 248;
-	}
-}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+/* --heat is an RGB triple for rgba(), which light-dark() cannot hold */
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --heat: 129, 140, 248; } }
+:root[data-theme="dark"] { --heat: 129, 140, 248; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
 main { max-width: 1240px; margin: 0 auto; padding: 32px 16px 64px; }
