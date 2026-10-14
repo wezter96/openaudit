@@ -36,3 +36,19 @@ Cross-checked against tool source, not recorded (the Rust toolchain is too big t
   string and may be CVSS v2, v3.x or v4.0; the severity helper only scores
   v3.x, so other versions fall back to `medium`.
 
+
+- `guarddog-npm.json`, `guarddog-pypi.json`: GuardDog 3.2.0 (`uvx guarddog@3.2.0`,
+  Python 3.14), 2026-10-14, run from an empty scratch dir holding copies of
+  `supply/guarddog/package.json` and `supply/guarddog/requirements.txt`:
+  `guarddog --log-level error npm verify <dir>/package.json --output-format json --include-dev-dependencies`
+  and `guarddog --log-level error pypi verify <dir>/requirements.txt --output-format json`
+  (both exit 0; `--exit-non-zero-on-finding` is not passed). The npm run got the
+  manifest as-is, so it includes the `"lib": "workspace:*"` entry that the
+  auditor's sanitised copy drops (it shows up as a `download-package` error).
+  `electorn`, `lodahs` and `reqeusts` are not on the registry (only
+  `0.0.1-security` matches for electorn, which `*` excludes) and are left out
+  of the output. `crossenv` and `loadsh` trip the typosquatting metadata rule;
+  core-js (postinstall hook), vite, wrangler (labelled `high_risk`) and
+  beautifulsoup 3.2.2 trip source-code YARA rules. No known-malicious package
+  was downloaded: the registries remove them, and the typosquats here are npm
+  security placeholders or harmless.
