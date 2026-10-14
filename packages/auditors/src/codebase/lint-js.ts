@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import {
 	type Auditor,
 	AuditorError,
+	type Category,
 	defineAuditor,
 	type FindingInput,
 	requireTool,
@@ -50,6 +51,104 @@ const GENERIC_IGNORES = [
 /** Rules that point at likely runtime bugs rather than style. */
 const RELIABILITY_RULE =
 	/use-isnan|const-comparisons|no-unsafe-negation|no-self-assign|no-dupe|no-unreachable|no-undef\b|no-const-assign|no-cond-assign|no-unsafe-optional-chaining|no-fallthrough|valid-typeof|no-compare-neg-zero|no-setter-return|no-empty-pattern|no-sparse-array|no-loss-of-precision|no-constant-condition|no-global-assign|no-obj-calls|require-yield|no-this-before-super|getter-return|no-async-promise-executor|no-floating|no-misused|no-unsafe-|noUnreachable|useIsNan|noSelfAssign|noConstAssign|noGlobalAssign|noUndeclared|noInvalid|noUnsafe|useValidTypeof|useYield|noFallthrough|noDuplicate|noCompareNegZero|noSparseArray/;
+
+/** Next.js rules about loading speed rather than correctness. */
+const NEXT_PERFORMANCE_RULES = new Set([
+	"google-font-display",
+	"google-font-preconnect",
+	"next-script-for-ga",
+	"no-css-tags",
+	"no-img-element",
+	"no-page-custom-font",
+	"no-sync-scripts",
+	"no-unwanted-polyfillio",
+]);
+
+/** Category of a lint rule, by its ESLint id (or bare rule name). */
+const lintCategory = (rule: string | undefined): Category => {
+	if (!rule) return "reliability";
+	if (rule.startsWith("jsx-a11y/")) return "accessibility";
+	if (rule.startsWith("react-hooks/")) return "reliability";
+	if (rule.startsWith("@next/next/"))
+		return NEXT_PERFORMANCE_RULES.has(rule.slice("@next/next/".length))
+			? "performance"
+			: "reliability";
+	return RELIABILITY_RULE.test(rule) ? "reliability" : "maintainability";
+};
+
+/**
+ * WCAG success criteria of jsx-a11y rules, only where the rule tests one
+ * directly. Where code.accessibility has a twin rule they share a criterion,
+ * so the engine merges the two reports of one element.
+ */
+const JSX_A11Y_WCAG: Readonly<Record<string, ReadonlyArray<string>>> = {
+	"alt-text": ["1.1.1"],
+	"anchor-ambiguous-text": ["2.4.4"],
+	"anchor-has-content": ["2.4.4", "4.1.2"],
+	"anchor-is-valid": ["2.1.1"],
+	"aria-props": ["4.1.2"],
+	"aria-proptypes": ["4.1.2"],
+	"aria-role": ["4.1.2"],
+	"autocomplete-valid": ["1.3.5"],
+	"click-events-have-key-events": ["2.1.1"],
+	"control-has-associated-label": ["4.1.2"],
+	"html-has-lang": ["3.1.1"],
+	"iframe-has-title": ["4.1.2"],
+	"interactive-supports-focus": ["2.1.1"],
+	"label-has-associated-control": ["1.3.1", "3.3.2", "4.1.2"],
+	lang: ["3.1.1"],
+	"media-has-caption": ["1.2.2"],
+	"mouse-events-have-key-events": ["2.1.1"],
+	"no-aria-hidden-on-focusable": ["4.1.2"],
+	"no-autofocus": ["2.4.3", "3.2.1"],
+	"no-distracting-elements": ["2.2.2"],
+	"no-noninteractive-element-interactions": ["4.1.2"],
+	"no-static-element-interactions": ["4.1.2"],
+	"role-has-required-aria-props": ["4.1.2"],
+	"role-supports-aria-props": ["4.1.2"],
+	"tabindex-no-positive": ["2.4.3"],
+};
+
+/**
+ * typescript-eslint rules that replace the core rule of the same name; oxlint
+ * reports the core rule for TypeScript files.
+ */
+const TS_EXTENSION_RULES = new Set([
+	"class-methods-use-this",
+	"consistent-return",
+	"default-param-last",
+	"dot-notation",
+	"init-declarations",
+	"max-params",
+	"no-array-constructor",
+	"no-dupe-class-members",
+	"no-empty-function",
+	"no-implied-eval",
+	"no-invalid-this",
+	"no-loop-func",
+	"no-magic-numbers",
+	"no-redeclare",
+	"no-restricted-imports",
+	"no-shadow",
+	"no-unused-expressions",
+	"no-unused-vars",
+	"no-use-before-define",
+	"no-useless-constructor",
+	"prefer-destructuring",
+]);
+
+/**
+ * Tags of an ESLint rule id: `eslint:<id>`, the key correlate merges code.eslint
+ * and code.oxlint findings on, plus WCAG criteria for jsx-a11y rules.
+ */
+const lintTags = (id: string): string[] => {
+	const lower = id.toLowerCase();
+	const ts = /^@typescript-eslint\/(.+)$/.exec(lower)?.[1];
+	const tags = [`eslint:${ts && TS_EXTENSION_RULES.has(ts) ? ts : lower}`];
+	const a11y = /^jsx-a11y\/(.+)$/.exec(lower)?.[1];
+	for (const sc of (a11y && JSX_A11Y_WCAG[a11y]) || []) tags.push(`wcag-${sc}`);
+	return tags;
+};
 
 const capFindings = (
 	findings: FindingInput[],
@@ -445,6 +544,62 @@ const OXLINT_SAFE_KEYS = [
 	"settings",
 ];
 
+/**
+ * oxlint's default plugins (`eslint` is always on). A `plugins` list replaces
+ * them, so a list that adds plugins has to repeat them.
+ */
+const OXLINT_DEFAULT_PLUGINS = ["eslint", "typescript", "unicorn", "oxc"];
+/** Dependencies that turn on oxlint plugins, which are off by default. */
+const REACT_DEPENDENCIES = ["next", "preact", "react", "react-dom"];
+const MAX_PACKAGE_JSONS = 200;
+
+/** oxlint plugins for the frameworks the given package.json files depend on. */
+export const frameworkPlugins = (
+	packageJsons: ReadonlyArray<string>,
+): string[] => {
+	const deps = new Set<string>();
+	for (const text of packageJsons) {
+		const pkg = parseJsonc(text);
+		if (!isRecord(pkg)) continue;
+		for (const key of ["dependencies", "devDependencies", "peerDependencies"]) {
+			const section = pkg[key];
+			if (isRecord(section))
+				for (const name of Object.keys(section)) deps.add(name);
+		}
+	}
+	const plugins: string[] = [];
+	if (REACT_DEPENDENCIES.some((d) => deps.has(d)))
+		plugins.push("react", "jsx-a11y");
+	if (deps.has("next")) plugins.push("nextjs");
+	return plugins;
+};
+
+/**
+ * Adds framework plugins to a (sanitized) oxlint config that does not choose
+ * its own. rules-of-hooks is in oxlint's off-by-default `pedantic` category, so
+ * it is turned on unless the config sets it.
+ */
+export const withFrameworkPlugins = (
+	config: string,
+	plugins: ReadonlyArray<string>,
+): string => {
+	const json = parseJsonc(config);
+	if (!isRecord(json) || "plugins" in json || plugins.length === 0)
+		return config;
+	const out: Record<string, unknown> = {
+		...json,
+		plugins: [...OXLINT_DEFAULT_PLUGINS, ...plugins],
+	};
+	const rules = isRecord(json.rules) ? json.rules : {};
+	if (
+		plugins.includes("react") &&
+		!("react/rules-of-hooks" in rules) &&
+		!("react-hooks/rules-of-hooks" in rules)
+	)
+		out.rules = { ...rules, "react/rules-of-hooks": "error" };
+	return JSON.stringify(out);
+};
+
 /** A copy of an oxlint config that cannot load JavaScript. */
 export const sanitizeOxlintConfig = (text: string): string | undefined => {
 	const json = parseJsonc(text);
@@ -455,6 +610,58 @@ export const sanitizeOxlintConfig = (text: string): string | undefined => {
 };
 
 const OXLINT_CODE = /^([\w@-]+)\((.+)\)$/;
+
+/**
+ * React Compiler rules, which eslint-plugin-react-hooks ships and oxlint files
+ * under its `react` plugin.
+ */
+const REACT_HOOKS_RULES = new Set([
+	"capitalized-calls",
+	"error-boundaries",
+	"exhaustive-effect-dependencies",
+	"globals",
+	"hooks",
+	"immutability",
+	"incompatible-library",
+	"invariant",
+	"memo-dependencies",
+	"no-deriving-state-in-effects",
+	"preserve-manual-memoization",
+	"purity",
+	"refs",
+	"rule-suppression",
+	"set-state-in-effect",
+	"set-state-in-render",
+	"static-components",
+	"syntax",
+	"todo",
+	"unsupported-syntax",
+	"use-memo",
+	"void-use-memo",
+]);
+
+/** ESLint plugin prefixes of oxlint plugins whose names differ. */
+const OXLINT_ESLINT_PREFIX: Readonly<Record<string, string>> = {
+	next: "@next/next",
+	node: "n",
+	typescript: "@typescript-eslint",
+	"typescript-eslint": "@typescript-eslint",
+};
+
+/**
+ * The ESLint id of an oxlint rule (`react-hooks(exhaustive-deps)` is
+ * `react-hooks/exhaustive-deps`), or undefined for oxc's own rules.
+ */
+export const oxlintEslintId = (
+	plugin: string,
+	rule: string,
+): string | undefined => {
+	if (plugin === "oxc") return undefined;
+	if (plugin === "eslint") return rule;
+	if (plugin === "react" && REACT_HOOKS_RULES.has(rule))
+		return `react-hooks/${rule}`;
+	return `${OXLINT_ESLINT_PREFIX[plugin] ?? plugin}/${rule}`;
+};
 
 export const parseOxlintReport = (
 	json: unknown,
@@ -484,12 +691,12 @@ export const parseOxlintReport = (
 		const ruleSlug = rule
 			? kebab(plugin === "eslint" ? rule : `${plugin}/${rule}`)
 			: "parse-error";
-		const reliability = !rule || RELIABILITY_RULE.test(rule);
+		const eslintId = plugin && rule ? oxlintEslintId(plugin, rule) : undefined;
 		findings.push({
 			ruleId: `code.oxlint/${ruleSlug}`,
 			title: truncate(rule ? `${rule}: ${message}` : message, 120),
 			severity: rule ? severity : "medium",
-			category: reliability ? "reliability" : "maintainability",
+			category: lintCategory(eslintId ?? rule),
 			message: `${message}${str(d.help) ? ` ${str(d.help)}` : ""}`,
 			location: { file, line: num(span.line), column: num(span.column) },
 			evidence: scrubLine(truncate(message)),
@@ -498,7 +705,9 @@ export const parseOxlintReport = (
 				"Fix the reported issue, or configure the rule in .oxlintrc.json if it does not fit your code base.",
 			references: str(d.url) ? [str(d.url) as string] : undefined,
 			confidence: "high",
-			tags: plugin ? [plugin] : undefined,
+			tags: plugin
+				? [plugin, ...(eslintId ? lintTags(eslintId) : [])]
+				: undefined,
 		});
 	}
 	return findings;
@@ -508,8 +717,13 @@ export const oxlint: Auditor = defineAuditor({
 	id: "code.oxlint",
 	title: "oxlint",
 	description:
-		"Runs oxlint, a fast Rust linter for JavaScript and TypeScript. Uses a sanitized copy of the project's .oxlintrc.json (rules, categories, plugins only): `jsPlugins` are removed because they would load project JavaScript, and JS config files are never read.",
-	categories: ["maintainability", "reliability"],
+		"Runs oxlint, a fast Rust linter for JavaScript and TypeScript. Uses a sanitized copy of the project's .oxlintrc.json (rules, categories, plugins only): `jsPlugins` are removed because they would load project JavaScript, and JS config files are never read. When the project depends on React, Preact or Next.js and its config lists no plugins, oxlint's react (including the React hooks rules), jsx-a11y and nextjs plugins are turned on.",
+	categories: [
+		"maintainability",
+		"reliability",
+		"accessibility",
+		"performance",
+	],
 	targets: ["codebase"],
 	engine: "external",
 	tool: "oxlint",
@@ -532,6 +746,26 @@ export const oxlint: Auditor = defineAuditor({
 			const sanitized = configText
 				? sanitizeOxlintConfig(configText)
 				: undefined;
+			const packageJsons = yield* Effect.forEach(
+				all
+					.filter(
+						(p) =>
+							(p === "package.json" || p.endsWith("/package.json")) &&
+							!isFixturePath(p),
+					)
+					.slice(0, MAX_PACKAGE_JSONS),
+				(p) => ws.readText(p).pipe(Effect.orElseSucceed(() => "")),
+				{ concurrency: 8 },
+			);
+			const plugins = frameworkPlugins(packageJsons);
+			// Tried in order: the project's config, the framework plugins, defaults.
+			const configs = [
+				...(sanitized === undefined
+					? []
+					: [withFrameworkPlugins(sanitized, plugins)]),
+				...(plugins.length > 0 ? [withFrameworkPlugins("{}", plugins)] : []),
+				undefined,
+			].filter((c, i, list) => list.indexOf(c) === i);
 
 			return yield* withTempDir("openaudit-oxlint-", (cwd) =>
 				Effect.gen(function* () {
@@ -543,30 +777,34 @@ export const oxlint: Auditor = defineAuditor({
 						"--no-error-on-unmatched-pattern",
 						...GENERIC_IGNORES.flatMap((g) => ["--ignore-pattern", g]),
 					];
-					const attempt = (withConfig: boolean) =>
+					const attempt = (config: string | undefined) =>
 						Effect.gen(function* () {
 							const args = [...base];
-							if (withConfig) {
+							if (config !== undefined) {
 								const file = join(cwd, "oxlintrc.json");
-								yield* Effect.promise(() => writeFile(file, sanitized ?? "{}"));
+								yield* Effect.promise(() => writeFile(file, config));
 								args.push("-c", file);
 							}
 							const res = yield* runTool(ctx, [...args, ws.root], cwd, [0, 1]);
 							return yield* parseJson(res.stdout, "oxlint");
 						});
-					const json = yield* attempt(sanitized !== undefined).pipe(
-						// An unusable project config (unknown rule, missing plugin): use defaults.
-						Effect.catch((err) =>
-							sanitized === undefined
-								? Effect.fail(err)
-								: Effect.andThen(
-										ctx.log(
-											"code.oxlint: project config unusable, using defaults",
+					// An unusable config (unknown rule, missing plugin): try the next one.
+					const firstUsable = ([config, ...rest]: ReadonlyArray<
+						string | undefined
+					>): ReturnType<typeof attempt> =>
+						attempt(config).pipe(
+							Effect.catch((err) =>
+								rest.length === 0
+									? Effect.fail(err)
+									: Effect.andThen(
+											ctx.log(
+												`code.oxlint: config unusable, retrying with ${rest[0] === undefined ? "oxlint's defaults" : "the framework plugins only"}`,
+											),
+											firstUsable(rest),
 										),
-										attempt(false),
-									),
-						),
-					);
+							),
+						);
+					const json = yield* firstUsable(configs);
 					return capFindings(
 						parseOxlintReport(json, ws.root),
 						"code.oxlint/more-findings",
@@ -714,10 +952,7 @@ export const parseEslintReport = (
 				ruleId: `code.eslint/${ruleId ? kebab(ruleId) : "parse-error"}`,
 				title: truncate(ruleId ? `${ruleId}: ${message}` : message, 120),
 				severity: !ruleId || level === 2 ? "medium" : "low",
-				category:
-					!ruleId || RELIABILITY_RULE.test(ruleId)
-						? "reliability"
-						: "maintainability",
+				category: lintCategory(ruleId),
 				message,
 				location: { file, line: num(m.line), column: num(m.column) },
 				// ESLint's `source` field would echo whole files; only the message is kept.
@@ -730,7 +965,7 @@ export const parseEslintReport = (
 						? [`https://eslint.org/docs/latest/rules/${ruleId}`]
 						: undefined,
 				confidence: "high",
-				tags: ruleId ? undefined : ["parse-error"],
+				tags: ruleId ? lintTags(ruleId) : ["parse-error"],
 			});
 		}
 	}
@@ -741,8 +976,13 @@ export const eslint: Auditor = defineAuditor({
 	id: "code.eslint",
 	title: "ESLint",
 	description:
-		"Runs the project's own ESLint with its own flat config. WARNING: eslint.config.* is JavaScript that runs on load, together with every plugin it imports, so this executes code from the audited project. Opt-in only (--only code.eslint); use on code you trust.",
-	categories: ["maintainability", "reliability"],
+		"Runs the project's own ESLint with its own flat config, for the rules oxlint and Biome cannot cover (custom and project-specific plugins). A finding for the same rule at the same file and line as one from code.oxlint is merged with it. WARNING: eslint.config.* is JavaScript that runs on load, together with every plugin it imports, so this executes code from the audited project. Opt-in only (--only code.eslint); use on code you trust.",
+	categories: [
+		"maintainability",
+		"reliability",
+		"accessibility",
+		"performance",
+	],
 	targets: ["codebase"],
 	engine: "external",
 	tool: "eslint",

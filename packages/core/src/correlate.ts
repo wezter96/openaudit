@@ -12,7 +12,9 @@ import { severityRank } from "./model";
  * - the same advisory (CVE/GHSA/…) in the same directory;
  * - a secret at the same file and line;
  * - the same CWE at the same file and line, or the same URL and selector;
- * - the same WCAG criterion at the same URL and selector.
+ * - the same WCAG criterion at the same URL and selector;
+ * - the same lint rule (`eslint:<ESLint rule id>`, which linters that port
+ *   ESLint rules map their own ids to) at the same file and line.
  * Findings from one auditor never merge with each other.
  */
 
@@ -49,6 +51,8 @@ export const correlationKeys = (f: Finding): string[] => {
 	for (const t of tags) {
 		if (/^cwe-\d+$/.test(t)) keys.push(`${t}:${place}`);
 		else if (/^wcag-\d+\.\d+\.\d+$/.test(t)) keys.push(`${t}:${place}`);
+		else if (t.startsWith("eslint:") && f.location?.file)
+			keys.push(`${t}:${place}`);
 	}
 	return keys;
 };

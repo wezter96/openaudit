@@ -1,0 +1,9 @@
+{
+	"name": "react-fixture",
+	"private": true,
+	"dependencies": {
+		"next": "16.0.0",
+		"react": "19.2.0",
+		"react-dom": "19.2.0"
+	}
+}

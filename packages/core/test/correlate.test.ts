@@ -127,6 +127,30 @@ describe("correlate", () => {
 		expect(again[0]?.alsoReportedBy).toBeUndefined();
 	});
 
+	test("merges one lint rule reported by two linters at the same file and line", () => {
+		const lint = (auditor: string, line: number, rule: string) =>
+			finding(auditor, {
+				severity: "low",
+				category: "reliability",
+				tags: [`eslint:${rule}`],
+				location: { file: "src/a.tsx", line },
+			});
+		const out = correlate([
+			result("code.oxlint", [
+				lint("code.oxlint", 5, "react-hooks/rules-of-hooks"),
+				lint("code.oxlint", 9, "no-debugger"),
+			]),
+			result("code.eslint", [
+				lint("code.eslint", 5, "React-Hooks/rules-of-hooks"),
+				lint("code.eslint", 10, "no-debugger"),
+				lint("code.eslint", 9, "eqeqeq"),
+			]),
+		]);
+		const all = out.flatMap((r) => r.findings);
+		expect(all.filter((f) => f.duplicateOf)).toHaveLength(1);
+		expect(all.find((f) => f.alsoReportedBy)?.location?.line).toBe(5);
+	});
+
 	test("merges accessibility issues by WCAG criterion, URL and selector", () => {
 		const loc = { url: "https://x.test/", selector: "img.hero" };
 		const out = correlate([

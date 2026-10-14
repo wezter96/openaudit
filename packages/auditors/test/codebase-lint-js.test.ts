@@ -5,9 +5,12 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
 	type Auditor,
+	correlate,
 	Exec,
 	type ExecOptions,
 	type ExecResult,
+	type FindingInput,
+	fingerprintOf,
 	Http,
 	type Report,
 	runAudit,
@@ -126,6 +129,11 @@ describe("auditor metadata", () => {
 			"code.eslint external eslint false",
 		]);
 		expect(eslint.description).toContain("executes code");
+		expect(eslint.description).toContain("oxlint");
+		for (const a of [oxlint, eslint])
+			expect(a.categories).toEqual(
+				expect.arrayContaining(["accessibility", "performance", "reliability"]),
+			);
 	});
 });
 
@@ -449,6 +457,67 @@ describe("oxlint", () => {
 		});
 	});
 
+	test("parser on a recorded oxlint 1.88.0 run with the React, jsx-a11y and Next.js plugins", () => {
+		const findings = parseOxlintReport(
+			recordedJson("oxlint-react.json"),
+			"/repo",
+		);
+		expect(summary(findings)).toEqual([
+			"no-unused-vars low maintainability lib/util.ts:3",
+			"no-debugger low maintainability lib/util.ts:2",
+			"oxc-const-comparisons low reliability lib/util.ts:4",
+			"unicorn-no-useless-spread low maintainability lib/util.ts:4",
+			"next-no-head-import-in-document low reliability pages/_document.tsx:1",
+			"next-no-sync-scripts low performance pages/_document.tsx:9",
+			"jsx-a11y-html-has-lang low accessibility app/layout.tsx:3",
+			"jsx-a11y-lang low accessibility app/layout.tsx:3",
+			"jsx-a11y-alt-text low accessibility app/page.tsx:4",
+			"next-no-img-element low performance app/page.tsx:4",
+			"jsx-a11y-click-events-have-key-events low accessibility app/page.tsx:5",
+			"jsx-a11y-no-static-element-interactions low accessibility app/page.tsx:5",
+			"jsx-a11y-no-noninteractive-tabindex low accessibility app/page.tsx:6",
+			"jsx-a11y-tabindex-no-positive low accessibility app/page.tsx:6",
+			"jsx-a11y-anchor-is-valid low accessibility app/page.tsx:7",
+			"react-set-state-in-effect low reliability components/Counter.tsx:7",
+			"react-hooks-rules-of-hooks medium reliability components/Counter.tsx:5",
+			"react-hooks-exhaustive-deps low reliability components/Counter.tsx:7",
+			"react-hooks-rules-of-hooks medium reliability components/Counter.tsx:6",
+			"react-jsx-key low maintainability components/Counter.tsx:17",
+		]);
+		// Shared ESLint rule ids let correlate merge them with code.eslint's findings.
+		expect(findings.map((f) => f.tags)).toEqual([
+			["eslint", "eslint:no-unused-vars"],
+			["eslint", "eslint:no-debugger"],
+			["oxc"],
+			["unicorn", "eslint:unicorn/no-useless-spread"],
+			["next", "eslint:@next/next/no-head-import-in-document"],
+			["next", "eslint:@next/next/no-sync-scripts"],
+			["jsx-a11y", "eslint:jsx-a11y/html-has-lang", "wcag-3.1.1"],
+			["jsx-a11y", "eslint:jsx-a11y/lang", "wcag-3.1.1"],
+			["jsx-a11y", "eslint:jsx-a11y/alt-text", "wcag-1.1.1"],
+			["next", "eslint:@next/next/no-img-element"],
+			[
+				"jsx-a11y",
+				"eslint:jsx-a11y/click-events-have-key-events",
+				"wcag-2.1.1",
+			],
+			[
+				"jsx-a11y",
+				"eslint:jsx-a11y/no-static-element-interactions",
+				"wcag-4.1.2",
+			],
+			["jsx-a11y", "eslint:jsx-a11y/no-noninteractive-tabindex"],
+			["jsx-a11y", "eslint:jsx-a11y/tabindex-no-positive", "wcag-2.4.3"],
+			["jsx-a11y", "eslint:jsx-a11y/anchor-is-valid", "wcag-2.1.1"],
+			// oxlint files React Compiler rules under `react`; ESLint under `react-hooks`.
+			["react", "eslint:react-hooks/set-state-in-effect"],
+			["react-hooks", "eslint:react-hooks/rules-of-hooks"],
+			["react-hooks", "eslint:react-hooks/exhaustive-deps"],
+			["react-hooks", "eslint:react-hooks/rules-of-hooks"],
+			["react", "eslint:react/jsx-key"],
+		]);
+	});
+
 	test("non-eslint plugin rules keep their plugin in the rule id; errors are medium", () => {
 		const findings = parseOxlintReport(
 			{
@@ -473,6 +542,10 @@ describe("oxlint", () => {
 		expect(summary(findings)).toEqual([
 			"typescript-eslint-no-explicit-any medium maintainability a.ts:1",
 			"parse-error medium reliability b.ts:-",
+		]);
+		expect(findings[0]?.tags).toEqual([
+			"typescript-eslint",
+			"eslint:@typescript-eslint/no-explicit-any",
 		]);
 	});
 
@@ -535,6 +608,130 @@ describe("oxlint", () => {
 				expect(call?.options.cwd).not.toBe(dir);
 			},
 		);
+	});
+
+	/** Runs code.oxlint on a project and returns the config file of each call. */
+	const oxlintConfigs = async (
+		files: Record<string, string>,
+		fail: (config: string) => boolean = () => false,
+	) =>
+		withProject(files, async (dir) => {
+			const configs: Array<unknown> = [];
+			await runFake(
+				oxlint,
+				dir,
+				() => "/bin/oxlint",
+				(cmd) => {
+					const i = cmd.indexOf("-c");
+					const config = i === -1 ? "" : readFileSync(cmd[i + 1] ?? "", "utf8");
+					configs.push(config ? JSON.parse(config) : undefined);
+					return fail(config)
+						? { code: 1, stdout: "", stderr: "invalid config" }
+						: ok(recorded("oxlint.json"));
+				},
+			);
+			return configs;
+		});
+
+	const DEFAULTS = ["eslint", "typescript", "unicorn", "oxc"];
+	const HOOKS = { "react/rules-of-hooks": "error" };
+
+	test("enables the React, jsx-a11y and Next.js plugins the project depends on", async () => {
+		expect(
+			await oxlintConfigs({
+				"package.json": JSON.stringify({
+					dependencies: { next: "16.0.0", react: "19.2.0" },
+				}),
+				"app/page.tsx": "",
+			}),
+		).toEqual([
+			{
+				plugins: [...DEFAULTS, "react", "jsx-a11y", "nextjs"],
+				rules: HOOKS,
+			},
+		]);
+	});
+
+	test("detects frameworks in workspace packages but not in fixtures", async () => {
+		expect(
+			await oxlintConfigs({
+				"package.json": "{}",
+				"apps/web/package.json": JSON.stringify({
+					devDependencies: { preact: "10.0.0" },
+				}),
+				"test/fixtures/site/package.json": JSON.stringify({
+					dependencies: { next: "16.0.0" },
+				}),
+				"apps/web/src/a.tsx": "",
+			}),
+		).toEqual([{ plugins: [...DEFAULTS, "react", "jsx-a11y"], rules: HOOKS }]);
+	});
+
+	test("runs with oxlint's defaults when no framework is found", async () => {
+		expect(
+			await oxlintConfigs({
+				"package.json": JSON.stringify({ dependencies: { express: "5" } }),
+				"a.ts": "",
+			}),
+		).toEqual([undefined]);
+	});
+
+	test("respects a project config that lists its own plugins", async () => {
+		expect(
+			await oxlintConfigs({
+				"package.json": JSON.stringify({ dependencies: { react: "19" } }),
+				".oxlintrc.json": '{ "plugins": ["typescript"], "rules": {} }',
+				"a.tsx": "",
+			}),
+		).toEqual([{ plugins: ["typescript"], rules: {} }]);
+	});
+
+	test("adds the framework plugins to a project config without a plugins list", async () => {
+		expect(
+			await oxlintConfigs({
+				"package.json": JSON.stringify({ dependencies: { react: "19" } }),
+				".oxlintrc.json":
+					'{ "jsPlugins": ["./evil.js"], "rules": { "no-debugger": "error" } }',
+				"a.tsx": "",
+			}),
+		).toEqual([
+			{
+				rules: { "no-debugger": "error", ...HOOKS },
+				plugins: [...DEFAULTS, "react", "jsx-a11y"],
+			},
+		]);
+		// The project's own setting for rules-of-hooks wins.
+		expect(
+			await oxlintConfigs({
+				"package.json": JSON.stringify({ dependencies: { react: "19" } }),
+				".oxlintrc.json":
+					'{ "rules": { "react-hooks/rules-of-hooks": "off" } }',
+				"a.tsx": "",
+			}),
+		).toEqual([
+			{
+				rules: { "react-hooks/rules-of-hooks": "off" },
+				plugins: [...DEFAULTS, "react", "jsx-a11y"],
+			},
+		]);
+	});
+
+	test("an unusable project config falls back to the framework plugins, then to defaults", async () => {
+		const files = {
+			"package.json": JSON.stringify({ dependencies: { react: "19" } }),
+			".oxlintrc.json": '{ "rules": { "no-such-rule": "error" } }',
+			"a.tsx": "",
+		};
+		expect(
+			await oxlintConfigs(files, (c) => c.includes("no-such-rule")),
+		).toEqual([
+			{
+				rules: { "no-such-rule": "error", ...HOOKS },
+				plugins: [...DEFAULTS, "react", "jsx-a11y"],
+			},
+			{ plugins: [...DEFAULTS, "react", "jsx-a11y"], rules: HOOKS },
+		]);
+		expect(await oxlintConfigs(files, (c) => c !== "")).toHaveLength(3);
 	});
 
 	test("falls back to defaults when the project config is unusable", async () => {
@@ -697,6 +894,39 @@ describe("eslint", () => {
 		expect(JSON.stringify(findings)).not.toContain("return input.length");
 	});
 
+	test("parser on a recorded eslint 10.12.0 run with React, jsx-a11y and Next.js plugins", () => {
+		const findings = parseEslintReport(
+			recordedJson("eslint-react.json"),
+			"/repo",
+		);
+		expect(summary(findings)).toEqual([
+			"jsx-a11y-html-has-lang medium accessibility app/layout.tsx:3",
+			"jsx-a11y-alt-text medium accessibility app/page.tsx:4",
+			"next-next-no-img-element low performance app/page.tsx:4",
+			"jsx-a11y-click-events-have-key-events medium accessibility app/page.tsx:5",
+			"jsx-a11y-no-static-element-interactions medium accessibility app/page.tsx:5",
+			"jsx-a11y-no-noninteractive-tabindex medium accessibility app/page.tsx:6",
+			"jsx-a11y-tabindex-no-positive medium accessibility app/page.tsx:6",
+			"jsx-a11y-anchor-is-valid medium accessibility app/page.tsx:7",
+			"react-hooks-rules-of-hooks medium reliability components/Counter.tsx:5",
+			"react-hooks-rules-of-hooks medium reliability components/Counter.tsx:6",
+			"react-hooks-set-state-in-effect medium reliability components/Counter.tsx:7",
+			"react-hooks-exhaustive-deps low reliability components/Counter.tsx:8",
+			"react-jsx-key low maintainability components/Counter.tsx:18",
+			"no-debugger medium maintainability lib/util.ts:2",
+			"typescript-eslint-no-unused-vars medium maintainability lib/util.ts:3",
+			"next-next-no-head-import-in-document medium reliability pages/_document.tsx:1",
+			"next-next-no-sync-scripts low performance pages/_document.tsx:9",
+		]);
+		expect(findings[1]?.tags).toEqual([
+			"eslint:jsx-a11y/alt-text",
+			"wcag-1.1.1",
+		]);
+		// typescript-eslint's extension of a core rule shares the core rule's tag.
+		expect(findings[14]?.tags).toEqual(["eslint:no-unused-vars"]);
+		expect(findings[16]?.tags).toEqual(["eslint:@next/next/no-sync-scripts"]);
+	});
+
 	test("is opt-in and skips without a flat config", async () => {
 		await withProject({ ".eslintrc.json": "{}", "a.js": "1" }, async (dir) => {
 			const { report } = await runFake(
@@ -769,5 +999,89 @@ describe("eslint", () => {
 			);
 			expect(statusOf(report)).toBe("error");
 		});
+	});
+});
+
+describe("oxlint and eslint together", () => {
+	const asFindings = (auditor: string, inputs: ReadonlyArray<FindingInput>) =>
+		inputs.map((f) => ({
+			...f,
+			auditor,
+			fingerprint: fingerprintOf(auditor, f),
+		}));
+	const result = (auditor: string, inputs: ReadonlyArray<FindingInput>) => ({
+		auditor,
+		title: auditor,
+		engine: "external" as const,
+		categories: [],
+		status: "failed" as const,
+		durationMs: 1,
+		findings: asFindings(auditor, inputs),
+	});
+
+	test("the same rule at the same file and line is one finding", () => {
+		const out = correlate([
+			result(
+				"code.oxlint",
+				parseOxlintReport(recordedJson("oxlint-react.json"), "/repo"),
+			),
+			result(
+				"code.eslint",
+				parseEslintReport(recordedJson("eslint-react.json"), "/repo"),
+			),
+		]);
+		const all = out.flatMap((r) => r.findings);
+		const tag = (f: { tags?: ReadonlyArray<string> }) =>
+			f.tags?.find((t) => t.startsWith("eslint:"))?.slice(7);
+		const merged = all
+			.filter((f) => f.alsoReportedBy)
+			.map((f) => `${tag(f)} ${f.location?.file}:${f.location?.line}`)
+			.sort();
+		expect(merged).toEqual([
+			"@next/next/no-head-import-in-document pages/_document.tsx:1",
+			"@next/next/no-img-element app/page.tsx:4",
+			"@next/next/no-sync-scripts pages/_document.tsx:9",
+			"jsx-a11y/alt-text app/page.tsx:4",
+			"jsx-a11y/anchor-is-valid app/page.tsx:7",
+			"jsx-a11y/click-events-have-key-events app/page.tsx:5",
+			"jsx-a11y/html-has-lang app/layout.tsx:3",
+			"jsx-a11y/no-noninteractive-tabindex app/page.tsx:6",
+			"jsx-a11y/no-static-element-interactions app/page.tsx:5",
+			"jsx-a11y/tabindex-no-positive app/page.tsx:6",
+			"no-debugger lib/util.ts:2",
+			"no-unused-vars lib/util.ts:3",
+			"react-hooks/rules-of-hooks components/Counter.tsx:5",
+			"react-hooks/rules-of-hooks components/Counter.tsx:6",
+			"react-hooks/set-state-in-effect components/Counter.tsx:7",
+		]);
+		// Every duplicate points at a finding for the same rule, except oxlint's
+		// `lang` on <html> without lang, which shares WCAG 3.1.1 with html-has-lang.
+		const byFingerprint = new Map(all.map((f) => [f.fingerprint, f]));
+		expect(
+			all
+				.filter((f) => f.duplicateOf)
+				.map((f) => {
+					const kept = tag(byFingerprint.get(f.duplicateOf ?? "") ?? {});
+					return kept === tag(f) ? "same rule" : `${tag(f)} -> ${kept}`;
+				})
+				.sort(),
+		).toEqual([
+			"jsx-a11y/lang -> jsx-a11y/html-has-lang",
+			...merged.map(() => "same rule"),
+		]);
+		// The tools disagree on the line of these, so both stay.
+		expect(
+			all
+				.filter((f) => !f.duplicateOf && !f.alsoReportedBy)
+				.map((f) => `${f.auditor} ${tag(f) ?? f.ruleId}`)
+				.sort(),
+		).toEqual([
+			"code.eslint react-hooks/exhaustive-deps",
+			"code.eslint react/jsx-key",
+			"code.oxlint code.oxlint/oxc-const-comparisons",
+			"code.oxlint react-hooks/exhaustive-deps",
+			"code.oxlint react/jsx-key",
+			"code.oxlint unicorn/no-useless-spread",
+		]);
 	});
 });
