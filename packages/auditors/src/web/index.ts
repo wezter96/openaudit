@@ -12,6 +12,7 @@ import { performanceAuditor } from "./performance";
 import { privacy } from "./privacy";
 import { reliability } from "./reliability";
 import { seo } from "./seo";
+import { sslyze } from "./sslyze";
 import { testssl } from "./testssl";
 import { tlsAuditor } from "./tls";
 import { zapBaseline } from "./zap";
@@ -33,5 +34,6 @@ export const webAuditors: ReadonlyArray<Auditor> = [
 	pa11y,
 	zapBaseline,
 	zapActive,
+	sslyze,
 	testssl,
 ];
