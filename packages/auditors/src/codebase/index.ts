@@ -3,6 +3,7 @@ import type { Auditor } from "@openaudit/core";
 import { accessibility } from "./accessibility";
 import { api } from "./api";
 import { dependencies } from "./dependencies";
+import { dependencyHealth } from "./dependency-health";
 import { gitleaks, osvScanner, semgrep, trivyFs } from "./external";
 import { hygiene } from "./hygiene";
 import { licenses } from "./licenses";
@@ -35,6 +36,7 @@ export const codebaseAuditors: ReadonlyArray<Auditor> = [
 	secrets,
 	security,
 	dependencies,
+	dependencyHealth,
 	licenses,
 	accessibility,
 	performanceAuditor,

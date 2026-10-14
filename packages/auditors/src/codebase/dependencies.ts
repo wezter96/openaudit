@@ -294,7 +294,7 @@ export const isManifest = (path: string) =>
 /*                           package.json declarations                        */
 /* -------------------------------------------------------------------------- */
 
-const DEP_FIELDS = [
+export const DEP_FIELDS = [
 	"dependencies",
 	"devDependencies",
 	"optionalDependencies",
