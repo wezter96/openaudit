@@ -158,7 +158,7 @@ export const placeFinder = (
 				quote === "'" &&
 				lang !== undefined &&
 				CHAR_LITERAL.has(lang) &&
-				(end - s > 2 || [...text.slice(s, end)].length > 1)
+				(end - s > 2 || Array.from(text.slice(s, end)).length > 1)
 			) &&
 			!/[\w#$@"'`]/.test(text[s - 2] ?? "") &&
 			!/[{$\r\n]/.test(text.slice(s, end)) &&
