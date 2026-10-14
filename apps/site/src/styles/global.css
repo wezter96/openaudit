@@ -1421,6 +1421,16 @@ pre .s {
 	max-width: 22rem;
 }
 
+.site-foot .credit {
+	margin-top: 0.6rem;
+	font-size: 0.8125rem;
+}
+
+.site-foot .credit a {
+	text-decoration: underline;
+	text-decoration-color: var(--hair);
+}
+
 .site-foot .fine {
 	margin-top: 1rem;
 	font-family: var(--mono);

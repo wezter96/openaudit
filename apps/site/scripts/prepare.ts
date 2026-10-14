@@ -249,7 +249,19 @@ if (!args.has("--data-only")) {
 		}
 	}
 }
-await writeJson("self-audit.json", await summaryOf());
+const summary = await summaryOf();
+await writeJson("self-audit.json", summary);
+// The landing page shows this score; say so loudly when it isn't clean.
+if (summary.available) {
+	const open = Object.entries(summary.counts)
+		.filter(([severity]) => severity !== "info")
+		.reduce((n, [, count]) => n + count, 0);
+	if (open > 0) {
+		console.warn(
+			`\n  ⚠ site: the self-audit in public/report has ${open} finding(s) above info (score ${summary.score}, grade ${summary.grade}).\n    The landing page will show it. Run \`bun scripts/prepare.ts --fresh\` on a clean tree to refresh.\n`,
+		);
+	}
+}
 
 console.log(
 	`site: ${auditors.length} auditors, ${playbooks.length} playbooks, ${Object.keys(help).length} help pages`,

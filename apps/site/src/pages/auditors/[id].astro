@@ -10,6 +10,9 @@ interface Props {
 }
 const { auditor: a } = Astro.props;
 const playbook = playbooks.find((p) => p.id === a.id);
+// Two auditors can share a title (a static and a live check); the target tells them apart.
+const shared = auditors.some((o) => o.id !== a.id && o.title === a.title);
+const pageTitle = shared ? `${a.title}, ${TARGET_LABEL[a.targets[0] ?? ""] ?? a.id}` : a.title;
 
 const TARGET_ARG: Record<string, string> = {
 	codebase: ".",
@@ -32,7 +35,7 @@ const how = a.engine === "builtin"
 		: "Runs a playbook with the Claude Agent SDK. Needs ANTHROPIC_API_KEY or a Claude Code login; host agents can run the same playbook over MCP without a key.";
 ---
 
-<Base title={`${a.title} | openaudit`.length <= 60 ? `${a.title} | openaudit` : a.title} bareTitle ogTitle={a.title} description={a.description}>
+<Base title={`${pageTitle} | openaudit`.length <= 60 ? `${pageTitle} | openaudit` : pageTitle} bareTitle ogTitle={pageTitle} description={a.description}>
 	<div class="frame">
 		<nav class="crumbs" aria-label="Breadcrumb"><a href={u("/auditors/")}>Auditor catalogue</a></nav>
 		<header class="page-head head">

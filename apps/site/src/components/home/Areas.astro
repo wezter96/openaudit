@@ -11,7 +11,7 @@ const SHOWN = 7;
 		<div class="sheet-head">
 			<h2 id="areas-title" class="rise">Ten areas, each with its own grade</h2>
 			<p class="rise">
-				Every finding belongs to one area, and each area scores 0 to 100 from the severity of what was found. Pick an area to see what openaudit checks, where, and with which tools. The letters are openaudit's grades for its own repository.
+				Every finding belongs to one area, and each area scores 0 to 100 from the severity of what was found. Pick an area to see what openaudit checks, where, and with which tools.
 			</p>
 		</div>
 		<div class="areas" data-tabs>
@@ -27,9 +27,6 @@ const SHOWN = 7;
 							aria-selected={i === 0 ? "true" : "false"}
 							tabindex={i === 0 ? 0 : -1}
 						>
-							<span class:list={["tg", a.grade ? `gm-${a.grade}` : "none"]} aria-hidden="true">
-								{a.grade ?? "–"}
-							</span>
 							<span class="tn">{a.label}</span>
 							<span class="tc num" aria-hidden="true">
 								{a.count}
@@ -47,14 +44,7 @@ const SHOWN = 7;
 								<header class="area-head">
 									<h3>{a.label}</h3>
 									<p class="area-score">
-										{a.grade ? (
-											<>
-												<b class={`gm-${a.grade}`}>{a.grade}</b>
-												<span class="num">{a.score}/100</span> in openaudit's own audit
-											</>
-										) : (
-											`Not graded in openaudit's own audit: its auditors run on ${a.targets.join(", ").toLowerCase()} targets`
-										)}
+										<span class="num">{a.count}</span> auditors cover it, across {a.targets.length} kinds of target
 									</p>
 								</header>
 								<p class="checks" set:html={a.text} />
@@ -151,7 +141,7 @@ const SHOWN = 7;
 
 	.tab {
 		display: grid;
-		grid-template-columns: 2rem minmax(0, 1fr) auto;
+		grid-template-columns: minmax(0, 1fr) auto;
 		align-items: center;
 		gap: 0.75rem;
 		width: 100%;
@@ -178,19 +168,6 @@ const SHOWN = 7;
 		color: var(--ink);
 		background: var(--paper-2);
 		box-shadow: 0 1px 0 var(--hair-soft);
-	}
-
-	.tg {
-		font-family: var(--display);
-		font-size: 1.35rem;
-		font-weight: 800;
-		letter-spacing: -0.05em;
-		line-height: 1;
-		text-align: center;
-	}
-
-	.tg.none {
-		color: var(--hair);
 	}
 
 	.tn {
@@ -261,13 +238,6 @@ const SHOWN = 7;
 		margin-top: 0.6rem;
 		font-size: 0.875rem;
 		color: var(--graphite);
-	}
-
-	.area-score b {
-		font-family: var(--display);
-		font-size: 1.25rem;
-		font-weight: 800;
-		letter-spacing: -0.04em;
 	}
 
 	.area-score .num {
