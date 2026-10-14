@@ -508,7 +508,7 @@ const findHomoglyphs = (
 		while (end < text.length && ID_PART.test(text[end] ?? "")) end++;
 		lastEnd = end;
 		if (!isCode(start)) continue;
-		const chars = [...text.slice(start, end)];
+		const chars = Array.from(text.slice(start, end));
 		const hasLatin = chars.some(isLatinLetter);
 		let mixed = false;
 		for (let i = 0; i < chars.length && hasLatin && !mixed; i++) {

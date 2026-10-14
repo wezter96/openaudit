@@ -21,6 +21,10 @@
 			{
 				"fingerprint": "a22c9f9af84aaa4a",
 				"reason": "gitleaks generic-api-key false positive: the OWASP API Top 10 page slug for api10 in packages/auditors/src/codebase/api.ts"
+			},
+			{
+				"fingerprint": "073efb043367d01d",
+				"reason": "jscpd: the dark palette in apps/site/src/styles/global.css appears twice on purpose, once for the system setting and once for the explicit data-theme toggle; one CSS rule cannot sit both inside and outside a media query"
 			}
 		]
 	}

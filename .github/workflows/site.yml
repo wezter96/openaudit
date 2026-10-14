@@ -40,8 +40,13 @@ jobs:
         run: bun run check-types
 
       - name: Audit this repository for /report/
-        # Published whatever the result; CI is where the gate lives.
-        run: bun apps/cli/src/bin.ts . --format html,json,sarif,markdown --out apps/site/public/report --fail-on none --quiet
+        # Runs this commit's CLI inside the full scanner image, so the public
+        # report covers every bundled tool instead of skipping the ones the
+        # runner lacks. Published whatever the result; CI is where the gate lives.
+        run: >-
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp
+          -v "$PWD:/src" -w /src --entrypoint bun ghcr.io/wezter96/openaudit:edge-full
+          apps/cli/src/bin.ts . --format html,json,sarif,markdown --out apps/site/public/report --fail-on none --quiet
       - name: Regenerate the architecture page
         run: bun docs/architecture.ts
 
