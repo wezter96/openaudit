@@ -1,6 +1,6 @@
 # Releasing
 
-openaudit ships as one npm package, `openaudit`, built from `apps/cli`. The build (`apps/cli/scripts/build.ts`) bundles the CLI and the unpublished `@openaudit/*` workspace packages into `apps/cli/dist/cli.js`. Third-party packages stay as ordinary `dependencies`, so `typescript` (used by `code.typecheck`) and the optional `playwright-core` and `axe-core` are installed by npm/Bun as usual. `apps/cli/bin/openaudit.js` is a small Node-compatible launcher: under Bun it loads the bundle, under Node (`npx`) it hands over to a `bun` on PATH or prints how to install Bun.
+openaudit ships as one npm package, `@openaudit/cli`, built from `apps/cli`. The build (`apps/cli/scripts/build.ts`) bundles the CLI and the unpublished `@openaudit/*` workspace packages into `apps/cli/dist/cli.js`. Third-party packages stay as ordinary `dependencies`, so `typescript` (used by `code.typecheck`) and the optional `playwright-core` and `axe-core` are installed by npm/Bun as usual. `apps/cli/bin/openaudit.js` is a small Node-compatible launcher: under Bun it loads the bundle, under Node (`npx`) it hands over to a `bun` on PATH or prints how to install Bun.
 
 If you add a dependency to `core`, `auditors`, `agent` or `mcp`, add it to `apps/cli/package.json` too. The build fails with a list if one is missing.
 
