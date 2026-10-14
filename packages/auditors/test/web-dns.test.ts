@@ -259,6 +259,37 @@ describe("web.dns auditor", () => {
 		expect(ids).toEqual([]);
 	});
 
+	test("a domain that does not exist errors instead of reporting missing records", async () => {
+		// openaudt.se (a typo of openaudit.se) has no records at all: every
+		// lookup answers NXDOMAIN, which used to read as "no CAA, no SPF".
+		const report = await run(
+			{ missing: new Set(["openaudt.se"]) },
+			"https://openaudt.se/",
+		);
+		const result = report.results[0];
+		expect(result?.status).toBe("error");
+		expect(result?.findings).toEqual([]);
+		expect(result?.message).toContain("NXDOMAIN");
+		// A missing host under a real domain still gets the domain's checks.
+		const sub = await rules(
+			{ missing: new Set(["typo.example.test"]), caa: {} },
+			"https://typo.example.test/",
+		);
+		expect(sub).toContain("web.dns/caa-missing");
+	});
+
+	test("an unknown existence answer does not block the checks", async () => {
+		const resolver = fakeResolver({});
+		const auditor = makeDnsAuditor({
+			...resolver,
+			nameExists: async () => {
+				throw new Error("SERVFAIL");
+			},
+		});
+		const report = await runAuditor(auditor, "https://example.test/");
+		expect(ruleIds(report)).toContain("web.dns/caa-missing");
+	});
+
 	test("skipped offline and for non-DNS targets", async () => {
 		const auditor = makeDnsAuditor(fakeResolver({}));
 		const offline = await runAuditor(auditor, "https://example.test/", {
