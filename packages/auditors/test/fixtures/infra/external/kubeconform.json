@@ -1,0 +1,80 @@
+{
+  "resources": [
+    {
+      "filename": "./deploy/broken.yaml",
+      "kind": "",
+      "name": "",
+      "version": "",
+      "status": "statusError",
+      "msg": "error unmarshalling resource: error converting YAML to JSON: yaml: line 6: did not find expected ',' or ']'"
+    },
+    {
+      "filename": "./deploy/crds.yaml",
+      "kind": "Widget",
+      "name": "gizmo",
+      "version": "widgets.example.com/v1",
+      "status": "statusError",
+      "msg": "could not find schema for Widget"
+    },
+    {
+      "filename": "./deploy/app.yaml",
+      "kind": "Service",
+      "name": "web-dup",
+      "version": "v1",
+      "status": "statusError",
+      "msg": "error unmarshalling resource: error converting YAML to JSON: yaml: unmarshal errors:\n  line 5: key \"name\" already set in map"
+    },
+    {
+      "filename": "./deploy/crds.yaml",
+      "kind": "Certificate",
+      "name": "site",
+      "version": "cert-manager.io/v1",
+      "status": "statusInvalid",
+      "msg": "problem validating schema. Check JSON formatting: jsonschema validation failed with 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/cert-manager.io/certificate_v1.json#' - at '/spec': additional properties 'durationn' not allowed",
+      "validationErrors": [
+        {
+          "path": "/spec",
+          "msg": "additional properties 'durationn' not allowed"
+        }
+      ]
+    },
+    {
+      "filename": "./deploy/app.yaml",
+      "kind": "Deployment",
+      "name": "web",
+      "version": "apps/v1",
+      "status": "statusInvalid",
+      "msg": "problem validating schema. Check JSON formatting: jsonschema validation failed with 'https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/deployment-apps-v1.json#' - at '/spec/replicas': got string, want null or integer - at '/spec/template/spec/containers/0': additional properties 'imagePullPolicyy' not allowed",
+      "validationErrors": [
+        {
+          "path": "/spec/replicas",
+          "msg": "got string, want null or integer"
+        },
+        {
+          "path": "/spec/template/spec/containers/0",
+          "msg": "additional properties 'imagePullPolicyy' not allowed"
+        }
+      ]
+    },
+    {
+      "filename": "./deploy/app.yaml",
+      "kind": "Pod",
+      "name": "broken",
+      "version": "v1",
+      "status": "statusInvalid",
+      "msg": "problem validating schema. Check JSON formatting: jsonschema validation failed with 'https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/pod-v1.json#' - at '/spec': missing property 'containers'",
+      "validationErrors": [
+        {
+          "path": "/spec",
+          "msg": "missing property 'containers'"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "valid": 1,
+    "invalid": 3,
+    "errors": 3,
+    "skipped": 0
+  }
+}

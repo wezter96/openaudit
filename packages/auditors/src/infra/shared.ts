@@ -41,6 +41,34 @@ export const targetFiles = (
 export const readOptional = (ws: Workspace, file: string) =>
 	ws.readText(file).pipe(Effect.orElseSucceed(() => undefined));
 
+/** YAML that is clearly not a Kubernetes manifest. */
+const NOT_K8S_RE =
+	/(^|\/)(\.github\/|\.gitlab-ci|(docker-)?compose[^/]*\.ya?ml$|pnpm-lock|\.pre-commit|mkdocs|openapi|swagger)/;
+
+/**
+ * Plain Kubernetes manifests (YAML with top-level `apiVersion` and `kind`),
+ * keyed by path with their text. Helm templates (`{{`) are not valid YAML and
+ * are left out.
+ */
+export const kubernetesManifests = (ctx: AuditContext) =>
+	Effect.gen(function* () {
+		const { ws, files } = yield* targetFiles(ctx, /\.ya?ml$/);
+		const manifests = new Map<string, string>();
+		for (const file of files) {
+			if (ctx.target.type !== "file" && NOT_K8S_RE.test(file)) continue;
+			const text = yield* readOptional(ws, file);
+			if (
+				text === undefined ||
+				!/^apiVersion:\s*\S/m.test(text) ||
+				!/^kind:\s*\S/m.test(text) ||
+				text.includes("{{")
+			)
+				continue;
+			manifests.set(file, text);
+		}
+		return { ws, manifests };
+	});
+
 export type YamlPath = ReadonlyArray<string | number>;
 
 export interface YamlDoc {

@@ -1,0 +1,18 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: site
+spec:
+  secretName: site-tls
+  dnsNames:
+    - example.com
+  issuerRef:
+    name: letsencrypt
+  durationn: 2160h
+---
+apiVersion: widgets.example.com/v1
+kind: Widget
+metadata:
+  name: gizmo
+spec:
+  size: 3
