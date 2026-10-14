@@ -7,7 +7,8 @@
  * - serve a page's Markdown version when `Accept` prefers text/markdown;
  * - add discovery Link headers and `Vary: Accept` to HTML;
  * - give the agent-facing files (llms.txt, .well-known/*, *.md, /data/*,
- *   /openapi.json) their content types and open CORS (worker/agents.ts).
+ *   /openapi.json) their content types and open CORS (worker/agents.ts);
+ * - count page and Markdown views anonymously (worker/visits.ts).
  */
 import {
 	agentFile,
@@ -18,9 +19,12 @@ import {
 	prefersMarkdown,
 } from "./agents";
 import { type Assets, CORS, handleMcp } from "./mcp";
+import { recordVisit, type Visits } from "./visits";
 
 export interface Env {
 	readonly ASSETS: Assets;
+	/** Analytics Engine dataset for page views; absent in tests and local dev. */
+	readonly VISITS?: Visits;
 }
 
 const SERVER_CARD = "/.well-known/mcp/server-card.json";
@@ -116,13 +120,19 @@ export default {
 				);
 				out.headers.delete("Content-Length");
 				out.headers.delete("ETag");
+				recordVisit(env.VISITS, request, path, "markdown");
 				return out;
 			}
 		}
 
 		const res = await env.ASSETS.fetch(request);
-		if (file) return publicFile(res, file.type, false);
+		if (file) {
+			if (res.ok && path.endsWith(".md"))
+				recordVisit(env.VISITS, request, path, "markdown");
+			return publicFile(res, file.type, false);
+		}
 		if ((res.headers.get("content-type") ?? "").startsWith("text/html")) {
+			if (res.status === 200) recordVisit(env.VISITS, request, path, "page");
 			const md = res.status === 200 ? markdownFor(path) : undefined;
 			const out = withHeaders(res, { Link: linkHeader(md) });
 			out.headers.append("Vary", "Accept");

@@ -47,6 +47,16 @@ bun run test                     # the Worker's tests (worker/*.test.ts)
 - writes the agent discovery files (`scripts/agents.ts`);
 - fails the build if any internal link or asset reference does not resolve, including each page's Markdown version, the links in `llms.txt` and the discovery files, and the heading anchors the docs search returns.
 
+## Visitors
+
+The Worker counts page views anonymously (`worker/visits.ts`): one Workers Analytics Engine data point per HTML or Markdown view, with the path, human or bot (and the bot's name), the referring host, the country and phone or desktop. No IP address, user agent string or cookie is stored, and the page loads no analytics script. `HEAD` requests and prefetches aren't counted.
+
+```sh
+CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… bun run stats 30   # last 30 days
+```
+
+The token needs "Account Analytics: Read". These are page views, not people.
+
 ## Where it is served
 
 The base URL comes from two environment variables, read by `astro.config.ts` and `scripts/postbuild.ts`:

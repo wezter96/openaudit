@@ -191,3 +191,70 @@ describe("routing", () => {
 		expect((await get("/mcp")).status).toBe(405);
 	});
 });
+
+describe("visits", () => {
+	const SAFARI =
+		"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
+	const counted = async (
+		path: string,
+		headers: Record<string, string> = {},
+		method = "GET",
+	) => {
+		const points: { blobs?: string[] }[] = [];
+		await worker.fetch(
+			new Request(`https://openaudit.se${path}`, { method, headers }),
+			{ ...env, VISITS: { writeDataPoint: (p) => points.push(p) } },
+		);
+		return points.map((p) => p.blobs);
+	};
+
+	test("a page view is one anonymous data point", async () => {
+		expect(
+			await counted("/docs/cli/", {
+				"user-agent": SAFARI,
+				referer: "https://news.ycombinator.com/item?id=1",
+			}),
+		).toEqual([
+			["/docs/cli/", "page", "human", "", "news.ycombinator.com", "", "mobile"],
+		]);
+		const own = await counted("/", {
+			"user-agent": SAFARI,
+			referer: "https://openaudit.se/docs/",
+		});
+		expect(own[0]?.[4]).toBe("");
+	});
+
+	test("bots and agents are named", async () => {
+		const [google] = await counted("/", {
+			"user-agent":
+				"Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+		});
+		expect(google?.slice(2, 4)).toEqual(["bot", "googlebot"]);
+		const [agent] = await counted("/", {
+			"user-agent":
+				"Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ChatGPT-User/1.0; +https://openai.com/bot)",
+		});
+		expect(agent?.slice(2, 4)).toEqual(["bot", "chatgpt-user"]);
+		const [none] = await counted("/");
+		expect(none?.slice(2, 4)).toEqual(["bot", "unknown"]);
+	});
+
+	test("Markdown views count as markdown", async () => {
+		const ua = { "user-agent": "claude-code/2.0" };
+		expect(
+			(await counted("/docs/cli/", { ...ua, accept: "text/markdown" }))[0]?.[1],
+		).toBe("markdown");
+		expect((await counted("/index.md", ua))[0]?.[1]).toBe("markdown");
+	});
+
+	test("HEAD, prefetches, missing pages and assets are not counted", async () => {
+		const ua = { "user-agent": SAFARI };
+		expect(await counted("/", ua, "HEAD")).toEqual([]);
+		expect(await counted("/", { ...ua, "sec-purpose": "prefetch" })).toEqual(
+			[],
+		);
+		expect(await counted("/nope/", ua)).toEqual([]);
+		expect(await counted("/favicon.svg", ua)).toEqual([]);
+		expect(await counted("/llms.txt", ua)).toEqual([]);
+	});
+});

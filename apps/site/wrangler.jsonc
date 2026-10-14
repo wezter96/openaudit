@@ -18,5 +18,9 @@
 	"workers_dev": false,
 	// Each branch push uploads a version with its own preview URL (site.yml).
 	"preview_urls": true,
+	// Anonymous page views (worker/visits.ts); read them with `bun run stats`.
+	"analytics_engine_datasets": [
+		{ "binding": "VISITS", "dataset": "openaudit_site_visits" }
+	],
 	"observability": { "enabled": false }
 }

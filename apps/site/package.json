@@ -10,6 +10,7 @@
 		"check-types": "bun scripts/prepare.ts --data-only && astro check",
 		"test": "bun test worker",
 		"check:ui": "bun scripts/check-ui.ts",
+		"stats": "bun scripts/stats.ts",
 		"deploy": "wrangler deploy"
 	},
 	"dependencies": {
