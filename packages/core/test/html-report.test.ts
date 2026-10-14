@@ -391,9 +391,9 @@ describe("escaping", () => {
 		expect(markup).not.toContain('href="javascript:');
 		// Exactly one executable script element: ours.
 		expect(html.match(/<script>/g)).toHaveLength(1);
-		// Plus four inert data blocks: JSON, SARIF, Markdown and CSV.
-		expect(html.match(/<script\b/g)).toHaveLength(5);
-		expect(html.match(/<script type="application\/json"/g)).toHaveLength(4);
+		// Plus five inert data blocks: JSON, SARIF, Markdown, CSV and the AI prompt.
+		expect(html.match(/<script\b/g)).toHaveLength(6);
+		expect(html.match(/<script type="application\/json"/g)).toHaveLength(5);
 	});
 
 	test("the embedded data cannot break out and round-trips", () => {
@@ -580,6 +580,21 @@ describe("downloads", () => {
 			html.match(/id="data-csv"[^>]*>([\s\S]*?)<\/script>/)?.[1] ?? "",
 		);
 		expect(csv.split("\r\n")[0]).toBe(CSV_COLUMNS.join(","));
+	});
+});
+
+describe("copy for AI", () => {
+	test("a button copies the report with a plain-language prompt", () => {
+		expect(markup).toContain('data-action="copy-ai"');
+		expect(html).toContain('role="status" id="copy-status"');
+		const prompt = JSON.parse(
+			html.match(/id="data-ai"[^>]*>([\s\S]*?)<\/script>/)?.[1] ?? "",
+		);
+		expect(prompt).toStartWith("Here's an openaudit report for my repo.");
+		expect(prompt).toContain("Assume I'm not a security expert.");
+		expect(prompt).toContain("## openaudit: my repo");
+		expect(prompt).toContain("AWS access key committed");
+		expect(prompt).not.toContain("/home/me");
 	});
 });
 

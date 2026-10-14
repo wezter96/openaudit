@@ -153,6 +153,7 @@ var act=b.getAttribute("data-action"),panel=closest(b,".panel");
 if(act==="expand"||act==="collapse")toggleAll(panel,act==="expand");
 else if(act==="menu")toggleMenu(menuOpen()?0:1);
 else if(act==="download"){download(b);toggleMenu(0,true);}
+else if(act==="copy-ai")copyAi(b);
 else if(act==="print")w.print();
 else if(act==="sort")sortTable(b);
 });
@@ -252,6 +253,26 @@ var url=URL.createObjectURL(new Blob([text],{type:type+";charset=utf-8"}));
 var a=d.createElement("a");a.href=url;a.download=file||"openaudit-report";a.hidden=true;
 d.body.appendChild(a);a.click();a.remove();
 setTimeout(function(){URL.revokeObjectURL(url);},4000);
+}
+/* ---- copy for AI: the report with a plain-language prompt ---- */
+function copyAi(btn){
+var src=d.getElementById("data-ai"),label=btn.querySelector(".bl"),status=d.getElementById("copy-status");
+if(!src)return;
+var text=JSON.parse(src.textContent);
+function done(ok){
+if(status)status.textContent=ok?"Report copied. Paste it into an AI chat.":"Couldn't copy. Use Download, Markdown instead.";
+if(!label)return;
+label.textContent=ok?"Copied":"Couldn't copy";
+clearTimeout(btn._t);btn._t=setTimeout(function(){label.textContent="Copy for AI";if(status)status.textContent="";},2500);
+}
+function fallback(){
+var area=d.createElement("textarea");area.value=text;area.setAttribute("readonly","");
+area.style.position="fixed";area.style.opacity="0";d.body.appendChild(area);area.select();
+var ok=false;try{ok=d.execCommand("copy");}catch(e){}
+area.remove();btn.focus();done(ok);
+}
+if(navigator.clipboard&&w.isSecureContext)navigator.clipboard.writeText(text).then(function(){done(true);},fallback);
+else fallback();
 }
 var menuBtn=d.getElementById("dl-button"),menu=d.getElementById("dl-menu");
 function items(){return menu?[].slice.call(menu.querySelectorAll("[role=menuitem]")):[];}

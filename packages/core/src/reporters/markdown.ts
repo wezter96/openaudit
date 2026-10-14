@@ -240,3 +240,26 @@ export const toMarkdown = (
 
 	return `${out.join("\n").trimEnd()}\n`;
 };
+
+/**
+ * The report as a prompt for an AI chat, for readers who aren't security
+ * experts: explain the risks plainly, order the fixes, flag false alarms.
+ */
+export const toAiPrompt = (
+	report: Report,
+	options: MarkdownOptions = {},
+): string => {
+	const { score, grade } = report.summary;
+	return `Here's an openaudit report for ${sanitizeText(targetLabel(report))}. It scored ${score}/100 (grade ${grade}).
+
+Please:
+1. Explain the biggest risks in plain language and why they matter. Assume I'm not a security expert.
+2. List what to fix first, in order, with the steps for each.
+3. Point out anything that looks like a false alarm.
+
+If you can see my code, make the fixes and tell me what you changed.
+
+The report:
+
+${toMarkdown(report, options)}`;
+};

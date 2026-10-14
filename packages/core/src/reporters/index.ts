@@ -10,7 +10,7 @@ import { toTerminal } from "./terminal";
 export { CSV_COLUMNS, csvCell, toCsv } from "./csv";
 export { type HtmlOptions, toHtml } from "./html";
 export { canonicalize, type JsonOptions, toJson } from "./json";
-export { type MarkdownOptions, toMarkdown } from "./markdown";
+export { type MarkdownOptions, toAiPrompt, toMarkdown } from "./markdown";
 export { type SarifOptions, toSarif, toSarifLog } from "./sarif";
 export { jsonSchemaOf, reportJsonSchema } from "./schema";
 export {
