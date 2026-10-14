@@ -8,6 +8,9 @@
  *   CLI (unmodified). Reuses an existing report, e.g. one CI just wrote, or
  *   runs the audit when there is none. `--fresh` always re-runs it.
  * - public/architecture/: docs/architecture.html, copied as-is.
+ * - public/schema/: the config and report JSON Schemas, as printed by
+ *   `openaudit schema`. `openaudit init` points configs at
+ *   https://openaudit.se/schema/config.json, so this path is a public contract.
  *
  * `--data-only` writes src/generated and nothing else (for type checks).
  */
@@ -18,7 +21,11 @@ import * as Agent from "../../../packages/agent/src/index";
 import type { Finding } from "../../../packages/core/src/model";
 import { gradeFor, scoreFor } from "../../../packages/core/src/scoring";
 import { allAuditors } from "../../cli/src/audit";
-import { DEFAULT_CONFIG, restrictUntrusted } from "../../cli/src/config";
+import {
+	CONFIG_SCHEMA_URL,
+	DEFAULT_CONFIG,
+	restrictUntrusted,
+} from "../../cli/src/config";
 
 const site = join(import.meta.dir, "..");
 const repo = join(site, "..", "..");
@@ -80,18 +87,8 @@ await writeJson("cli-help.json", help);
 
 /* ----------------------------- configuration ------------------------------ */
 
-const schema = JSON.parse(await cli("schema", "config"));
-const configSource = await Bun.file(
-	join(repo, "apps", "cli", "src", "config.ts"),
-).text();
-/** `/** text *\/` comments directly above `key:` in the config schema. */
-const docComments: Record<string, string> = {};
-for (const m of configSource.matchAll(
-	/\/\*\*((?:(?!\*\/)[\s\S])*)\*\/\s*\n\s*(\w+):/g,
-)) {
-	const [, text = "", key = ""] = m;
-	docComments[key] = text.replace(/\s*\n\s*\*\s?/g, " ").trim();
-}
+const configSchema = await cli("schema", "config");
+const schema = JSON.parse(configSchema);
 // Which keys survive when the config is found inside the audited target.
 const everything = {
 	only: ["x"],
@@ -111,8 +108,8 @@ const { ignored } = restrictUntrusted(
 );
 await writeJson("config.json", {
 	schema,
+	schemaUrl: CONFIG_SCHEMA_URL,
 	defaults: DEFAULT_CONFIG,
-	comments: docComments,
 	trustedOnly: ignored,
 });
 
@@ -239,6 +236,15 @@ if (!args.has("--data-only")) {
 	await copyFile(
 		join(repo, "docs", "architecture.html"),
 		join(arch, "index.html"),
+	);
+
+	// Published at stable URLs for editors: keep these paths.
+	const schemas = join(site, "public", "schema");
+	await mkdir(schemas, { recursive: true });
+	await Bun.write(join(schemas, "config.json"), configSchema);
+	await Bun.write(
+		join(schemas, "report-v1.json"),
+		await cli("schema", "report"),
 	);
 
 	const shots = join(site, "public", "img");
