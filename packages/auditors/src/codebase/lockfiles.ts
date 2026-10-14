@@ -8,7 +8,6 @@ import {
 	type Workspace,
 } from "@openaudit/core";
 import { Effect } from "effect";
-import { parse as parseYaml } from "yaml";
 
 import {
 	baseName,
@@ -52,6 +51,12 @@ const DEFAULT_REGISTRY_HOSTS = new Set([
 	"registry.yarnpkg.com",
 	"npm.pkg.github.com",
 ]);
+
+/** Default download hosts of pnpm `runtime:` dependencies (Node.js, Bun, Deno). */
+const RUNTIME_HOSTS = new Set(["nodejs.org", "github.com", "dl.deno.land"]);
+
+/** Hosts of the Python Package Index. */
+const PYPI_HOSTS = new Set(["pypi.org", "files.pythonhosted.org"]);
 
 /** Git hosts whose repositories have a known owner namespace. */
 const KNOWN_GIT_HOSTS = new Set([
@@ -329,6 +334,8 @@ export interface LockedPackage {
 	readonly installScript?: boolean;
 	/** Shipped inside its parent's tarball (npm `inBundle`). */
 	readonly bundled?: boolean;
+	/** A Node.js/Bun/Deno runtime download (pnpm `runtime:` dependencies). */
+	readonly runtime?: boolean;
 	readonly line?: number;
 }
 
@@ -350,14 +357,25 @@ export interface Lockfile {
 const str = (v: unknown): string | undefined =>
 	typeof v === "string" ? v : undefined;
 
+/** A YAML or Yarn scalar as text (js-yaml's FAILSAFE schema keeps every scalar a string). */
+const scalar = (v: unknown): string | undefined =>
+	typeof v === "string" || typeof v === "number" || typeof v === "boolean"
+		? String(v)
+		: undefined;
+
 const strings = (v: unknown): string[] =>
 	Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 
+/** Every package manager here ignores a leading byte-order mark. */
+const stripBom = (text: string) =>
+	text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+
 const parseJson = (text: string): unknown => {
+	const t = stripBom(text);
 	try {
-		return JSON.parse(text);
+		return JSON.parse(t);
 	} catch {
-		return parseJsonc(text);
+		return parseJsonc(t);
 	}
 };
 
@@ -395,7 +413,7 @@ const declaredSpecs = (pkg: Record<string, unknown>): Importer => {
 };
 
 /**
- * 1-based lines of `"key":` lines after the top-level `section` key (first
+ * 1-based lines of `"key":` lines after the top-level `"section"` key (first
  * occurrence wins). Linear: no regex backtracking. Minified files get none.
  */
 const jsonKeyLines = (text: string, section: string): Map<string, number> => {
@@ -404,15 +422,20 @@ const jsonKeyLines = (text: string, section: string): Map<string, number> => {
 	let started = false;
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i] ?? "";
+		const t = line.trimStart();
 		if (!started) {
-			started = line.startsWith(`  ${section}`);
+			started =
+				line.length - t.length === 2 &&
+				(t[0] === '"' || t[0] === "'") &&
+				t.startsWith(`${section}${t[0]}`, 1);
 			continue;
 		}
-		const t = line.trimStart();
-		if (!t.startsWith('"')) continue;
-		const end = t.indexOf('"', 1);
-		if (end === -1 || t[end + 1] !== ":") continue;
-		const key = t.slice(1, end);
+		const quote = t[0];
+		if (quote !== '"' && quote !== "'") continue;
+		let end = 1;
+		while (end < t.length && t[end] !== quote) end += t[end] === "\\" ? 2 : 1;
+		if (t[end + 1] !== ":") continue;
+		const key = unquote(t.slice(0, end + 1));
 		if (!out.has(key)) out.set(key, i + 1);
 	}
 	return out;
@@ -428,7 +451,7 @@ export const parseNpmLock = (file: SourceFile): Lockfile | undefined => {
 	const packages: LockedPackage[] = [];
 	const importers = new Map<string, Importer>();
 	if (isRecord(json.packages)) {
-		const lines = jsonKeyLines(file.text, '"packages"');
+		const lines = jsonKeyLines(file.text, "packages");
 		for (const [key, value] of Object.entries(json.packages)) {
 			if (!isRecord(value)) continue;
 			const line = lines.get(key);
@@ -465,7 +488,7 @@ export const parseNpmLock = (file: SourceFile): Lockfile | undefined => {
 		}
 	}
 	if (isRecord(json.dependencies)) {
-		const lines = jsonKeyLines(file.text, '"dependencies"');
+		const lines = jsonKeyLines(file.text, "dependencies");
 		const visit = (deps: Record<string, unknown>, depth: number) => {
 			if (depth > 64) return;
 			for (const [name, value] of Object.entries(deps)) {
@@ -497,9 +520,15 @@ export const parseNpmLock = (file: SourceFile): Lockfile | undefined => {
 
 /** bun.lock (JSONC): `"key": ["name@spec", registry?, info, integrity?]`. */
 export const parseBunLock = (file: SourceFile): Lockfile | undefined => {
-	const json = parseJsonc(file.text);
+	let json: unknown;
+	try {
+		// Bun's own parser: comments, trailing commas, single quotes and a BOM.
+		json = Bun.JSONC.parse(file.text);
+	} catch {
+		return undefined;
+	}
 	if (!isRecord(json) || !isRecord(json.packages)) return undefined;
-	const lines = jsonKeyLines(file.text, '"packages"');
+	const lines = jsonKeyLines(file.text, "packages");
 	const packages: LockedPackage[] = [];
 	for (const [key, value] of Object.entries(json.packages)) {
 		if (!Array.isArray(value) || typeof value[0] !== "string") continue;
@@ -574,8 +603,167 @@ const yamlKeyLines = (
 	return out;
 };
 
-/** pnpm-lock.yaml v5, v6 and v9. */
-export const parsePnpmLock = (file: SourceFile): Lockfile | undefined => {
+/** Shifts entry lines, for documents parsed out of a larger file. */
+const shiftLines = (
+	lock: Lockfile,
+	map: (line: number) => number,
+): Lockfile => ({
+	...lock,
+	packages: lock.packages.map((p) =>
+		p.line === undefined ? p : { ...p, line: map(p.line) },
+	),
+});
+
+/** One lockfile from several parses of the same file (documents, conflict sides). */
+const mergeLockfiles = (
+	locks: ReadonlyArray<Lockfile>,
+): Lockfile | undefined => {
+	const [first] = locks;
+	if (!first || locks.length === 1) return first;
+	const importers = new Map<string, Importer>();
+	for (const lock of locks)
+		for (const [dir, importer] of lock.importers) {
+			const into: Importer = importers.get(dir) ?? new Map();
+			for (const [name, specs] of importer) {
+				const prev = into.get(name);
+				into.set(
+					name,
+					!into.has(name)
+						? specs
+						: prev === undefined || specs === undefined
+							? undefined
+							: [...prev, ...specs],
+				);
+			}
+			importers.set(dir, into);
+		}
+	return {
+		path: first.path,
+		manager: locks.some((l) => l.manager === "yarn-berry")
+			? "yarn-berry"
+			: first.manager,
+		packages: locks.flatMap((l) => l.packages),
+		importers,
+		recordsInstallScripts: locks.some((l) => l.recordsInstallScripts),
+		trusted: [...new Set(locks.flatMap((l) => l.trusted ?? []))],
+	};
+};
+
+interface ConflictSide {
+	readonly text: string;
+	/** Line in the file of each line of `text`. */
+	readonly lines: ReadonlyArray<number>;
+}
+
+/**
+ * Both sides of git merge conflicts in a lockfile. npm (parse-conflict-json),
+ * pnpm and Yarn resolve a conflicted lockfile by reading both sides and
+ * merging them, so code.lockfiles checks both.
+ */
+export const conflictSides = (text: string): ConflictSide[] => {
+	if (
+		!text.includes("<<<<<<<") ||
+		!text.includes("=======") ||
+		!text.includes(">>>>>>>")
+	)
+		return [];
+	const ours: string[] = [];
+	const theirs: string[] = [];
+	const oursLines: number[] = [];
+	const theirsLines: number[] = [];
+	let state: "top" | "ours" | "parent" | "theirs" = "top";
+	text.split(/\r\n|\r|\n/).forEach((line, i) => {
+		if (line.startsWith("<<<<<<<")) state = "ours";
+		else if (line.startsWith("|||||||")) state = "parent";
+		else if (line === "=======") state = "theirs";
+		else if (line.startsWith(">>>>>>>")) state = "top";
+		else {
+			if (state === "top" || state === "ours") {
+				ours.push(line);
+				oursLines.push(i + 1);
+			}
+			if (state === "top" || state === "theirs") {
+				theirs.push(line);
+				theirsLines.push(i + 1);
+			}
+		}
+	});
+	return [
+		{ text: ours.join("\n"), lines: oursLines },
+		{ text: theirs.join("\n"), lines: theirsLines },
+	];
+};
+
+/**
+ * One YAML document, parsed with Bun's YAML parser: it applies `<<` merge
+ * keys like pnpm's js-yaml and lets a repeated key override the earlier one
+ * like Yarn 2+ (js-yaml with `json: true`), and it is fast on large lockfiles.
+ * Values that js-yaml's FAILSAFE schema keeps as strings (Yarn) may come back
+ * as numbers or booleans, so callers compare them as strings. A stream of
+ * several documents is an error, as it is for js-yaml's `load`.
+ */
+const parseYaml = (text: string): unknown => {
+	const doc: unknown = Bun.YAML.parse(text);
+	if (Array.isArray(doc) && /^---|\n---/.test(text))
+		throw new Error("Expected a single YAML document");
+	return doc;
+};
+
+/** pnpm's `removeSuffix`: `a@1.0.0(peer@2.0.0)` → `a@1.0.0`. */
+const withoutPeerSuffix = (depPath: string) => {
+	if (!depPath.endsWith(")")) return depPath;
+	const i = depPath.indexOf("(", 1);
+	return i === -1 ? depPath : depPath.slice(0, i);
+};
+
+interface Fetch {
+	readonly source?: string;
+	readonly integrity?: string;
+	readonly runtime?: boolean;
+}
+
+/**
+ * What a pnpm `resolution` downloads: a registry or tarball URL, a git commit,
+ * a directory, or one archive per platform of a `runtime:` dependency.
+ * Unknown shapes become an unknown source, which is reported.
+ */
+const pnpmFetches = (res: unknown, depth = 0): Fetch[] => {
+	if (!isRecord(res)) return [{}];
+	const integrity = str(res.integrity);
+	switch (res.type) {
+		case undefined:
+			return [
+				{
+					source:
+						typeof res.directory === "string"
+							? `file:${res.directory}`
+							: str(res.tarball),
+					integrity,
+				},
+			];
+		case "directory":
+			return [{ source: `file:${str(res.directory) ?? ""}` }];
+		case "git":
+			return [
+				{ source: `git+${str(res.repo) ?? ""}#${str(res.commit) ?? ""}` },
+			];
+		case "binary":
+			return [{ source: str(res.url) ?? "binary:", integrity, runtime: true }];
+		case "variations":
+			if (depth > 2 || !Array.isArray(res.variants))
+				return [{ source: "variations:" }];
+			return res.variants.flatMap((v) =>
+				pnpmFetches(isRecord(v) ? v.resolution : undefined, depth + 1).map(
+					(f) => ({ ...f, runtime: true }),
+				),
+			);
+		default:
+			return [{ source: `${String(res.type)}:`, integrity }];
+	}
+};
+
+/** One YAML document of a pnpm lockfile. */
+const parsePnpmDocument = (file: SourceFile): Lockfile | undefined => {
 	let doc: unknown;
 	try {
 		doc = parseYaml(file.text);
@@ -622,30 +810,43 @@ export const parsePnpmLock = (file: SourceFile): Lockfile | undefined => {
 		}
 		if (recorded.size || isRecord(doc.importers)) importers.set(dir, recorded);
 	}
-	if (isRecord(doc.packages)) {
-		const lines = yamlKeyLines(file.text, "packages");
-		for (const [key, value] of Object.entries(doc.packages)) {
-			if (!isRecord(value)) continue;
-			const res = isRecord(value.resolution) ? value.resolution : {};
-			const source =
-				typeof res.directory === "string"
-					? `file:${res.directory}`
-					: res.type === "git" && typeof res.repo === "string"
-						? `git+${res.repo}#${str(res.commit) ?? ""}`
-						: str(res.tarball);
-			const name = str(value.name) ?? pnpmName(key);
-			const at = key.lastIndexOf("@");
-			const keyVersion = at > 0 ? key.slice(at + 1).split("(")[0] : undefined;
+	const add = (key: string, value: Record<string, unknown>, line?: number) => {
+		const name = str(value.name) ?? pnpmName(key);
+		const at = key.lastIndexOf("@");
+		const keyVersion = at > 0 ? key.slice(at + 1).split("(")[0] : undefined;
+		const version =
+			str(value.version) ??
+			(keyVersion && /^\d/.test(keyVersion) ? keyVersion : undefined);
+		for (const f of pnpmFetches(value.resolution))
 			packages.push({
 				name,
-				version:
-					str(value.version) ??
-					(keyVersion && /^\d/.test(keyVersion) ? keyVersion : undefined),
-				source,
-				integrity: str(res.integrity),
+				version,
+				source: f.source,
+				integrity: f.integrity,
+				...(f.runtime ? { runtime: true } : {}),
 				installScript: value.requiresBuild === true,
-				line: lines.get(key) ?? lineOf(key),
+				line: line ?? lineOf(key),
 			});
+	};
+	const declared = isRecord(doc.packages) ? doc.packages : {};
+	const packageLines = yamlKeyLines(file.text, "packages");
+	for (const [key, value] of Object.entries(declared))
+		if (isRecord(value)) add(key, value, packageLines.get(key));
+	// v9 lockfiles install what `snapshots` lists; pnpm fills each snapshot in
+	// from `packages`, so a snapshot without a package (or a package without a
+	// resolution) brings its own fields.
+	if (isRecord(doc.snapshots)) {
+		const snapshotLines = yamlKeyLines(file.text, "snapshots");
+		for (const [key, snapshot] of Object.entries(doc.snapshots)) {
+			if (!isRecord(snapshot)) continue;
+			const id = withoutPeerSuffix(key);
+			const pkg = declared[id];
+			if (isRecord(pkg) && pkg.resolution !== undefined) continue;
+			add(
+				id,
+				{ ...snapshot, ...(isRecord(pkg) ? pkg : {}) },
+				snapshotLines.get(key),
+			);
 		}
 	}
 	return {
@@ -655,6 +856,28 @@ export const parsePnpmLock = (file: SourceFile): Lockfile | undefined => {
 		importers,
 		recordsInstallScripts: major > 0 && major < 9,
 	};
+};
+
+/**
+ * pnpm-lock.yaml v5, v6 and v9. pnpm 10 may put an env lockfile document
+ * first (`---\n<env>\n---\n<main>`); both are installed, so both are checked.
+ */
+export const parsePnpmLock = (file: SourceFile): Lockfile | undefined => {
+	const text = file.text;
+	const sep = text.startsWith("---\n") ? text.indexOf("\n---\n", 4) : -1;
+	if (sep === -1) return parsePnpmDocument(file);
+	const mainStart = sep + "\n---\n".length;
+	const offset = text.slice(0, mainStart).split("\n").length - 1;
+	const env = parsePnpmDocument({ path: file.path, text: text.slice(4, sep) });
+	const main = parsePnpmDocument({
+		path: file.path,
+		text: text.slice(mainStart),
+	});
+	if (!env || !main) return undefined;
+	return mergeLockfiles([
+		shiftLines(env, (l) => l + 1),
+		shiftLines(main, (l) => l + offset),
+	]);
 };
 
 const nameOfSpec = (spec: string) => {
@@ -678,173 +901,319 @@ const berryLocatorDir = (params: string): string => {
 	return "";
 };
 
-/**
- * Yarn Berry lockfiles are YAML, and Yarn falls back to a full YAML parser
- * for syntax its own parser does not handle, so they are parsed as YAML.
- */
-const parseBerryLock = (
-	file: SourceFile,
-	doc: Record<string, unknown>,
-): Lockfile => {
-	const packages: LockedPackage[] = [];
-	const importers = new Map<string, Importer>();
-	const lines = yamlKeyLines(file.text, undefined);
-	const lineOf = lineFinder(file.text);
-	for (const [key, value] of Object.entries(doc)) {
-		if (key === "__metadata" || !isRecord(value)) continue;
-		const resolution = str(value.resolution) ?? key.split(",")[0]?.trim() ?? "";
-		const name = nameOfSpec(resolution);
-		const spec = resolution.slice(name.length + 1);
-		if (spec.startsWith("workspace:")) {
-			const dir = spec.slice("workspace:".length);
-			const deps = isRecord(value.dependencies) ? value.dependencies : {};
-			importers.set(
-				dir === "." ? "" : dir,
-				new Map(Object.keys(deps).map((n) => [n, undefined])),
-			);
-			continue;
-		}
-		const params = spec.indexOf("::");
-		const bare = params === -1 ? spec : spec.slice(0, params);
-		const isPath = /^(file|link|portal):/.test(bare);
-		const checksum =
-			value.checksum === undefined ? undefined : String(value.checksum);
-		packages.push({
-			name,
-			version: value.version === undefined ? undefined : String(value.version),
-			source: isPath ? bare.split("#")[0] : bare,
-			...(isPath && params !== -1
-				? { base: berryLocatorDir(spec.slice(params + 2)) }
-				: {}),
-			// Berry checksums are SHA-512 digests of the package archive.
-			integrity: checksum ? `sha512-${checksum}` : undefined,
-			line: lines.get(key) ?? lineOf(key),
-		});
-	}
-	return {
-		path: file.path,
-		manager: "yarn-berry",
-		packages,
-		importers,
-		recordsInstallScripts: false,
-	};
-};
+/* --------------------------- Classic yarn.lock ---------------------------- */
 
-interface YarnEntry {
-	readonly specs: string[];
-	readonly line: number;
-	readonly fields: Map<string, string>;
+/*
+ * A port of Yarn 1's lockfile parser (src/lockfile/parse.js), so that what is
+ * checked is exactly what Yarn reads: comments run to the next \n, a lone \r
+ * is a newline but does not start an indent, only even runs of spaces indent,
+ * quoted strings are JSON, and a repeated key overrides the earlier one.
+ */
+
+type YarnToken =
+	| {
+			readonly type:
+				| "newline"
+				| "colon"
+				| "comma"
+				| "comment"
+				| "eof"
+				| "invalid";
+			readonly line: number;
+	  }
+	| { readonly type: "indent"; readonly value: number; readonly line: number }
+	| {
+			readonly type: "string" | "number" | "boolean";
+			readonly value: string | number | boolean;
+			readonly line: number;
+	  };
+
+class YarnLexer {
+	private i = 0;
+	private line = 1;
+	private lastNewline = false;
+	constructor(private readonly s: string) {}
+
+	next(): YarnToken {
+		const s = this.s;
+		for (;;) {
+			const i = this.i;
+			if (i >= s.length) return { type: "eof", line: this.line };
+			const c = s[i] as string;
+			const line = this.line;
+			let chop = 1;
+			let token: YarnToken | undefined;
+			if (c === "\n" || c === "\r") {
+				if (c === "\r" && s[i + 1] === "\n") chop = 2;
+				this.line++;
+				token = { type: "newline", line };
+			} else if (c === "#") {
+				const nl = s.indexOf("\n", i + 1);
+				chop = (nl === -1 ? s.length : nl) - i;
+				token = { type: "comment", line };
+			} else if (c === " ") {
+				if (this.lastNewline) {
+					let n = 1;
+					while (s[i + n] === " ") n++;
+					if (n % 2) throw new Error("Invalid number of spaces");
+					chop = n;
+					token = { type: "indent", value: n / 2, line };
+				}
+			} else if (c === '"') {
+				let j = i + 1;
+				for (; j < s.length; j++)
+					if (s[j] === '"' && !(s[j - 1] === "\\" && s[j - 2] !== "\\")) {
+						j++;
+						break;
+					}
+				chop = j - i;
+				try {
+					token = { type: "string", value: JSON.parse(s.slice(i, j)), line };
+				} catch {
+					token = { type: "invalid", line };
+				}
+			} else if (c >= "0" && c <= "9") {
+				let j = i;
+				while (
+					s[j] !== undefined &&
+					(s[j] as string) >= "0" &&
+					(s[j] as string) <= "9"
+				)
+					j++;
+				chop = j - i;
+				token = { type: "number", value: Number(s.slice(i, j)), line };
+			} else if (s.startsWith("true", i)) {
+				chop = 4;
+				token = { type: "boolean", value: true, line };
+			} else if (s.startsWith("false", i)) {
+				chop = 5;
+				token = { type: "boolean", value: false, line };
+			} else if (c === ":") token = { type: "colon", line };
+			else if (c === ",") token = { type: "comma", line };
+			else if (/[a-zA-Z/.-]/.test(c)) {
+				let j = i;
+				for (; j < s.length; j++) {
+					const ch = s[j];
+					if (
+						ch === ":" ||
+						ch === " " ||
+						ch === "\n" ||
+						ch === "\r" ||
+						ch === ","
+					)
+						break;
+				}
+				chop = j - i;
+				token = { type: "string", value: s.slice(i, j), line };
+			} else token = { type: "invalid", line };
+			this.lastNewline = c === "\n" || (c === "\r" && s[i + 1] === "\n");
+			this.i += chop;
+			if (token) return token;
+		}
+	}
 }
 
-/** `key value`, `key "value"`, `key: value` and `key:"value"` lines. */
-const yarnKeyValue = (t: string): readonly [string, string] => {
-	let end = 0;
-	if (t[0] === '"') {
-		end = 1;
-		while (end < t.length && t[end] !== '"') end += t[end] === "\\" ? 2 : 1;
-		end++;
-	} else
-		while (
-			end < t.length &&
-			t[end] !== " " &&
-			t[end] !== "\t" &&
-			t[end] !== ":"
-		)
-			end++;
-	let rest = t.slice(end).trimStart();
-	if (rest.startsWith(":")) rest = rest.slice(1).trimStart();
-	return [unquote(t.slice(0, end)), unquote(rest)];
-};
-
-/** Line parser for classic (v1) yarn.lock. Indentation may be spaces or tabs. */
-const yarnEntries = (text: string): YarnEntry[] => {
-	const out: YarnEntry[] = [];
-	let current: YarnEntry | undefined;
-	let fieldIndent = -1;
-	const lines = text.split("\n");
-	for (let i = 0; i < lines.length; i++) {
-		const line = (lines[i] ?? "").trimEnd();
-		const t = line.trimStart();
-		if (!t || t.startsWith("#")) continue;
-		const indent = line.length - t.length;
-		if (indent === 0) {
-			current = undefined;
-			fieldIndent = -1;
-			if (!line.endsWith(":")) continue;
-			current = {
-				specs: line
-					.slice(0, -1)
-					.split(",")
-					.map((s) => unquote(s.trim()))
-					.filter(Boolean),
-				line: i + 1,
-				fields: new Map(),
-			};
-			out.push(current);
-			continue;
+/** Yarn 1's grammar; throws where Yarn throws. Records top-level key lines. */
+const yarnGrammar = (
+	text: string,
+): {
+	readonly obj: Record<string, unknown>;
+	readonly lines: Map<string, number>;
+} => {
+	const lexer = new YarnLexer(text);
+	const lines = new Map<string, number>();
+	let token = lexer.next();
+	const next = () => {
+		token = lexer.next();
+		return token;
+	};
+	const parse = (indent: number): Record<string, unknown> => {
+		const obj: Record<string, unknown> = Object.create(null);
+		for (;;) {
+			const t = token;
+			if (t.type === "newline") {
+				const n = next();
+				if (!indent) continue;
+				if (n.type !== "indent") break;
+				if (n.value === indent) next();
+				else break;
+			} else if (t.type === "indent") {
+				if (t.value === indent) next();
+				else break;
+			} else if (t.type === "eof") break;
+			else if (t.type === "string") {
+				if (!t.value) throw new Error("Expected a key");
+				const keys = [String(t.value)];
+				next();
+				while (token.type === "comma") {
+					const k = next();
+					if (k.type !== "string") throw new Error("Expected string");
+					keys.push(String(k.value));
+					next();
+				}
+				const wasColon = token.type === "colon";
+				if (wasColon) next();
+				const v = token;
+				const plain =
+					v.type === "string" || v.type === "number" || v.type === "boolean";
+				if (!plain && !wasColon) throw new Error("Invalid value type");
+				let value: unknown;
+				if (plain) {
+					value = v.value;
+					next();
+				} else value = parse(indent + 1);
+				for (const k of keys) {
+					obj[k] = value;
+					if (!indent) lines.set(k, t.line);
+				}
+				if (!plain && indent && token.type !== "indent") break;
+			} else if (t.type === "comment") next();
+			else throw new Error("Unknown token");
 		}
-		if (!current) continue;
-		if (fieldIndent === -1) fieldIndent = indent;
-		if (indent !== fieldIndent) continue;
-		const [key, value] = yarnKeyValue(t);
-		if (value) current.fields.set(key, value);
-	}
-	return out;
+		return obj;
+	};
+	return { obj: parse(0), lines };
 };
 
-/** yarn.lock: classic v1 and Berry (v2+, recognised by `__metadata`). */
+/** Yarn 1 reads lockfiles and .yarnrc with its grammar, falling back to YAML. */
+const parseYarnClassic = (
+	text: string,
+):
+	| {
+			readonly obj: Record<string, unknown>;
+			readonly lines: Map<string, number>;
+	  }
+	| undefined => {
+	try {
+		return yarnGrammar(text);
+	} catch {
+		// Yarn 1 retries with js-yaml (FAILSAFE schema).
+	}
+	try {
+		const doc: unknown = parseYaml(text);
+		if (isRecord(doc))
+			return { obj: doc, lines: yamlKeyLines(text, undefined) };
+	} catch {
+		// Neither parses: Yarn 1 cannot read it either.
+	}
+	return undefined;
+};
+
+/** Yarn 2+ treats files with this header as classic lockfiles. */
+const YARN_V1_HEADER = /^(#.*(\r?\n))*?#\s+yarn\s+lockfile\s+v1\r?\n/i;
+
+/**
+ * yarn.lock, read the way both Yarn 1 (its grammar, then YAML) and Yarn 2+
+ * (YAML unless the file has the classic header) read it. Which Yarn installs
+ * is not known, so entries from either reading are checked: Berry's
+ * `resolution`/`checksum` and Yarn 1's `resolved`/`integrity`.
+ */
 export const parseYarnLock = (file: SourceFile): Lockfile | undefined => {
-	if (file.text.includes("__metadata")) {
-		let doc: unknown;
-		try {
-			doc = parseYaml(file.text);
-		} catch {
-			return undefined;
-		}
-		if (isRecord(doc) && isRecord(doc.__metadata))
-			return parseBerryLock(file, doc);
+	const text = file.text;
+	const docs: Array<{
+		readonly obj: Record<string, unknown>;
+		readonly lines: Map<string, number>;
+	}> = [];
+	let classic: ReturnType<typeof parseYarnClassic>;
+	try {
+		classic = yarnGrammar(text);
+		docs.push(classic);
+	} catch {
+		classic = undefined;
 	}
+	if (!YARN_V1_HEADER.test(text))
+		try {
+			const doc: unknown = parseYaml(text);
+			if (isRecord(doc))
+				docs.push({ obj: doc, lines: yamlKeyLines(text, undefined) });
+		} catch {
+			// Not YAML: Yarn 2+ cannot read it either.
+		}
+	if (!docs.length) {
+		classic = parseYarnClassic(text);
+		if (classic) docs.push(classic);
+	}
+	if (!docs.length) return undefined;
+
+	const lineOf = lineFinder(text);
 	const packages: LockedPackage[] = [];
+	const workspaces = new Map<string, Importer>();
 	const rootSpecs: Importer = new Map();
-	for (const entry of yarnEntries(file.text)) {
-		for (const spec of entry.specs) {
-			const name = nameOfSpec(spec);
-			rootSpecs.set(name, [
-				...(rootSpecs.get(name) ?? []),
-				spec.slice(name.length + 1),
-			]);
+	let berry = false;
+	for (const { obj, lines } of docs) {
+		if (isRecord(obj.__metadata)) berry = true;
+		for (const [key, value] of Object.entries(obj)) {
+			if (key === "__metadata" || !isRecord(value)) continue;
+			const line = lines.get(key) ?? lineOf(key);
+			const resolution = scalar(value.resolution);
+			if (resolution !== undefined) {
+				const name = nameOfSpec(resolution);
+				const spec = resolution.slice(name.length + 1);
+				if (spec.startsWith("workspace:")) {
+					const dir = spec.slice("workspace:".length);
+					const deps = isRecord(value.dependencies) ? value.dependencies : {};
+					workspaces.set(
+						dir === "." ? "" : dir,
+						new Map(Object.keys(deps).map((n) => [n, undefined])),
+					);
+				} else {
+					const params = spec.indexOf("::");
+					const bare = params === -1 ? spec : spec.slice(0, params);
+					const isPath = /^(file|link|portal):/.test(bare);
+					const checksum = scalar(value.checksum);
+					packages.push({
+						name,
+						version: scalar(value.version),
+						source: isPath ? bare.split("#")[0] : bare,
+						...(isPath && params !== -1
+							? { base: berryLocatorDir(spec.slice(params + 2)) }
+							: {}),
+						// Berry checksums are SHA-512 digests of the package archive.
+						integrity: checksum ? `sha512-${checksum}` : undefined,
+						line,
+					});
+				}
+			}
+			if (resolution !== undefined && value.resolved === undefined) continue;
+			// Yarn 1's reading of the entry.
+			const first = key.split(",")[0]?.trim() ?? key;
+			const name = nameOfSpec(first);
+			if (obj === classic?.obj)
+				rootSpecs.set(name, [
+					...(rootSpecs.get(name) ?? []),
+					first.slice(name.length + 1),
+				]);
+			const declared = first.slice(name.length + 1);
+			let resolved = scalar(value.resolved);
+			let integrity = scalar(value.integrity);
+			const source = classifySource(resolved);
+			const hash = resolved?.indexOf("#") ?? -1;
+			const sha1 = resolved && hash !== -1 ? resolved.slice(hash + 1) : "";
+			// Classic yarn appends the archive's SHA-1 to registry, tarball and
+			// codeload URLs; for those the fragment is a checksum, not a git ref.
+			const archive =
+				source.kind === "tarball" ||
+				(source.kind === "git" && /^https?:/i.test(resolved ?? ""));
+			if (resolved && archive && /^[0-9a-f]{40}$/i.test(sha1)) {
+				resolved = resolved.slice(0, hash);
+				integrity ??= `sha1-${sha1}`;
+			}
+			packages.push({
+				name,
+				version:
+					value.version === undefined ? undefined : String(value.version),
+				source:
+					resolved ?? (/^(file|link):/.test(declared) ? declared : undefined),
+				integrity,
+				line,
+			});
 		}
-		const first = entry.specs[0] ?? "";
-		const name = nameOfSpec(first);
-		const declared = first.slice(name.length + 1);
-		let resolved = entry.fields.get("resolved");
-		let integrity = entry.fields.get("integrity");
-		const source = classifySource(resolved);
-		const hash = resolved?.indexOf("#") ?? -1;
-		const sha1 = resolved && hash !== -1 ? resolved.slice(hash + 1) : "";
-		// Classic yarn appends the archive's SHA-1 to registry, tarball and
-		// codeload URLs; for those the fragment is a checksum, not a git ref.
-		const archive =
-			source.kind === "tarball" ||
-			(source.kind === "git" && /^https?:/i.test(resolved ?? ""));
-		if (resolved && archive && /^[0-9a-f]{40}$/i.test(sha1)) {
-			resolved = resolved.slice(0, hash);
-			integrity ??= `sha1-${sha1}`;
-		}
-		packages.push({
-			name,
-			version: entry.fields.get("version"),
-			source:
-				resolved ?? (/^(file|link):/.test(declared) ? declared : undefined),
-			integrity,
-			line: entry.line,
-		});
 	}
 	return {
 		path: file.path,
-		manager: "yarn",
+		manager: berry ? "yarn-berry" : "yarn",
 		packages,
-		importers: new Map([["", rootSpecs]]),
+		importers: berry ? workspaces : new Map([["", rootSpecs]]),
 		recordsInstallScripts: false,
 	};
 };
@@ -935,23 +1304,78 @@ const scopeOf = (key: string) => {
 	return scope.length > 1 ? scope : undefined;
 };
 
-/** `.npmrc` and classic `.yarnrc`: registries, `ignore-scripts`, `strict-ssl`. */
-const readRc = (file: SourceFile, config: FileConfig) => {
-	const npmrc = baseName(file.path) === ".npmrc";
-	file.text.split("\n").forEach((raw, i) => {
-		const t = raw.trim();
-		if (!t || t[0] === "#" || t[0] === ";") return;
-		let key: string;
-		let value: string;
-		if (npmrc) {
-			const eq = t.indexOf("=");
-			if (eq === -1) return;
-			key = t.slice(0, eq).trim();
-			value = unquote(t.slice(eq + 1).trim());
-		} else [key, value] = yarnKeyValue(t);
-		const at = { file: file.path, line: i + 1 };
-		const sep = npmrc ? "=" : " ";
-		if (key === "registry" || key.endsWith(":registry")) {
+/** A value as the `ini` package (npm's .npmrc parser) unescapes it. */
+const iniValue = (raw: string): unknown => {
+	let val = raw.trim();
+	const quoted =
+		val.length > 1 &&
+		((val[0] === '"' && val.endsWith('"')) ||
+			(val[0] === "'" && val.endsWith("'")));
+	if (quoted) {
+		if (val[0] === "'") val = val.slice(1, -1);
+		try {
+			return JSON.parse(val);
+		} catch {
+			return val;
+		}
+	}
+	let out = "";
+	let escaped = false;
+	for (const c of val) {
+		if (escaped) {
+			out += ";#".includes(c) ? c : `\\${c}`;
+			escaped = false;
+		} else if (c === ";" || c === "#") break;
+		else if (c === "\\") escaped = true;
+		else out += c;
+	}
+	if (escaped) out += "\\";
+	return out.trim();
+};
+
+const INI_LINE = /^\[([^\]]*)\]\s*$|^([^=]+)(=(.*))?$/;
+
+/**
+ * `.npmrc`, read like npm's `ini` parser: `\r` and `\n` end lines, `;` and `#`
+ * start comments (also after a value), keys after a `[section]` header are not
+ * npm config, and the last value of a key wins.
+ */
+const readNpmrc = (file: SourceFile, config: FileConfig) => {
+	const values = new Map<
+		string,
+		{ readonly value: unknown; readonly line: number; readonly raw: string }
+	>();
+	let inSection = false;
+	stripBom(file.text)
+		.split(/\r\n|\r|\n/)
+		.forEach((line, i) => {
+			if (/^\s*([;#]|$)/.test(line)) return;
+			const m = INI_LINE.exec(line);
+			if (!m) return;
+			if (m[1] !== undefined) {
+				inSection = true;
+				return;
+			}
+			if (inSection) return;
+			const key = String(iniValue(m[2] ?? ""));
+			if (key.length > 2 && key.endsWith("[]")) return;
+			const raw = m[3] ? iniValue(m[4] ?? "") : true;
+			const value =
+				raw === "true"
+					? true
+					: raw === "false"
+						? false
+						: raw === "null"
+							? null
+							: raw;
+			values.set(key, { value, line: i + 1, raw: line.trim() });
+		});
+	for (const [key, { value, line, raw }] of values) {
+		const at = { file: file.path, line };
+		if (
+			typeof value === "string" &&
+			(key === "registry" || key.endsWith(":registry"))
+		) {
 			const scope =
 				key === "registry"
 					? undefined
@@ -960,22 +1384,45 @@ const readRc = (file: SourceFile, config: FileConfig) => {
 				...at,
 				url: value,
 				...(scope ? { scope } : {}),
-				evidence: `${key}${sep}${displayUrl(value)}`,
+				evidence: `${key}=${displayUrl(value)}`,
 			});
-		}
-		// npm and pnpm only honour ignore-scripts from .npmrc.
-		else if (npmrc && key === "ignore-scripts" && value === "true")
-			config.ignoreScripts = { ...at, evidence: t };
-		else if (key === "strict-ssl" && value === "false")
-			config.strictSslOff = { ...at, evidence: t };
-	});
+		} else if (key === "ignore-scripts" && value === true)
+			config.ignoreScripts = { ...at, evidence: raw };
+		else if (key === "strict-ssl" && value === false)
+			config.strictSslOff = { ...at, evidence: raw };
+	}
 };
 
-/** `.yarnrc.yml`: `npmRegistryServer`, `npmScopes.*`, `enableStrictSsl`. */
+/** Classic `.yarnrc`, read with Yarn 1's lockfile grammar like Yarn does. */
+const readYarnrc = (file: SourceFile, config: FileConfig) => {
+	const parsed = parseYarnClassic(stripBom(file.text));
+	if (!parsed) return;
+	for (const [key, value] of Object.entries(parsed.obj)) {
+		const at = { file: file.path, line: parsed.lines.get(key) };
+		if (
+			typeof value === "string" &&
+			(key === "registry" || key.endsWith(":registry"))
+		) {
+			const scope =
+				key === "registry"
+					? undefined
+					: scopeOf(key.slice(0, -":registry".length));
+			config.registries.push({
+				...at,
+				url: value,
+				...(scope ? { scope } : {}),
+				evidence: `${key} ${displayUrl(value)}`,
+			});
+		} else if (key === "strict-ssl" && String(value) === "false")
+			config.strictSslOff = { ...at, evidence: "strict-ssl false" };
+	}
+};
+
+/** `.yarnrc.yml` (YAML as Yarn reads it): registries and `enableStrictSsl`. */
 const readYarnrcYml = (file: SourceFile, config: FileConfig) => {
 	let doc: unknown;
 	try {
-		doc = parseYaml(file.text);
+		doc = parseYaml(stripBom(file.text));
 	} catch {
 		return;
 	}
@@ -995,7 +1442,7 @@ const readYarnrcYml = (file: SourceFile, config: FileConfig) => {
 	if (isRecord(doc.npmScopes))
 		for (const [scope, value] of Object.entries(doc.npmScopes))
 			if (isRecord(value)) registry(value.npmRegistryServer, scopeOf(scope));
-	if (doc.enableStrictSsl === false)
+	if (String(doc.enableStrictSsl) === "false")
 		config.strictSslOff = {
 			file: file.path,
 			line: lineOf("enableStrictSsl"),
@@ -1003,34 +1450,31 @@ const readYarnrcYml = (file: SourceFile, config: FileConfig) => {
 		};
 };
 
-/** bunfig.toml: `[install] registry` and `[install.scopes]` URLs. */
+/** bunfig.toml, parsed with Bun's TOML parser: `install.registry` and `install.scopes`. */
 const readBunfig = (file: SourceFile, config: FileConfig) => {
-	let section = "";
-	file.text.split("\n").forEach((raw, i) => {
-		const t = raw.trim();
-		if (t.startsWith("[")) {
-			section = t.replace(/\s+/g, "");
-			return;
-		}
-		const eq = t.indexOf("=");
-		if (eq === -1) return;
-		const key = unquote(t.slice(0, eq).trim());
-		const scoped = section === "[install.scopes]";
-		if (!scoped && !(section === "[install]" && key === "registry")) return;
-		const start = t.indexOf('"', eq);
-		const end = start === -1 ? -1 : t.indexOf('"', start + 1);
-		if (end === -1) return;
-		const url = t.slice(start + 1, end);
-		if (!/^(https?:)?\/\//i.test(url)) return;
-		const scope = scoped ? scopeOf(key) : undefined;
+	let doc: unknown;
+	try {
+		doc = Bun.TOML.parse(stripBom(file.text));
+	} catch {
+		return;
+	}
+	const install = isRecord(doc) && isRecord(doc.install) ? doc.install : {};
+	const lineOf = lineFinder(file.text);
+	const registry = (value: unknown, scope?: string) => {
+		const url = isRecord(value) ? str(value.url) : str(value);
+		if (!url || !/^(https?:)?\/\//i.test(url)) return;
 		config.registries.push({
 			file: file.path,
-			line: i + 1,
+			line: lineOf(url),
 			url,
 			...(scope ? { scope } : {}),
 			evidence: `${scope ?? "registry"} = ${displayUrl(url)}`,
 		});
-	});
+	};
+	registry(install.registry);
+	if (isRecord(install.scopes))
+		for (const [scope, value] of Object.entries(install.scopes))
+			registry(value, scopeOf(scope));
 };
 
 /** pnpm build settings, from pnpm-workspace.yaml or package.json `pnpm`. */
@@ -1063,7 +1507,7 @@ const readPnpmBuildSettings = (
 const readPnpmWorkspace = (file: SourceFile, config: FileConfig) => {
 	let doc: unknown;
 	try {
-		doc = parseYaml(file.text);
+		doc = parseYaml(stripBom(file.text));
 	} catch {
 		return;
 	}
@@ -1082,8 +1526,8 @@ const readPackageJson = (file: SourceFile, config: FileConfig) => {
 const CONFIG_READERS: Readonly<
 	Record<string, (file: SourceFile, config: FileConfig) => void>
 > = {
-	".npmrc": readRc,
-	".yarnrc": readRc,
+	".npmrc": readNpmrc,
+	".yarnrc": readYarnrc,
 	".yarnrc.yml": readYarnrcYml,
 	"bunfig.toml": readBunfig,
 	"pnpm-workspace.yaml": readPnpmWorkspace,
@@ -1348,6 +1792,7 @@ const sourceFinding = (
 			if (source.insecure)
 				return insecureFinding(file, p.line, p.name, evidence(shown));
 			if (DEFAULT_REGISTRY_HOSTS.has(source.host)) return undefined;
+			if (p.runtime && RUNTIME_HOSTS.has(source.host)) return undefined;
 			// A scoped registry only serves its own scope.
 			const scope = scopeOfPackage(p.name);
 			const registry = configs
@@ -1710,7 +2155,9 @@ const uncheckedFinding = (
 	...base,
 	ruleId: rule(ruleName),
 	title: `${baseName(file)} was not checked`,
-	severity: "low",
+	// A lockfile the package manager may read but openaudit cannot is a
+	// place to hide entries; an oversized one is more likely just large.
+	severity: ruleName === "unparseable-lockfile" ? "medium" : "low",
 	message: `${message} Its entries were not checked, but the package manager may still install from it.`,
 	location: { file },
 	evidence: file,
@@ -1851,19 +2298,57 @@ const tlsFinding = (s: Setting, who: string): FindingInput => ({
 /*                               Python, Composer                             */
 /* -------------------------------------------------------------------------- */
 
-const PIP_VALUE_OPTIONS = new Set([
-	"-i",
+/** Long options pip accepts in requirements files (optparse also takes unique prefixes). */
+const PIP_LONG_OPTIONS = [
 	"--index-url",
 	"--extra-index-url",
-	"-f",
+	"--no-index",
 	"--find-links",
 	"--trusted-host",
-]);
+	"--requirement",
+	"--constraint",
+	"--editable",
+	"--no-binary",
+	"--only-binary",
+	"--prefer-binary",
+	"--require-hashes",
+	"--pre",
+	"--use-feature",
+	"--global-option",
+	"--config-settings",
+	"--hash",
+];
 
-/** Short options pip also accepts with the value attached (`-ihttps://…`). */
-const PIP_SHORT: Readonly<Record<string, string>> = {
+const PIP_SHORT_OPTIONS: Readonly<Record<string, string>> = {
 	"-i": "--index-url",
 	"-f": "--find-links",
+	"-r": "--requirement",
+	"-c": "--constraint",
+	"-e": "--editable",
+};
+
+/** Options whose value is a source or file. */
+const PIP_VALUE_OPTIONS = new Set([
+	"--index-url",
+	"--extra-index-url",
+	"--find-links",
+	"--trusted-host",
+	"--requirement",
+	"--constraint",
+	"--editable",
+	"--no-binary",
+	"--only-binary",
+	"--use-feature",
+	"--global-option",
+	"--config-settings",
+	"--hash",
+]);
+
+/** optparse's long-option matching: exact, else a unique prefix. */
+const pipLongOption = (name: string): string | undefined => {
+	if (PIP_LONG_OPTIONS.includes(name)) return name;
+	const matches = PIP_LONG_OPTIONS.filter((o) => o.startsWith(name));
+	return matches.length === 1 ? matches[0] : undefined;
 };
 
 const isInsecureUrl = (s: string) => {
@@ -1871,7 +2356,8 @@ const isInsecureUrl = (s: string) => {
 	return (
 		l.startsWith("http://") ||
 		l.startsWith("git://") ||
-		l.startsWith("git+http://")
+		l.startsWith("svn://") ||
+		/^[a-z]+\+http:\/\//.test(l)
 	);
 };
 
@@ -1880,8 +2366,7 @@ const logicalLines = (text: string): Array<readonly [string, number]> => {
 	const out: Array<readonly [string, number]> = [];
 	let buffer = "";
 	let start = 0;
-	text.split("\n").forEach((raw, i) => {
-		const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+	text.split(/\r\n|\r|\n/).forEach((line, i) => {
 		if (!buffer) start = i + 1;
 		if (line.endsWith("\\")) {
 			buffer += `${line.slice(0, -1)} `;
@@ -1894,10 +2379,119 @@ const logicalLines = (text: string): Array<readonly [string, number]> => {
 	return out;
 };
 
-/** pip requirements files: index options and plain-HTTP sources. */
-export const requirementsFindings = (file: SourceFile): FindingInput[] => {
+/** A repository path for `rel` relative to `dir`, or undefined if it leaves the repository. */
+const resolveInRepo = (dir: string, rel: string): string | undefined => {
+	const p = rel.replace(/\\/g, "/");
+	if (p.startsWith("/") || p.startsWith("~") || /^[a-z]:/i.test(p))
+		return undefined;
+	const out = dir ? dir.split("/") : [];
+	for (const seg of p.split("/")) {
+		if (!seg || seg === ".") continue;
+		if (seg === "..") {
+			if (!out.length) return undefined;
+			out.pop();
+		} else out.push(seg);
+	}
+	return out.join("/");
+};
+
+const pipSourceFinding = (
+	file: string,
+	line: number,
+	what: string,
+	url: string,
+	why: string,
+): FindingInput => {
+	const shown = displayUrl(url);
+	const host = hostOf(url) ?? "an unknown host";
+	return {
+		...base,
+		ruleId: rule("unexpected-host"),
+		title: truncate(`${what} is downloaded from ${host}`, 120),
+		severity: "medium",
+		message: truncate(
+			`${file} makes pip download ${what} from ${shown}, ${why}. It bypasses the package index, so the index's provenance and any --require-hashes pinning of index packages do not cover it.`,
+			600,
+		),
+		location: { file, line },
+		evidence: truncate(`${what}: ${shown}`),
+		remediation:
+			"Publish the package to PyPI or your private index and require it by version, or pin the download with --hash.",
+		references: [PIP_INSTALL, cweUrl(829), owaspUrl("a08")],
+		tags: ["cwe-829", "owasp-a08"],
+	};
+};
+
+/** A VCS, URL or path requirement (`name @ url`, a bare URL, `-e url`). */
+const pipDirectReference = (
+	file: SourceFile,
+	line: number,
+	name: string,
+	url: string,
+): FindingInput | undefined => {
+	const lower = url.toLowerCase();
+	const what = name || "a direct reference";
+	const evidence = `${what}: ${displayUrl(url)}`;
+	if (isInsecureUrl(url))
+		return insecureFinding(file.path, line, what, evidence);
+	const vcs = /^(git|hg|svn|bzr)\+/.exec(lower);
+	if (vcs) {
+		const bare = url.slice(vcs[0].length);
+		const host = hostOf(bare) ?? "";
+		let path = bare;
+		try {
+			path = new URL(bare).pathname;
+		} catch {
+			// scp-like spec: keep it whole.
+		}
+		const hash = path.indexOf("#");
+		const at = path.lastIndexOf("@");
+		const ref =
+			at === -1
+				? undefined
+				: path.slice(at + 1, hash === -1 ? undefined : hash);
+		return gitFinding(
+			file.path,
+			line,
+			what,
+			evidence,
+			ref !== undefined && /^[0-9a-f]{40}$/i.test(ref),
+			ref ? `${displayUrl(url)} at "${truncate(ref, 60)}"` : displayUrl(url),
+			host,
+		);
+	}
+	if (lower.startsWith("https://")) {
+		const host = hostOf(url);
+		return host && PYPI_HOSTS.has(host)
+			? undefined
+			: pipSourceFinding(
+					file.path,
+					line,
+					what,
+					url,
+					"not the Python Package Index",
+				);
+	}
+	if (lower.startsWith("file:")) {
+		const path = url.replace(/^file:(\/\/)?/i, "");
+		return escapesRoot(dirOf(file.path), path)
+			? pathFinding(file.path, line, what, evidence)
+			: undefined;
+	}
+	return undefined;
+};
+
+/**
+ * pip requirements and constraints files: index and link options, included
+ * files, and direct references. `includes` lists local `-r`/`-c` files for
+ * the caller to read and check too.
+ */
+export const requirementsFindings = (
+	file: SourceFile,
+): { readonly findings: FindingInput[]; readonly includes: string[] } => {
 	const out: FindingInput[] = [];
-	for (const [raw, line] of logicalLines(file.text)) {
+	const includes: string[] = [];
+	for (const [raw, line] of logicalLines(stripBom(file.text))) {
 		const hash = raw.search(/(^|\s)#/);
 		const tokens = (hash === -1 ? raw : raw.slice(0, hash))
 			.trim()
@@ -1905,69 +2499,138 @@ export const requirementsFindings = (file: SourceFile): FindingInput[] => {
 			.filter(Boolean);
 		for (let t = 0; t < tokens.length; t++) {
 			const token = tokens[t] ?? "";
-			const eq = token.indexOf("=");
-			const short = PIP_SHORT[token.slice(0, 2)];
-			let option = token;
+			let option: string | undefined;
 			let value: string | undefined;
-			if (token.startsWith("--") && eq !== -1) {
-				option = token.slice(0, eq);
-				value = token.slice(eq + 1);
-			} else if (PIP_VALUE_OPTIONS.has(token)) {
-				value = tokens[t + 1];
-				t++;
-			} else if (short && token.length > 2) {
-				option = short;
-				value = token.slice(2);
+			if (token.startsWith("--")) {
+				const eq = token.indexOf("=");
+				option = pipLongOption(eq === -1 ? token : token.slice(0, eq));
+				if (eq !== -1) value = token.slice(eq + 1);
+				else if (option && PIP_VALUE_OPTIONS.has(option)) value = tokens[++t];
+			} else if (
+				token.startsWith("-") &&
+				PIP_SHORT_OPTIONS[token.slice(0, 2)]
+			) {
+				option = PIP_SHORT_OPTIONS[token.slice(0, 2)];
+				value = token.length > 2 ? token.slice(2) : tokens[++t];
 			}
-			if (value === undefined) {
-				if (isInsecureUrl(token))
-					out.push(
-						insecureFinding(
-							file.path,
-							line,
-							"A requirement",
-							displayUrl(token),
-						),
-					);
+			if (option === undefined) {
+				// A requirement: `name @ url`, `name@url`, `@ url` or a bare URL.
+				if (token === "@" || !token.includes("://")) continue;
+				const scheme = token.indexOf("://");
+				const at = token.lastIndexOf("@", scheme);
+				const url = at === -1 ? token : token.slice(at + 1);
+				const name =
+					at > 0
+						? token.slice(0, at)
+						: at === 0 || tokens[t - 1] === "@"
+							? (tokens[t - (at === 0 ? 1 : 2)] ?? "")
+							: "";
+				const f = pipDirectReference(file, line, name, url);
+				if (f) out.push(f);
 				continue;
 			}
+			if (value === undefined) continue;
 			const evidence = `${option} ${displayUrl(value)}`;
-			if (option === "--trusted-host")
-				out.push(
-					tlsFinding(
-						{ file: file.path, line, evidence },
-						`pip (host ${truncate(value, 60)})`,
-					),
-				);
-			else if (isInsecureUrl(value))
-				out.push(
-					insecureFinding(
-						file.path,
-						line,
-						`The package index ${displayUrl(value)}`,
-						evidence,
-					),
-				);
-			if (option === "--extra-index-url")
-				out.push({
-					...base,
-					ruleId: rule("extra-index-url"),
-					title: "pip searches an extra package index",
-					severity: "medium",
-					message: truncate(
-						`${file.path} adds ${displayUrl(value)} with --extra-index-url. pip treats every index as equal and installs the highest version it finds on any of them, so a public package with the same name as an internal one (dependency confusion) can win.`,
-						500,
-					),
-					location: { file: file.path, line },
-					evidence,
-					remediation:
-						"Use a single --index-url that proxies PyPI and your private packages (devpi, Artifactory, Nexus, CodeArtifact), or pin every package with --require-hashes.",
-					references: [PIP_INSTALL, PIP_CONFUSION, cweUrl(427)],
-					tags: ["cwe-427", "owasp-a08"],
-				});
+			const isUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
+			switch (option) {
+				case "--trusted-host":
+					out.push(
+						tlsFinding(
+							{ file: file.path, line, evidence },
+							`pip (host ${truncate(value, 60)})`,
+						),
+					);
+					break;
+				case "--index-url":
+				case "--extra-index-url":
+				case "--find-links": {
+					if (isInsecureUrl(value))
+						out.push(
+							insecureFinding(
+								file.path,
+								line,
+								`The package source ${displayUrl(value)}`,
+								evidence,
+							),
+						);
+					const host = hostOf(value);
+					if (option === "--index-url") {
+						if (host && !PYPI_HOSTS.has(host) && !isInsecureUrl(value))
+							out.push({
+								...base,
+								ruleId: rule("custom-registry"),
+								title: truncate(
+									`${baseName(file.path)} installs packages from ${host}`,
+									120,
+								),
+								severity: "info",
+								message: truncate(
+									`${file.path} sets ${displayUrl(value)} as pip's package index. Whoever runs that index decides what gets installed, and the setting lives in the repository, so a change to it deserves the same review as a change to the code.`,
+									600,
+								),
+								location: { file: file.path, line },
+								evidence,
+								remediation:
+									"Confirm the host is your organisation's index. Keep index settings in pip.conf or CI where possible, and review changes to them.",
+								references: [PIP_INSTALL],
+								tags: ["registry"],
+							});
+					} else if (option === "--extra-index-url" || isUrl)
+						out.push({
+							...base,
+							ruleId: rule("extra-index-url"),
+							title:
+								option === "--find-links"
+									? "pip searches extra package links"
+									: "pip searches an extra package index",
+							severity: "medium",
+							message: truncate(
+								`${file.path} adds ${displayUrl(value)} with ${option}. pip treats every index and link page as equal and installs the highest version it finds on any of them, so a public package with the same name as an internal one (dependency confusion) can win.`,
+								500,
+							),
+							location: { file: file.path, line },
+							evidence,
+							remediation:
+								"Use a single --index-url that proxies PyPI and your private packages (devpi, Artifactory, Nexus, CodeArtifact), or pin every package with --require-hashes.",
+							references: [PIP_INSTALL, PIP_CONFUSION, cweUrl(427)],
+							tags: ["cwe-427", "owasp-a08"],
+						});
+					break;
+				}
+				case "--requirement":
+				case "--constraint":
+					if (isInsecureUrl(value))
+						out.push(
+							insecureFinding(
+								file.path,
+								line,
+								`The ${option.slice(2)} file ${displayUrl(value)}`,
+								evidence,
+							),
+						);
+					else if (isUrl)
+						out.push(
+							pipSourceFinding(
+								file.path,
+								line,
+								`the ${option.slice(2)} file`,
+								value,
+								"a remote file whose contents can change between installs",
+							),
+						);
+					else includes.push(value);
+					break;
+				case "--editable": {
+					const f = isUrl
+						? pipDirectReference(file, line, "", value)
+						: undefined;
+					if (f) out.push(f);
+					break;
+				}
+			}
 		}
 	}
-	return capPerRule(out);
+	return { findings: capPerRule(out), includes };
 };
 
 /** Pipfile `[[source]]` blocks. */
@@ -2132,15 +2795,38 @@ const OTHER_READERS: Readonly<
 	"composer.lock": composerLockFindings,
 };
 
+/** Lockfiles in binary formats that package managers install from but cannot be read here. */
+const BINARY_LOCKFILES = new Set(["bun.lockb"]);
+
+/** Requirements files read in total, including those reached through `-r`/`-c`. */
+const MAX_REQUIREMENTS_FILES = 200;
+
 const isRelevant = (path: string) => {
 	if (isFixturePath(path)) return false;
 	const name = baseName(path);
 	return (
 		name in LOCKFILE_PARSERS ||
+		BINARY_LOCKFILES.has(name) ||
 		name in CONFIG_READERS ||
 		name in OTHER_READERS ||
 		isRequirements(path)
 	);
+};
+
+/**
+ * Parses a lockfile as a whole and, when it has merge conflicts, each side of
+ * them (package managers merge both sides), then combines what parsed.
+ */
+export const parseLockfile = (file: SourceFile): Lockfile | undefined => {
+	const parse = LOCKFILE_PARSERS[baseName(file.path)];
+	if (!parse) return undefined;
+	const text = stripBom(file.text);
+	const whole = parse({ path: file.path, text });
+	const sides = conflictSides(text).flatMap((side) => {
+		const lock = parse({ path: file.path, text: side.text });
+		return lock ? [shiftLines(lock, (l) => side.lines[l - 1] ?? l)] : [];
+	});
+	return mergeLockfiles([...(whole ? [whole] : []), ...sides]);
 };
 
 /** Reads a file up to `MAX_LOCKFILE_BYTES` (Workspace.readText stops at 2 MB). */
@@ -2172,11 +2858,21 @@ export const lockfiles = defineAuditor({
 		Effect.gen(function* () {
 			const ws = yield* requireWorkspace(ctx);
 			const paths = (yield* ws.files).filter(isRelevant).sort();
-			const read = yield* Effect.forEach(paths, (p) => readLarge(ws, p), {
-				concurrency: 16,
-			});
+			const findings: FindingInput[] = paths
+				.filter((p) => BINARY_LOCKFILES.has(baseName(p)))
+				.map((p) =>
+					uncheckedFinding(
+						"unparseable-lockfile",
+						p,
+						`${p} is a binary lockfile, which openaudit cannot read. Run \`bun install --save-text-lockfile\` to migrate to bun.lock.`,
+					),
+				);
+			const read = yield* Effect.forEach(
+				paths.filter((p) => !BINARY_LOCKFILES.has(baseName(p))),
+				(p) => readLarge(ws, p),
+				{ concurrency: 16 },
+			);
 			const files: SourceFile[] = [];
-			const findings: FindingInput[] = [];
 			for (const f of read) {
 				if (!f) continue;
 				if ("text" in f) files.push(f);
@@ -2215,11 +2911,26 @@ export const lockfiles = defineAuditor({
 				if (name === "package.json") manifests.set(f.path, f);
 				const other = OTHER_READERS[name];
 				if (other) findings.push(...other(f));
-				if (isRequirements(f.path)) findings.push(...requirementsFindings(f));
+			}
+
+			// pip follows -r/-c includes, whatever their names, so do we.
+			const queue = files.filter((f) => isRequirements(f.path));
+			const seen = new Set(queue.map((f) => f.path));
+			for (let f = queue.shift(); f; f = queue.shift()) {
+				const result = requirementsFindings(f);
+				findings.push(...result.findings);
+				for (const include of result.includes) {
+					const path = resolveInRepo(dirOf(f.path), include);
+					if (!path || seen.has(path) || seen.size >= MAX_REQUIREMENTS_FILES)
+						continue;
+					seen.add(path);
+					const included = yield* readLarge(ws, path);
+					if (included && "text" in included) queue.push(included);
+				}
 			}
 
 			for (const f of lockfileList) {
-				const lock = LOCKFILE_PARSERS[baseName(f.path)]?.(f);
+				const lock = parseLockfile(f);
 				if (!lock) {
 					findings.push(
 						uncheckedFinding(
