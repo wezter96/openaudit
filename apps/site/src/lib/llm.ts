@@ -24,6 +24,7 @@ import {
 	SCORING_INTRO,
 	severities,
 } from "./docs";
+import { guidePath, guides } from "./guides";
 import { readmeIntro } from "./home";
 import {
 	introListIn,
@@ -109,6 +110,14 @@ const join = (...parts: ReadonlyArray<string | false | undefined>) =>
 		.join("\n\n")}\n`;
 
 /* ------------------------------------------------------------------ pages */
+
+const guidePages = (): MarkdownPage[] =>
+	guides.map((g) => ({
+		path: guidePath(g.slug),
+		title: g.title,
+		description: g.description,
+		body: join(`# ${g.heading}`, g.body),
+	}));
 
 export interface MarkdownPage {
 	/** Site path of the HTML page, e.g. "/docs/cli/". */
@@ -443,6 +452,7 @@ export const markdownPages = (): MarkdownPage[] => [
 	cataloguePage(),
 	...auditors.map(auditorPage),
 	architecturePage(),
+	...guidePages(),
 ];
 
 /* ------------------------------------------------------------- llms.txt */
@@ -459,6 +469,13 @@ export const llmsTxt = (): string =>
 		DOCS.map(
 			(d) => `- [${d.title}](${mdUrl(docPath(d.slug))}): ${d.description}`,
 		).join("\n"),
+		guides.length > 0 && "## Guides",
+		guides
+			.map(
+				(g) =>
+					`- [${g.heading}](${mdUrl(guidePath(g.slug))}): ${g.description}`,
+			)
+			.join("\n"),
 		"## Auditors",
 		[
 			`- [Auditor catalogue](${mdUrl("/auditors/")}): ${CATALOGUE_DESCRIPTION}`,

@@ -3,6 +3,7 @@ import "../styles/global.css";
 import Icon from "../components/Icon.astro";
 import Logo from "../components/Logo.astro";
 import { clamp } from "../lib/dial";
+import { guidePath, guides } from "../lib/guides";
 import { AUTHOR, BLOB, markdownPath, NAV, OPENSVERIGE, ogName, pageUrl, REPO, self, u, unbase } from "../lib/site";
 
 interface Props {
@@ -139,6 +140,20 @@ const grade = self.grade ?? "";
 							<li><a href={u("/docs/safety/")}>Safety</a></li>
 						</ul>
 					</div>
+					{
+						guides.length > 0 && (
+							<div>
+								<h2>Guides</h2>
+								<ul>
+									{guides.map((g) => (
+										<li>
+											<a href={u(guidePath(g.slug))}>{g.heading}</a>
+										</li>
+									))}
+								</ul>
+							</div>
+						)
+					}
 					<div>
 						<h2>Project</h2>
 						<ul>

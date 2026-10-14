@@ -1,0 +1,121 @@
+---
+/** One guide from src/guides/*.md (see src/lib/guides.ts). */
+import type { GetStaticPaths } from "astro";
+import Command from "../../components/Command.astro";
+import Icon from "../../components/Icon.astro";
+import Base from "../../layouts/Base.astro";
+import { type Guide, guidePath, guides } from "../../lib/guides";
+import { render } from "../../lib/markdown";
+import { pageUrl, REPO, u } from "../../lib/site";
+
+export const getStaticPaths = (() => guides.map((guide) => ({ params: { slug: guide.slug }, props: { guide } }))) satisfies GetStaticPaths;
+
+const { guide } = Astro.props as { guide: Guide };
+const html = render(guide.body, guide.file);
+const others = guides.filter((g) => g.slug !== guide.slug);
+const jsonLd = JSON.stringify({
+	"@context": "https://schema.org",
+	"@type": "TechArticle",
+	headline: guide.heading,
+	description: guide.description,
+	url: pageUrl(guidePath(guide.slug)),
+	author: { "@type": "Organization", name: "openaudit", url: REPO },
+	publisher: { "@type": "Organization", name: "openaudit", url: pageUrl("/") },
+}).replace(/</g, "\\u003c");
+---
+
+<Base title={guide.title} description={guide.description} ogTitle={guide.heading} bareTitle>
+	<script type="application/ld+json" slot="head" is:inline set:html={jsonLd} />
+	<article class="frame guide">
+		<header class="guide-head">
+			<p class="kicker">Guide</p>
+			<h1>{guide.heading}</h1>
+		</header>
+		<div class="prose">
+			<Fragment set:html={html} />
+		</div>
+		<aside class="try" aria-labelledby="try-title">
+			<h2 id="try-title">Try it on your project</h2>
+			<Command command="bunx @openaudit/cli . -f html -o report" />
+			<p class="links">
+				<a class="btn primary" href={u("/docs/")}>Read the docs</a>
+				<a class="btn" href={u("/report/")}><Icon name="report" />See a live report</a>
+			</p>
+		</aside>
+		{
+			others.length > 0 && (
+				<nav class="more" aria-label="More guides">
+					<h2>More guides</h2>
+					<ul>
+						{others.map((g) => (
+							<li>
+								<a href={u(guidePath(g.slug))}>{g.heading}</a>
+							</li>
+						))}
+					</ul>
+				</nav>
+			)
+		}
+	</article>
+</Base>
+
+<style>
+	.guide {
+		max-width: 48rem;
+		padding-block: clamp(2rem, 1rem + 4vw, 4rem) 2rem;
+	}
+
+	.kicker {
+		font-size: 0.8125rem;
+		font-weight: 650;
+		color: var(--accent);
+		margin-bottom: 0.5rem;
+	}
+
+	.guide-head h1 {
+		font-family: var(--display);
+		font-size: clamp(2rem, 1.4rem + 2.6vw, 3.25rem);
+		font-weight: 780;
+		letter-spacing: -0.04em;
+		line-height: 1.02;
+		text-wrap: balance;
+		margin-bottom: 1.75rem;
+	}
+
+	.try {
+		margin-top: 3rem;
+		padding: 1.5rem;
+		border: 1px solid var(--hair);
+		border-radius: 10px;
+		background: var(--paper-2);
+		display: grid;
+		gap: 1rem;
+	}
+
+	.try h2,
+	.more h2 {
+		font-size: 1.125rem;
+		font-weight: 680;
+		letter-spacing: -0.01em;
+	}
+
+	.links {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.6rem;
+	}
+
+	.more {
+		margin-top: 2.5rem;
+	}
+
+	.more ul {
+		display: grid;
+		gap: 0.5rem;
+		margin-top: 0.75rem;
+	}
+
+	.more a {
+		font-weight: 600;
+	}
+</style>

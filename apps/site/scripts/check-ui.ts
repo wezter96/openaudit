@@ -37,6 +37,7 @@ const PAGES = [
 	"/auditors/code.lockfiles/",
 	"/report/",
 	"/architecture/",
+	"/guides/mcp-security/",
 ];
 const WIDTHS = [
 	{ width: 375, height: 667 },

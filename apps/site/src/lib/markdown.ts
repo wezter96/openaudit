@@ -11,7 +11,7 @@ import { Marked, type Token, type Tokens } from "marked";
 import { BLOB, REPO, u } from "./site";
 
 /** The repository root: the nearest directory up from cwd with action.yml. */
-const ROOT = (() => {
+export const ROOT = (() => {
 	let dir = process.cwd();
 	while (!existsSync(join(dir, "action.yml"))) {
 		const up = dirname(dir);
@@ -68,6 +68,8 @@ const EXTERNAL: Record<string, string> = {
 export const resolveLink = (href: string, from: string): string => {
 	if (EXTERNAL[href]) return u(EXTERNAL[href]);
 	if (/^[a-z]+:/i.test(href)) return href;
+	// A site path, as the guides write them.
+	if (href.startsWith("/")) return u(href);
 	const [path = "", hash = ""] = href.split("#");
 	const file = path
 		? posix.normalize(posix.join(posix.dirname(from), path))
