@@ -224,15 +224,10 @@ packages:
 });
 
 describe("parser evasion", () => {
-	test("classic yarn.lock quoting, escaping, tabs and CRLF", async () => {
+	test("classic yarn.lock quoting, escaping and CRLF", async () => {
 		const findings = await audit({
 			"yarn.lock": [
 				"# yarn lockfile v1",
-				"",
-				"tabbed@^1.0.0:",
-				'\tversion "1.0.0"',
-				'\tresolved "http://evil.example/tabbed-1.0.0.tgz"',
-				`\tintegrity ${SHA512}`,
 				"",
 				'"escaped@^1.0.0":',
 				'  version "1.0.0"',
@@ -245,11 +240,19 @@ describe("parser evasion", () => {
 				`  integrity ${SHA512}`,
 				"",
 			].join("\r\n"),
+			// Yarn rejects tab indentation (and so does YAML): nothing installs.
+			"tabs/yarn.lock": [
+				"# yarn lockfile v1",
+				"",
+				"tabbed@^1.0.0:",
+				'\tresolved "http://evil.example/tabbed-1.0.0.tgz"',
+				"",
+			].join("\n"),
 		});
 		expect(rules(findings)).toEqual([
 			"insecure-protocol high escaped@1.0.0",
-			"insecure-protocol high tabbed@1.0.0",
 			"unexpected-host medium colon@1.0.0",
+			"unparseable-lockfile medium tabs/yarn.lock",
 		]);
 	});
 
@@ -293,7 +296,7 @@ describe("parser evasion", () => {
 			"pnpm-lock.yaml": "lockfileVersion: '9.0'\npackages:\n  a: [\n",
 		});
 		expect(rules(findings)).toEqual([
-			"unparseable-lockfile low pnpm-lock.yaml",
+			"unparseable-lockfile medium pnpm-lock.yaml",
 		]);
 	});
 
@@ -342,5 +345,345 @@ describe("large lockfiles", () => {
 		const summary = insecure.find((f) => f.title.startsWith("20 more"));
 		expect(summary?.severity).toBe("high");
 		expect(summary?.message).toContain(`p${MAX_FINDINGS_PER_RULE}@`);
+	});
+});
+
+/*
+ * Parser differentials: each target below is read by the package manager in
+ * a way an earlier version of code.lockfiles did not reproduce, so a hostile
+ * entry was installed but not seen (or seen as benign).
+ */
+describe("parity with the package managers' parsers", () => {
+	const insecure = (findings: ReadonlyArray<Finding>) =>
+		rules(findings).filter((r) => r.startsWith("insecure-protocol"));
+
+	test("npm strips a byte-order mark", async () => {
+		const findings = await audit({
+			"package-lock.json": `﻿${npmLock({
+				"node_modules/a": tarball("http://evil.example/a-1.0.0.tgz"),
+			})}`,
+		});
+		expect(rules(findings)).toEqual(["insecure-protocol high a@1.0.0"]);
+	});
+
+	test("npm, pnpm and yarn resolve merge conflicts, so both sides are checked", async () => {
+		const findings = await audit({
+			"package-lock.json": `{
+  "name": "app",
+  "lockfileVersion": 3,
+  "packages": {
+    "": { "name": "app" },
+<<<<<<< HEAD
+    "node_modules/a": { "version": "1.0.0", "resolved": "https://registry.npmjs.org/a/-/a-1.0.0.tgz", "integrity": "${SHA512}" }
+=======
+    "node_modules/a": { "version": "1.0.0", "resolved": "http://evil.example/a-1.0.0.tgz", "integrity": "${SHA512}" }
+>>>>>>> evil
+  }
+}
+`,
+			"pnpm/pnpm-lock.yaml": `lockfileVersion: '9.0'
+
+packages:
+
+<<<<<<< HEAD
+  b@1.0.0:
+    resolution: {integrity: ${SHA512}}
+=======
+  b@1.0.0:
+    resolution: {tarball: http://evil.example/b-1.0.0.tgz}
+>>>>>>> evil
+
+snapshots:
+
+  b@1.0.0: {}
+`,
+			"yarn/yarn.lock": `# yarn lockfile v1
+
+<<<<<<< HEAD
+c@^1.0.0:
+  version "1.0.0"
+  resolved "https://registry.yarnpkg.com/c/-/c-1.0.0.tgz"
+  integrity ${SHA512}
+=======
+c@^1.0.0:
+  version "1.0.0"
+  resolved "http://evil.example/c-1.0.0.tgz"
+  integrity ${SHA512}
+>>>>>>> evil
+`,
+		});
+		expect(insecure(findings)).toEqual([
+			"insecure-protocol high a@1.0.0",
+			"insecure-protocol high b@1.0.0",
+			"insecure-protocol high c@1.0.0",
+		]);
+	});
+
+	test("pnpm applies YAML merge keys and many aliases", async () => {
+		const aliases = Array.from({ length: 150 }, (_, i) => `  - *n${i % 2}`);
+		const findings = await audit({
+			"pnpm-lock.yaml": `lockfileVersion: '6.0'
+
+x-evil: &evil
+  resolution: {tarball: 'http://evil.example/a-1.0.0.tgz'}
+x-n0: &n0 0
+x-n1: &n1 1
+x-list:
+${aliases.join("\n")}
+
+packages:
+
+  /a@1.0.0:
+    <<: *evil
+    dev: false
+`,
+		});
+		expect(rules(findings)).toEqual([
+			"insecure-protocol high a@1.0.0",
+			"missing-integrity low a@1.0.0",
+		]);
+	});
+
+	test("pnpm takes v9 package fields from snapshots too", async () => {
+		const findings = await audit({
+			"pnpm-lock.yaml": `lockfileVersion: '9.0'
+
+packages:
+
+  ms@2.1.3:
+    resolution: {integrity: ${SHA512}}
+
+snapshots:
+
+  ms@2.1.3: {}
+
+  evil@1.0.0:
+    resolution: {tarball: http://evil.example/evil-1.0.0.tgz}
+`,
+		});
+		expect(rules(findings)).toEqual([
+			"insecure-protocol high evil@1.0.0",
+			"missing-integrity low evil@1.0.0",
+		]);
+	});
+
+	test("pnpm reads the main document after an env lockfile document", async () => {
+		const findings = await audit({
+			"pnpm-lock.yaml": `---
+lockfileVersion: '9.0'
+
+importers:
+
+  .:
+    configDependencies: {}
+
+---
+lockfileVersion: '9.0'
+
+packages:
+
+  a@1.0.0:
+    resolution: {tarball: http://evil.example/a-1.0.0.tgz}
+
+snapshots:
+
+  a@1.0.0: {}
+`,
+		});
+		expect(rules(findings)).toEqual([
+			"insecure-protocol high a@1.0.0",
+			"missing-integrity low a@1.0.0",
+		]);
+	});
+
+	test("pnpm runtime downloads (variations and binary resolutions)", async () => {
+		const findings = await audit({
+			"pnpm-lock.yaml": `lockfileVersion: '9.0'
+
+packages:
+
+  node@runtime:22.0.0:
+    resolution:
+      type: variations
+      variants:
+        - resolution:
+            type: binary
+            archive: tarball
+            url: https://nodejs.org/download/release/v22.0.0/node-v22.0.0-darwin-arm64.tar.gz
+            integrity: ${SHA512}
+          targets:
+            - os: darwin
+              cpu: arm64
+        - resolution:
+            type: binary
+            archive: tarball
+            url: https://evil.example/node-v22.0.0-linux-x64.tar.gz
+            integrity: ${SHA512}
+          targets:
+            - os: linux
+              cpu: x64
+
+snapshots:
+
+  node@runtime:22.0.0: {}
+`,
+		});
+		expect(rules(findings)).toEqual(["unexpected-host medium node"]);
+	});
+
+	test("classic yarn: trailing comments and the YAML fallback", async () => {
+		const findings = await audit({
+			"comment/yarn.lock": `# yarn lockfile v1
+
+b@^1.0.0:
+  version "1.0.0"
+  resolved "http://evil.example/b-1.0.0.tgz" # "https://registry.yarnpkg.com/b/-/b-1.0.0.tgz"
+  integrity ${SHA512}
+`,
+			"yaml/yarn.lock": `# yarn lockfile v1
+
+c@^1.0.0: {version: "1.0.0", resolved: "http://evil.example/c-1.0.0.tgz", integrity: "${SHA512}"}
+`,
+		});
+		expect(insecure(findings)).toEqual([
+			"insecure-protocol high b@1.0.0",
+			"insecure-protocol high c@1.0.0",
+		]);
+	});
+
+	test("Yarn Berry: duplicate keys (last wins) and classic resolved fields", async () => {
+		const findings = await audit({
+			"dup/yarn.lock": `__metadata:
+  version: 8
+
+"a@npm:^1.0.0":
+  version: 1.0.0
+  resolution: "a@npm:1.0.0"
+  checksum: 10c0/abc
+
+"a@npm:^1.0.0":
+  version: 1.0.0
+  resolution: "a@https://evil.example/a-1.0.0.tgz"
+  checksum: 10c0/abc
+`,
+			"mixed/yarn.lock": `__metadata:
+  version: 8
+
+"b@npm:^1.0.0":
+  version: 1.0.0
+  resolution: "b@npm:1.0.0"
+  resolved: "http://evil.example/b-1.0.0.tgz"
+  checksum: 10c0/abc
+`,
+		});
+		expect(rules(findings)).toEqual([
+			"insecure-protocol high b@1.0.0",
+			"missing-integrity low b@1.0.0",
+			"unexpected-host medium a@1.0.0",
+		]);
+	});
+
+	test("bun.lock accepts single quotes and a byte-order mark", async () => {
+		const findings = await audit({
+			"bun.lock": `﻿{
+  'lockfileVersion': 1,
+  "workspaces": { "": { "name": "app" } },
+  "packages": {
+    'a': ['a@1.0.0', 'http://evil.example/a-1.0.0.tgz', {}, '${SHA512}'],
+  },
+}
+`,
+		});
+		expect(rules(findings)).toEqual(["insecure-protocol high a@1.0.0"]);
+	});
+
+	test("a binary bun.lockb is reported as unchecked", async () => {
+		const findings = await audit({
+			"bun.lockb": "#!/usr/bin/env bun\nbun-lockfile-format-v0\n\u0000\u0001",
+		});
+		expect(rules(findings)).toEqual(["unparseable-lockfile medium bun.lockb"]);
+	});
+
+	test(".npmrc is read like npm's ini parser", async () => {
+		const evil = {
+			"node_modules/a": tarball("https://evil.example/a-1.0.0.tgz"),
+		};
+		const findings = await audit({
+			// Keys under a section are not npm config.
+			"section/.npmrc": "[x]\nregistry=https://evil.example/\n",
+			"section/package-lock.json": npmLock(evil),
+			// The last value of a key wins.
+			"dup/.npmrc":
+				"registry=https://evil.example/\nregistry=https://registry.npmjs.org/\n",
+			"dup/package-lock.json": npmLock(evil),
+			// Inline comments end the value; a lone \r ends the line.
+			"comment/.npmrc": "strict-ssl=false ; legacy proxy\r",
+		});
+		expect(rules(findings)).toEqual([
+			"tls-verification-disabled medium strict-ssl=false ; legacy proxy",
+			"unexpected-host medium a@1.0.0",
+			"unexpected-host medium a@1.0.0",
+		]);
+	});
+
+	test(".yarnrc.yml with duplicate keys is still read", async () => {
+		const findings = await audit({
+			".yarnrc.yml":
+				'npmRegistryServer: "https://registry.yarnpkg.com"\nnpmRegistryServer: "https://evil.example"\n',
+		});
+		expect(rules(findings)).toEqual(["custom-registry info npmRegistryServer"]);
+	});
+
+	test("bunfig.toml is parsed as TOML", async () => {
+		const findings = await audit({
+			"bunfig.toml": `install.registry = "https://corp.example/"
+
+[install.scopes]
+note = """
+registry = "https://evil.example/"
+"""
+`,
+			"bun.lock": `{
+  "lockfileVersion": 1,
+  "workspaces": { "": { "name": "app" } },
+  "packages": {
+    "a": ["a@1.0.0", "https://evil.example/a/-/a-1.0.0.tgz", {}, "${SHA512}"],
+  }
+}
+`,
+		});
+		expect(rules(findings)).toEqual([
+			"custom-registry info registry = https",
+			"unexpected-host medium a@1.0.0",
+		]);
+	});
+
+	test("pip includes, find-links and direct references", async () => {
+		const findings = await audit({
+			"requirements.txt": [
+				"-r more/deps.in",
+				"-f https://evil.example/wheels/",
+				"good @ https://files.pythonhosted.org/packages/good-1.0-py3-none-any.whl",
+				"bad @ https://evil.example/bad-1.0-py3-none-any.whl",
+				"vcs @ git+https://evil.example/x/vcs.git@main",
+				"-r https://evil.example/remote.txt",
+				"",
+			].join("\n"),
+			"more/deps.in": "--extra-index-url https://evil.example/simple\n",
+		});
+		expect(
+			findings
+				.map(
+					(f) =>
+						`${f.location?.file}:${f.location?.line} ${f.ruleId.split("/")[1]} ${f.severity}`,
+				)
+				.sort(),
+		).toEqual([
+			"more/deps.in:1 extra-index-url medium",
+			"requirements.txt:2 extra-index-url medium",
+			"requirements.txt:4 unexpected-host medium",
+			"requirements.txt:5 git-dependency medium",
+			"requirements.txt:6 unexpected-host medium",
+		]);
 	});
 });
