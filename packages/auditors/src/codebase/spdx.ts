@@ -241,9 +241,14 @@ export const formatLicenseExpression = (expr: LicenseExpr): string => {
 /*                                   Policy                                   */
 /* -------------------------------------------------------------------------- */
 
+/** A compiled glob; `test` mirrors RegExp so either can be passed around. */
+export interface Glob {
+	readonly test: (value: string) => boolean;
+}
+
 interface Matcher {
-	readonly id: RegExp;
-	readonly exception?: RegExp;
+	readonly id: Glob;
+	readonly exception?: Glob;
 	/** Starts with `*`: too broad to accept or reject an unknown licence. */
 	readonly broad: boolean;
 }
@@ -256,14 +261,39 @@ export interface LicensePolicy {
 
 const PATTERN = /^[A-Za-z0-9*][A-Za-z0-9.+:*-]*$/;
 
-/** Case-insensitive, anchored match where `*` is the only wildcard. */
-export const globRegExp = (glob: string): RegExp =>
-	// The pattern is escaped, so it only matches literally apart from `*`.
-	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-	new RegExp(
-		`^${glob.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`,
-		"i",
-	);
+/**
+ * Case-insensitive, anchored match where `*` is the only wildcard. Globs and
+ * the values they test both come from the audited target, so this is the
+ * classic greedy matcher with one backtrack point (at most
+ * O(pattern × value)), not a regex, which `*a*a*…b` would send into
+ * catastrophic backtracking.
+ */
+export const globMatcher = (glob: string): Glob => {
+	const pattern = glob.toLowerCase();
+	return {
+		test: (raw) => {
+			const value = raw.toLowerCase();
+			let p = 0;
+			let v = 0;
+			let star = -1;
+			let resume = 0;
+			while (v < value.length) {
+				if (p < pattern.length && pattern[p] === "*") {
+					star = p++;
+					resume = v;
+				} else if (p < pattern.length && pattern[p] === value[v]) {
+					p++;
+					v++;
+				} else if (star !== -1) {
+					p = star + 1;
+					v = ++resume;
+				} else return false;
+			}
+			while (pattern[p] === "*") p++;
+			return p === pattern.length;
+		},
+	};
+};
 
 const compilePattern = (raw: string): Matcher => {
 	const [license = "", exception, ...rest] = raw.trim().split(/\s+WITH\s+/i);
@@ -277,8 +307,8 @@ const compilePattern = (raw: string): Matcher => {
 			`Licence policy entry "${raw}" must be a single licence id or glob (MIT, GPL-*), optionally with "WITH <exception>"`,
 		);
 	return {
-		id: globRegExp(id),
-		...(exception ? { exception: globRegExp(exception) } : {}),
+		id: globMatcher(id),
+		...(exception ? { exception: globMatcher(exception) } : {}),
 		broad: id.startsWith("*"),
 	};
 };

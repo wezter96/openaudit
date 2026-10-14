@@ -7,6 +7,7 @@ import type { Finding, Report } from "@openaudit/core";
 import {
 	anyOf,
 	licenses,
+	MAX_LICENSE_DEPENDENCIES,
 	npmLicense,
 	pythonLicense,
 } from "../src/codebase/licenses";
@@ -211,6 +212,35 @@ describe("code.licenses", () => {
 		// legacy `licenses` array of legacy-pkg reads as Apache-2.0 OR BSD-3-Clause.
 		expect(find(report, "dual-lib@1.1.0")).toBeUndefined();
 		expect(find(report, "legacy-pkg@0.9.0")).toBeUndefined();
+	});
+
+	test("checks a bounded number of dependencies", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "openaudit-licenses-many-"));
+		try {
+			const count = MAX_LICENSE_DEPENDENCIES + 50;
+			const packages: Record<string, unknown> = { "": { name: "many" } };
+			for (let i = 0; i < count; i++)
+				packages[`node_modules/p${i}`] = {
+					version: "1.0.0",
+					license: "GPL-3.0-only",
+				};
+			await Bun.write(
+				join(dir, "package-lock.json"),
+				JSON.stringify({ name: "many", lockfileVersion: 3, packages }),
+			);
+			const report = await runAuditor(licenses, dir, {
+				settings: { "code.licenses": { deny: ["GPL-*"] } },
+			});
+			const findings = result(report).findings;
+			expect(
+				findings.filter((f) => f.ruleId === "code.licenses/denied-license"),
+			).toHaveLength(MAX_LICENSE_DEPENDENCIES);
+			expect(
+				findings.find((f) => f.ruleId === "code.licenses/truncated")?.message,
+			).toContain(`${count}`);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
 	});
 
 	test("ignorePackages and the unknown severity", async () => {

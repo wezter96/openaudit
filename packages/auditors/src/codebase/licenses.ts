@@ -20,7 +20,7 @@ import {
 	compileLicensePolicy,
 	evaluateLicense,
 	formatLicenseExpression,
-	globRegExp,
+	globMatcher,
 	type LicensePolicy,
 	parseLicense,
 } from "./spdx";
@@ -406,6 +406,26 @@ const noDataFinding = (
 	};
 };
 
+/**
+ * Dependencies checked per run. Each one can cost a dozen metadata reads, and
+ * a lockfile is target input, so a hostile one must not make that unbounded.
+ */
+export const MAX_LICENSE_DEPENDENCIES = 5000;
+
+const truncatedFinding = (total: number): FindingInput => ({
+	ruleId: `${LICENSES_ID}/truncated`,
+	title: `Only ${MAX_LICENSE_DEPENDENCIES} of ${total} dependencies were checked`,
+	severity: "info",
+	category: "compliance",
+	message: `The lockfiles list ${total} dependencies; the licence policy was checked for the first ${MAX_LICENSE_DEPENDENCIES} (sorted by lockfile path) and the rest were skipped.`,
+	evidence: `${total} dependencies, ${MAX_LICENSE_DEPENDENCIES} checked`,
+	remediation:
+		"Audit each package of a large monorepo separately, or exempt build tooling with ignorePackages.",
+	references: REFERENCES,
+	confidence: "high",
+	tags: ["licence", "licence-policy"],
+});
+
 /* -------------------------------------------------------------------------- */
 /*                                  Auditor                                   */
 /* -------------------------------------------------------------------------- */
@@ -461,7 +481,7 @@ export const licenses = defineAuditor({
 						cause,
 					}),
 			});
-			const exempt = (settings.ignorePackages ?? []).map(globRegExp);
+			const exempt = (settings.ignorePackages ?? []).map(globMatcher);
 
 			const ws = yield* requireWorkspace(ctx);
 			const files = yield* readTextFiles(ws, isManifest, {
@@ -470,9 +490,10 @@ export const licenses = defineAuditor({
 			});
 			// Sorted so the file a shared dependency is attributed to is stable.
 			const sorted = [...files].sort((a, b) => a.path.localeCompare(b.path));
-			const deps = uniqueDependencies(sorted.flatMap(parseDependencies)).filter(
+			const all = uniqueDependencies(sorted.flatMap(parseDependencies)).filter(
 				(d) => !exempt.some((re) => re.test(d.name)),
 			);
+			const deps = all.slice(0, MAX_LICENSE_DEPENDENCIES);
 			if (deps.length === 0)
 				return yield* skip("No pinned dependencies found in lockfiles");
 
@@ -531,6 +552,7 @@ export const licenses = defineAuditor({
 				if (finding) findings.push(finding);
 			});
 			if (missing.length) findings.push(noDataFinding(missing, deps.length));
+			if (all.length > deps.length) findings.push(truncatedFinding(all.length));
 			return findings;
 		}),
 });

@@ -108,6 +108,26 @@ describe("parseLicense", () => {
 	});
 });
 
+describe("policy globs", () => {
+	test("pathological globs match in linear time", () => {
+		// As a regex (`.*a.*a…b`) this backtracks catastrophically.
+		const policy = compileLicensePolicy({
+			deny: [`${"*a".repeat(12)}*b`],
+		});
+		const started = performance.now();
+		expect(evaluateLicense("a".repeat(50_000), policy).status).toBe("ok");
+		expect(performance.now() - started).toBeLessThan(500);
+	});
+
+	test("matches literally apart from *, case-insensitively", () => {
+		const policy = compileLicensePolicy({ deny: ["GPL-*", "BSD-3-Clause"] });
+		expect(evaluateLicense("gpl-2.0-only", policy).status).toBe("denied");
+		expect(evaluateLicense("BSD-3-Clause", policy).status).toBe("denied");
+		expect(evaluateLicense("BSD-3-ClauseX", policy).status).toBe("ok");
+		expect(evaluateLicense("LGPL-2.1-only", policy).status).toBe("ok");
+	});
+});
+
 describe("evaluateLicense", () => {
 	const deny = compileLicensePolicy({ deny: ["GPL-*", "AGPL-3.0-only"] });
 	const allow = compileLicensePolicy({
