@@ -234,6 +234,28 @@ describe("markdown", () => {
 		const capped = toMarkdown(report, { maxFindings: 1 });
 		expect(capped).toContain("…and 2 more findings");
 	});
+	test("names skipped auditors without their local install hints", () => {
+		expect(text).toContain("Skipped: `code.semgrep`");
+		expect(text).not.toContain("semgrep not found");
+		expect(text).not.toContain("| `code.semgrep` |");
+	});
+	test("links keep their anchors", () => {
+		const hinted = toMarkdown({
+			...report,
+			results: [
+				{
+					...results[0],
+					status: "error",
+					message:
+						"Install it (https://github.com/kucherenko/jscpd#installation). See https://docs.kubelinter.io/#/?id=installing_kubelinter, or https://en.wikipedia.org/wiki/Foo_(bar).",
+				} as AuditorResult,
+			],
+		});
+		expect(hinted).toContain(
+			"Install it \\(<https://github.com/kucherenko/jscpd#installation>\\). See <https://docs.kubelinter.io/#/?id=installing_kubelinter>, or <https://en.wikipedia.org/wiki/Foo_(bar)>.",
+		);
+		expect(hinted).not.toContain("#installation\\");
+	});
 });
 
 // The HTML reporter has its own suite in html-report.test.ts.

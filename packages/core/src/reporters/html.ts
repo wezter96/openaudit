@@ -144,14 +144,17 @@ interface Download {
 	readonly hint: string;
 	readonly file: string;
 	readonly type: string;
-	/** `json` blocks are pretty-printed on download; `text` blocks hold a string. */
-	readonly format: "json" | "text";
+	/**
+	 * `json` blocks are pretty-printed on download and `text` blocks hold a
+	 * string. `page` saves the page itself, as it was served.
+	 */
+	readonly format: "json" | "text" | "page";
 	readonly data: unknown;
 }
 
 /**
  * Every format is rendered here by the core reporters, from the shareable
- * report, and embedded for the browser to save. SARIF gets no `root` at all,
+ * report, and embedded for the browser to save; the HTML is this page. SARIF gets no `root` at all,
  * so it carries no `originalUriBaseIds` and its paths stay relative.
  */
 const downloads = (
@@ -161,6 +164,15 @@ const downloads = (
 	const shared = shareable(report);
 	const { root: _root, ...target } = shared.target;
 	return [
+		{
+			id: "html",
+			label: "HTML",
+			hint: "This page, interactive and offline",
+			file: "openaudit-report.html",
+			type: "text/html",
+			format: "page",
+			data: null,
+		},
 		{
 			id: "json",
 			label: "JSON",
@@ -206,13 +218,14 @@ const downloadMenu = (items: ReadonlyArray<Download>): string =>
 <ul class="dl-menu" id="dl-menu" role="menu" aria-labelledby="dl-button" hidden>${items
 		.map(
 			(d) =>
-				`<li role="none"><button type="button" role="menuitem" tabindex="-1" data-action="download" data-src="data-${d.id}"><span class="dl-l">${d.label}</span> <span class="dl-h">${d.hint}</span> <span class="dl-f">${e(d.file)}</span></button></li>`,
+				`<li role="none"><button type="button" role="menuitem" tabindex="-1" data-action="download" ${d.format === "page" ? `data-page="${e(d.file)}"` : `data-src="data-${d.id}"`}><span class="dl-l">${d.label}</span> <span class="dl-h">${d.hint}</span> <span class="dl-f">${e(d.file)}</span></button></li>`,
 		)
 		.join("")}</ul>
 </div>`;
 
 const dataBlocks = (items: ReadonlyArray<Download>): string =>
 	items
+		.filter((d) => d.format !== "page")
 		.map(
 			(d) =>
 				`<script type="application/json" id="data-${d.id}" data-file="${e(d.file)}" data-type="${e(d.type)}" data-format="${d.format}">${scriptSafeJson(d.data)}</script>`,

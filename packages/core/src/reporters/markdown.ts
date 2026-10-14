@@ -23,21 +23,54 @@ export interface MarkdownOptions {
 	readonly suppressed?: ReadonlyArray<SuppressionSummary>;
 }
 
-/**
- * Renders untrusted text (from audited repos and sites) literally on one line,
- * so it cannot inject HTML (`<img>` beacons, `<details>`), links, images,
- * emphasis, table cells, emoji shortcodes (fake ":white_check_mark: passed")
- * or @mentions into a PR comment.
- */
-const md = (text: unknown): string =>
-	sanitizeText(text)
-		.trim()
+const escapeInline = (text: string): string =>
+	text
 		.replace(/([\\`*_{}[\]()<>|~&!])/g, "\\$1")
 		.replace(/:(?=[\w+-]+:)/g, "\\:")
-		.replace(/@(?=\w)/g, "@\u2060")
-		// Block markers would start a heading, quote or list when the text leads a line.
-		.replace(/^([#+=-])/, "\\$1")
-		.replace(/^(\d+)([.)])/, "$1\\$2");
+		.replace(/@(?=\w)/g, "@\u2060");
+
+/** A web address inside prose; `|` ends it so it cannot split a table cell. */
+const URL_IN_TEXT = /https?:\/\/[^\s<>`"|]+/g;
+
+/** Drops the sentence's punctuation, and a `)` the address doesn't open, from its end. */
+const trimUrl = (url: string): string => {
+	let u = url;
+	for (;;) {
+		const last = u.at(-1);
+		const unopened =
+			last === ")" &&
+			(u.match(/\)/g)?.length ?? 0) > (u.match(/\(/g)?.length ?? 0);
+		if (!(last && (/[.,;:!?'\]]/.test(last) || unopened))) return u;
+		u = u.slice(0, -1);
+	}
+};
+
+/**
+ * Renders untrusted text (from audited repos and sites) literally on one line,
+ * so it cannot inject HTML (`<img>` beacons, `<details>`), images, emphasis,
+ * table cells, emoji shortcodes (fake ":white_check_mark: passed") or
+ * @mentions into a PR comment. Web addresses become `<...>` autolinks, as a
+ * renderer would autolink them anyway, so escapes can't end up inside them
+ * and break the link (`\u2026#installation\)`).
+ */
+const md = (text: unknown): string => {
+	const clean = sanitizeText(text).trim();
+	let out = "";
+	let from = 0;
+	for (const m of clean.matchAll(URL_IN_TEXT)) {
+		const url = trimUrl(m[0]);
+		const href = safeUrl(url);
+		if (!href) continue;
+		out += `${escapeInline(clean.slice(from, m.index))}<${href}>`;
+		from = m.index + url.length;
+	}
+	return (
+		`${out}${escapeInline(clean.slice(from))}`
+			// Block markers would start a heading, quote or list when the text leads a line.
+			.replace(/^([#+=-])/, "\\$1")
+			.replace(/^(\d+)([.)])/, "$1\\$2")
+	);
+};
 
 /**
  * Inline code for untrusted text. The fence is longer than any backtick run in
@@ -171,27 +204,34 @@ export const toMarkdown = (
 		}
 	}
 
-	const notRun = report.results.filter(
-		(r) => r.status === "skipped" || r.status === "error",
-	);
+	// Skip reasons are install hints for whoever ran the audit; a reader of
+	// the file only needs to know what didn't run.
+	const ran = report.results.filter((r) => r.status !== "skipped");
+	const skipped = report.results.filter((r) => r.status === "skipped");
+	const errored = ran.filter((r) => r.status === "error");
 	out.push(
 		"<details>",
 		`<summary>Auditors: ${summary.auditors.passed} passed, ${summary.auditors.failed} failed, ${summary.auditors.skipped} skipped, ${summary.auditors.error} errored</summary>`,
 		"",
-		"| Auditor | Status | Findings | Duration | Note |",
-		"| --- | --- | ---: | ---: | --- |",
-		...report.results.map(
-			(r) =>
-				`| ${code(r.auditor, { table: true })} | ${md(r.status)} | ${r.findings.length} | ${formatDuration(r.durationMs)} | ${md(r.message ?? "")} |`,
-		),
-		"",
-		"</details>",
-		"",
 	);
-	if (notRun.some((r) => r.status === "error")) {
+	if (ran.length) {
 		out.push(
-			`> Some auditors errored, so results may be incomplete: ${notRun
-				.filter((r) => r.status === "error")
+			"| Auditor | Status | Findings | Duration | Note |",
+			"| --- | --- | ---: | ---: | --- |",
+			...ran.map(
+				(r) =>
+					`| ${code(r.auditor, { table: true })} | ${md(r.status)} | ${r.findings.length} | ${formatDuration(r.durationMs)} | ${md(r.message ?? "")} |`,
+			),
+			"",
+		);
+	}
+	if (skipped.length) {
+		out.push(`Skipped: ${skipped.map((r) => code(r.auditor)).join(", ")}`, "");
+	}
+	out.push("</details>", "");
+	if (errored.length) {
+		out.push(
+			`> Some auditors errored, so results may be incomplete: ${errored
 				.map((r) => code(r.auditor))
 				.join(", ")}`,
 			"",

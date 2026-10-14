@@ -101,7 +101,7 @@ export const withSiteBar = (
 	const crumbs = `<nav class="oa-bar-crumbs" aria-label="Breadcrumb"><ol><li><a href="${base}/">Home</a></li><li aria-current="page">${here}</li></ol></nav>`;
 	const theme = `<button class="oa-bar-icon oa-bar-theme" type="button" aria-label="Switch theme" data-oa-theme hidden>${icon(MOON, "moon")}${icon(SUN, "sun")}</button>`;
 	const menu = `<details class="oa-bar-menu"><summary class="oa-bar-icon">${icon(MENU)}<span class="oa-sr">Menu</span></summary><nav aria-label="Site">${links}</nav></details>`;
-	const bar = `<header class="oa-bar"><div class="oa-bar-in"><a class="oa-bar-brand" href="${base}/">${LOGO}<span>openaudit</span></a>${crumbs}<nav class="oa-bar-nav" aria-label="Site">${links}</nav>${theme}${menu}</div></header>`;
+	const bar = `<header class="oa-bar" data-host><div class="oa-bar-in"><a class="oa-bar-brand" href="${base}/">${LOGO}<span>openaudit</span></a>${crumbs}<nav class="oa-bar-nav" aria-label="Site">${links}</nav>${theme}${menu}</div></header>`;
 	const skip = /<a class="skip"[^>]*>[^<]*<\/a>/.exec(page);
 	const body = /<body[^>]*>/.exec(page);
 	const anchor = skip ?? body;
@@ -113,7 +113,7 @@ export const withSiteBar = (
 	return {
 		page: withBar.replace(
 			"</head>",
-			`<style>${style}</style>\n<script>${SCRIPT}</script>\n</head>`,
+			`<style data-host>${style}</style>\n<script data-host>${SCRIPT}</script>\n</head>`,
 		),
 		style,
 		script: SCRIPT,

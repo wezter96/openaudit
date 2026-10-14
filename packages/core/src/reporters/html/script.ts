@@ -11,6 +11,8 @@ export const SCRIPT = `
 (function(){
 "use strict";
 var d=document,root=d.documentElement,w=window;
+/* the page as served, before any of this runs, for the HTML download */
+var pristine=root.cloneNode(true);
 root.classList.add("js");
 var still=!w.matchMedia||w.matchMedia("(prefers-reduced-motion: reduce)").matches||!root.animate;
 var css=getComputedStyle(root);
@@ -230,12 +232,24 @@ if(!still)rows.forEach(function(r){var dy=before.get(r)-r.getBoundingClientRect(
 }
 
 /* ---- downloads: every format is rendered at report time and embedded ---- */
+/* what a host page added (a site's bar, its meta tags) stays with the host */
+function savedPage(){
+var page=pristine.cloneNode(true);
+each(page.querySelectorAll("[data-host]"),function(n){n.parentNode.removeChild(n);});
+page.removeAttribute("data-theme");
+return "<!doctype html>\\n"+page.outerHTML+"\\n";
+}
 function download(btn){
+var page=btn.getAttribute("data-page");
+if(page)return save(savedPage(),"text/html",page);
 var src=d.getElementById(btn.getAttribute("data-src"));if(!src)return;
 var data=JSON.parse(src.textContent);
 var text=src.getAttribute("data-format")==="json"?JSON.stringify(data,null,2)+"\\n":String(data);
-var url=URL.createObjectURL(new Blob([text],{type:src.getAttribute("data-type")+";charset=utf-8"}));
-var a=d.createElement("a");a.href=url;a.download=src.getAttribute("data-file")||"openaudit-report";a.hidden=true;
+save(text,src.getAttribute("data-type"),src.getAttribute("data-file"));
+}
+function save(text,type,file){
+var url=URL.createObjectURL(new Blob([text],{type:type+";charset=utf-8"}));
+var a=d.createElement("a");a.href=url;a.download=file||"openaudit-report";a.hidden=true;
 d.body.appendChild(a);a.click();a.remove();
 setTimeout(function(){URL.revokeObjectURL(url);},4000);
 }

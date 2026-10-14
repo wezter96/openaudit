@@ -108,7 +108,7 @@ The opt-in `code.dependency-health` auditor looks your pinned dependencies up on
 Every run produces one report, in whichever formats you ask for: `-f terminal,json,sarif,markdown,html`.
 
 - **Score and grade.** Each area scores 0–100 from the severity of its findings; info findings never lower a score. The overall score is the average of the areas that were actually examined. Skipped auditors are listed with the reason, so a clean result never hides a check that didn't run.
-- **Interactive HTML.** One self-contained file with no external requests, so it opens offline and can be attached to a CI run or an email. It has an overview, a tab per area with filters and search, an auditors tab, and OWASP Top 10 / CWE Top 25 groupings. It works with JavaScript off, prints cleanly, and lets readers download the same audit as JSON, SARIF, Markdown or CSV. Shared reports name the project folder, never your local path.
+- **Interactive HTML.** One self-contained file with no external requests, so it opens offline and can be attached to a CI run or an email. It has an overview, a tab per area with filters and search, an auditors tab, and OWASP Top 10 / CWE Top 25 groupings. It works with JavaScript off, prints cleanly, and lets readers download the page itself or the same audit as JSON, SARIF, Markdown or CSV. Shared reports name the project folder, never your local path.
 - **Stable fingerprints.** Each finding has a fingerprint that baselines, suppressions and `compare_reports` rely on.
 - **Diff mode.** `--diff origin/main` keeps only findings in files changed since that ref, for pull requests. OpenAPI specs are also checked for breaking changes against that ref with oasdiff.
 

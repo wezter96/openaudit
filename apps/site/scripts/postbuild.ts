@@ -256,7 +256,10 @@ for (const f of html.filter(copied)) {
 		'<meta property="og:image:height" content="630">',
 		`<meta property="og:image:alt" content="${attr(`openaudit grade dial beside the title “${info.title}”`)}">`,
 		'<meta name="twitter:card" content="summary_large_image">',
-	].join("\n");
+	]
+		// the report leaves `data-host` tags out of its HTML download
+		.map((t) => t.replace(/>$/, " data-host>"))
+		.join("\n");
 	page = page.replace("</head>", `${tags}\n</head>`);
 	const bar = withSiteBar(page, { base: BASE, current: info.path });
 	page = bar.page

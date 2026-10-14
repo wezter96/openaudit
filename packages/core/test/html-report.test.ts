@@ -560,7 +560,9 @@ describe("downloads", () => {
 			'aria-haspopup="menu" aria-expanded="false" aria-controls="dl-menu"',
 		);
 		expect(markup).toContain('<ul class="dl-menu" id="dl-menu" role="menu"');
-		expect(markup.match(/role="menuitem"/g)).toHaveLength(4);
+		expect(markup.match(/role="menuitem"/g)).toHaveLength(5);
+		// The HTML item saves the page itself, so it has no data block.
+		expect(markup).toContain('data-page="openaudit-report.html"');
 		const files = [
 			...html.matchAll(/data-file="([^"]+)" data-type="([^"]+)"/g),
 		].map((m) => `${m[1]} ${m[2]}`);
