@@ -73,6 +73,15 @@ export { parseYarnLock } from "./yarn";
  *   conflict) is checked as parsed here. Only parse failures are reported.
  * - `-r`/`-c` includes missing from the checkout (generated at install time)
  *   are not checked.
+ * - `${VAR}` in .npmrc and .yarnrc.yml is read as unset (npm keeps it, `?`
+ *   empties it, Yarn uses the fallback); a registry only the environment
+ *   decides is reported but not checked. bunfig.toml expansion is not modelled.
+ *
+ * Findings never echo userinfo (up to the last `@`, however a parser splits
+ * it) or token-like query and fragment parameters. A host WHATWG takes from
+ * what another parser reads as userinfo is masked, so such a finding may
+ * not name the host that is fetched. Tokens in a URL path (some hosted
+ * registries put them there) are not recognised.
  */
 
 const isRequirements = (path: string) =>

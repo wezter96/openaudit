@@ -14,6 +14,7 @@ import {
 } from "./findings";
 import { dirOf, stripBom, unquote } from "./shared";
 import {
+	displayHost,
 	displayUrl,
 	escapesRoot,
 	hostOf,
@@ -103,7 +104,8 @@ const pipSourceFinding = (
 	why: string,
 ): FindingInput => {
 	const shown = displayUrl(url);
-	const host = hostOf(url) ?? "an unknown host";
+	const parsed = hostOf(url);
+	const host = parsed ? displayHost(url, parsed) : "an unknown host";
 	return {
 		...base,
 		ruleId: rule("unexpected-host"),
@@ -137,7 +139,7 @@ const pipDirectReference = (
 	const vcs = /^(git|hg|svn|bzr)\+/.exec(lower);
 	if (vcs) {
 		const bare = url.slice(vcs[0].length);
-		const host = hostOf(bare) ?? "";
+		const host = displayHost(bare, hostOf(bare) ?? "");
 		let path = bare;
 		try {
 			path = new URL(bare).pathname;
@@ -208,7 +210,7 @@ const sourceOptionFindings = (
 				...base,
 				ruleId: rule("custom-registry"),
 				title: truncate(
-					`${baseName(file.path)} installs packages from ${host}`,
+					`${baseName(file.path)} installs packages from ${displayHost(value, host)}`,
 					120,
 				),
 				severity: "info",
@@ -296,7 +298,7 @@ const optionFindings = (
 			return [
 				tlsFinding(
 					{ file: file.path, line, evidence },
-					`pip (host ${truncate(value, 60)})`,
+					`pip (host ${truncate(displayUrl(value), 60)})`,
 				),
 			];
 		case "--index-url":

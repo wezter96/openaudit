@@ -103,15 +103,49 @@ const iniValue = (raw: string): unknown => {
 
 const INI_LINE = /^\[([^\]]*)\]\s*$|^([^=]+)(=(.*))?$/;
 
+/** Longer values are left as written: a fallback scan per `${` is quadratic. */
+const MAX_INTERPOLATED = 4096;
+
+/**
+ * npm's env-replace (@npmcli/config) with every variable unset, as
+ * openaudit cannot know the install's environment: `${VAR?}` is empty,
+ * `${VAR}` stays as written, and a backslash escapes.
+ */
+const npmEnv = (s: string): string =>
+	s.length > MAX_INTERPOLATED
+		? s
+		: s.replace(
+				/(?<!\\)(\\*)\$\{([^${}?]+)(\?)?\}/g,
+				(orig: string, esc: string, _name: string, optional?: string) =>
+					esc.length % 2
+						? orig.slice((esc.length + 1) / 2)
+						: esc.slice(esc.length / 2) +
+							(optional ? "" : orig.slice(esc.length)),
+			);
+
+/**
+ * Yarn's replaceEnvVariables with every variable unset: `${VAR:-x}` and
+ * `${VAR-x}` are `x`; `${VAR}`, which Yarn needs from the environment, stays.
+ */
+const yarnEnv = (s: string): string =>
+	s.length > MAX_INTERPOLATED
+		? s
+		: s.replace(
+				/\\?\$\{([\w]+)(:)?(?:-([^}]*))?\}/g,
+				(match: string, _name: string, _colon?: string, fallback?: string) =>
+					match.startsWith("\\") ? match.slice(1) : (fallback ?? match),
+			);
+
 /**
  * `.npmrc`, read like npm's `ini` parser: `\r` and `\n` end lines, `;` and `#`
  * start comments (also after a value), keys after a `[section]` header are not
  * npm config, and the last value of a key wins.
+ * `${VAR}` references are expanded as npm does (see npmEnv).
  */
 const readNpmrc = (file: SourceFile, config: FileConfig): boolean => {
 	const values = new Map<
 		string,
-		{ readonly value: unknown; readonly line: number; readonly raw: string }
+		{ readonly value: unknown; readonly line: number }
 	>();
 	let inSection = false;
 	stripBom(file.text)
@@ -125,9 +159,10 @@ const readNpmrc = (file: SourceFile, config: FileConfig): boolean => {
 				return;
 			}
 			if (inSection) return;
-			const key = String(iniValue(m[2] ?? ""));
+			const key = npmEnv(String(iniValue(m[2] ?? "")));
 			if (key.length > 2 && key.endsWith("[]")) return;
-			const raw = m[3] ? iniValue(m[4] ?? "") : true;
+			const parsed = m[3] ? iniValue(m[4] ?? "") : true;
+			const raw = typeof parsed === "string" ? npmEnv(parsed) : parsed;
 			const value =
 				raw === "true"
 					? true
@@ -136,9 +171,9 @@ const readNpmrc = (file: SourceFile, config: FileConfig): boolean => {
 						: raw === "null"
 							? null
 							: raw;
-			values.set(key, { value, line: i + 1, raw: line.trim() });
+			values.set(key, { value, line: i + 1 });
 		});
-	for (const [key, { value, line, raw }] of values) {
+	for (const [key, { value, line }] of values) {
 		const at = { file: file.path, line };
 		if (
 			typeof value === "string" &&
@@ -155,9 +190,10 @@ const readNpmrc = (file: SourceFile, config: FileConfig): boolean => {
 				evidence: `${key}=${displayUrl(value)}`,
 			});
 		} else if (key === "ignore-scripts" && value === true)
-			config.ignoreScripts = { ...at, evidence: raw };
+			// The setting, not the raw line: a trailing comment can hold anything.
+			config.ignoreScripts = { ...at, evidence: "ignore-scripts=true" };
 		else if (key === "strict-ssl" && value === false)
-			config.strictSslOff = { ...at, evidence: raw };
+			config.strictSslOff = { ...at, evidence: "strict-ssl=false" };
 	}
 	return true;
 };
@@ -200,19 +236,20 @@ const readYarnrcYml = (file: SourceFile, config: FileConfig): boolean => {
 	const lineOf = lineFinder(file.text);
 	const registry = (value: unknown, scope?: string) => {
 		if (typeof value !== "string") return;
+		const url = yarnEnv(value);
 		config.registries.push({
 			file: file.path,
 			line: lineOf(value),
-			url: value,
+			url,
 			...(scope ? { scope } : {}),
-			evidence: `${scope ? `npmScopes.${scope.slice(1)}.` : ""}npmRegistryServer: ${displayUrl(value)}`,
+			evidence: `${scope ? `npmScopes.${scope.slice(1)}.` : ""}npmRegistryServer: ${displayUrl(url)}`,
 		});
 	};
 	registry(doc.npmRegistryServer);
 	if (isRecord(doc.npmScopes))
 		for (const [scope, value] of Object.entries(doc.npmScopes))
 			if (isRecord(value)) registry(value.npmRegistryServer, scopeOf(scope));
-	if (String(doc.enableStrictSsl) === "false")
+	if (yarnEnv(String(doc.enableStrictSsl)) === "false")
 		config.strictSslOff = {
 			file: file.path,
 			line: lineOf("enableStrictSsl"),

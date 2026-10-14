@@ -44,6 +44,7 @@ import {
 import {
 	classifySource,
 	DEFAULT_REGISTRY_HOSTS,
+	displayHost,
 	displaySpec,
 	displayUrl,
 	escapesRoot,
@@ -152,7 +153,7 @@ const sourceFinding = (
 				source.ref
 					? `${displayUrl(source.url)} at "${truncate(source.ref, 60)}"`
 					: displayUrl(source.url),
-				source.host,
+				displayHost(p.source ?? "", source.host),
 			);
 		}
 		case "tarball": {
@@ -177,7 +178,7 @@ const sourceFinding = (
 			return unexpectedHostFinding(
 				lock,
 				p,
-				source.host,
+				displayHost(source.url, source.host),
 				shown,
 				"which is neither the public npm registry nor a registry configured for this package next to the lockfile",
 			);
@@ -187,8 +188,9 @@ const sourceFinding = (
 
 const customSourceFinding = (
 	lock: Lockfile,
-	{ registry, host, packages }: CustomSource,
+	{ registry, host: rawHost, packages }: CustomSource,
 ): FindingInput => {
+	const host = displayHost(registry.url, rawHost);
 	const names = unique(packages.map(label));
 	const declared = `${registry.file}:${registry.line ?? "?"}`;
 	return {
@@ -377,17 +379,17 @@ export const configFindings = (config: FileConfig): FindingInput[] => {
 					r.evidence,
 				),
 			);
-		else if (host && !DEFAULT_REGISTRY_HOSTS.has(host))
+		else if (!host || !DEFAULT_REGISTRY_HOSTS.has(host))
 			out.push({
 				...base,
 				ruleId: rule("custom-registry"),
 				title: truncate(
-					`${baseName(r.file)} installs ${r.scope ? `${r.scope} packages` : "packages"} from ${host}`,
+					`${baseName(r.file)} installs ${r.scope ? `${r.scope} packages` : "packages"} from ${host ? displayHost(r.url, host) : "a registry set outside the repository"}`,
 					120,
 				),
 				severity: "info",
 				message: truncate(
-					`${r.file} sets ${displayUrl(r.url)} as ${r.scope ? `the registry for ${r.scope} packages` : "the default registry"}. Whoever runs that registry decides what gets installed, and the setting lives in the repository, so a change to it deserves the same review as a change to the code.`,
+					`${r.file} sets ${displayUrl(r.url)} as ${r.scope ? `the registry for ${r.scope} packages` : "the default registry"}.${host ? "" : " The value comes from an environment variable or is not a URL, so openaudit cannot tell which registry is used."} Whoever runs that registry decides what gets installed, and the setting lives in the repository, so a change to it deserves the same review as a change to the code.`,
 					600,
 				),
 				location: { file: r.file, line: r.line },

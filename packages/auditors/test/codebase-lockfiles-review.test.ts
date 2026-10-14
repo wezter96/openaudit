@@ -406,3 +406,99 @@ packages: {}
 		expect(text).not.toContain("ghp_");
 	});
 });
+
+describe("second review: no credential reaches the report", () => {
+	test("credentials in every placement stay out of the serialized findings", async () => {
+		const secrets = [
+			"SECRETA1",
+			"SECRETB2",
+			"SECRETC3",
+			"SECRETD4",
+			"SECRETE5",
+			"SECRETF6",
+			"SECRETG7",
+			"SECRETH8",
+			"SECRETI9",
+			"SECRETJ10",
+			"SECRETK11",
+			"SECRETL12",
+		];
+		const findings = await audit({
+			// Userinfo before a backslash: WHATWG reads it as the host.
+			".npmrc": [
+				"registry=https://SECRETA1\\@npm.example/",
+				"//npm.example/:_authToken=SECRETB2",
+				"_auth=SECRETC3",
+				"strict-ssl=false ; //npm.example/:_password=SECRETD4",
+				"",
+			].join("\n"),
+			"package-lock.json": npmLock({
+				"node_modules/a": {
+					version: "1.0.0",
+					resolved: "https://a\\b:SECRETE5@evil.example/a-1.0.0.tgz",
+					integrity: SHA512,
+				},
+				"node_modules/b": {
+					version: "1.0.0",
+					resolved: "git+https://github.com/org/b.git#access_token=SECRETF6",
+				},
+				"node_modules/c": {
+					version: "1.0.0",
+					resolved: "x-access-token:SECRETG7@github.com:org/c.git",
+				},
+				"node_modules/d": {
+					version: "1.0.0",
+					resolved: "https://u:SECRETH8@x@evil.example/d-1.0.0.tgz",
+					integrity: SHA512,
+				},
+			}),
+			"requirements.txt": [
+				"--index-url https://SECRETI9\\@pypi.example/simple",
+				"--trusted-host user:SECRETJ10@pypi.example",
+				"",
+			].join("\n"),
+			"berry/.yarnrc.yml":
+				'npmRegistryServer: "https://npm.example"\nnpmAuthToken: SECRETK11\n',
+			"bun/bunfig.toml":
+				'[install.registry]\nurl = "https://npm.example/"\ntoken = "SECRETL12"\n',
+		});
+		// Every placement produced a finding, so each was actually exercised.
+		expect(rules(findings).length).toBeGreaterThanOrEqual(10);
+		const text = JSON.stringify(findings).toLowerCase();
+		for (const s of secrets) expect(text).not.toContain(s.toLowerCase());
+	});
+});
+
+describe("second review: registries set through environment variables", () => {
+	test(".npmrc optional variables are empty when unset, as npm reads them", async () => {
+		const findings = await audit({
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: .npmrc variable syntax
+			".npmrc": "registry=${OA_UNSET_VAR?}http://evil.example/\n",
+		});
+		expect(rules(findings)).toEqual(["insecure-protocol high registry=http"]);
+	});
+
+	test(".yarnrc.yml variables use their fallback, as Yarn reads them", async () => {
+		const findings = await audit({
+			".yarnrc.yml":
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: .yarnrc.yml variable syntax
+				'npmRegistryServer: "${OA_UNSET_VAR:-https://evil.example}"\n',
+		});
+		expect(rules(findings)).toEqual(["custom-registry info npmRegistryServer"]);
+		expect(findings[0]?.title).toContain("evil.example");
+	});
+
+	test("a registry only the environment decides is reported", async () => {
+		const findings = await audit({
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: .npmrc variable syntax
+			"a/.npmrc": "registry=${NPM_REGISTRY}\n",
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: .yarnrc.yml variable syntax
+			"b/.yarnrc.yml": 'npmRegistryServer: "${YARN_REGISTRY}"\n',
+		});
+		expect(rules(findings)).toEqual([
+			"custom-registry info npmRegistryServer",
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: .npmrc variable syntax
+			"custom-registry info registry=${NPM_REGISTRY}",
+		]);
+	});
+});

@@ -1,3 +1,5 @@
+import { redact } from "@openaudit/core";
+
 import { truncate } from "../util";
 
 /**
@@ -95,13 +97,14 @@ const GITHUB_SHORTHAND = /^[\w.-]+\/[\w.-]+(#.*)?$/;
 const gitRef = (fragment: string | undefined): string | undefined => {
 	if (!fragment) return undefined;
 	if (!fragment.includes("=")) return fragment;
+	// Other parameters are not a ref and may be a token (`#access_token=`).
 	const params = new URLSearchParams(fragment);
 	return (
 		params.get("commit") ??
 		params.get("tag") ??
 		params.get("head") ??
 		params.get("semver") ??
-		fragment
+		undefined
 	);
 };
 
@@ -261,8 +264,42 @@ export const resolveInRepo = (dir: string, rel: string) =>
 export const escapesRoot = (base: string, path: string): boolean =>
 	resolvePath(base, path, true) === undefined;
 
-/** A URL without credentials or query string, safe to show as evidence. */
-export const displayUrl = (raw: string): string => {
+/**
+ * The userinfo of a URL up to the last `@` of its authority, read leniently:
+ * the authority ends only at `/`, `?` or `#`, so text before a backslash
+ * (where WHATWG ends a special URL's authority) counts. Without a scheme,
+ * only scp-like `user:password@host` counts, not `git@host` or `npm:@scope`.
+ */
+const lenientUserinfo = (raw: string): string => {
+	const scheme = raw.indexOf("://");
+	const start = scheme === -1 ? 0 : scheme + 3;
+	let end = raw.length;
+	for (const c of "/?#") {
+		const i = raw.indexOf(c, start);
+		if (i !== -1 && i < end) end = i;
+	}
+	const at = raw.lastIndexOf("@", end - 1);
+	const userinfo = at >= start ? raw.slice(start, at) : "";
+	return scheme !== -1 || /^[^:@]+:[^@]+$/.test(userinfo) ? userinfo : "";
+};
+
+/** Parameters (`?a=b`, `#a=b&c=d`); linear, as names stop at delimiters. */
+const PARAM = /([?#&;])([^=?#&;]*)=([^?#&;]*)/g;
+
+/** Parameter names whose value is likely a credential. */
+const SECRET_NAME = /token|auth|key|secret|passw|pwd|sig|credential/i;
+
+/**
+ * A URL without credentials or query string, safe to show as evidence.
+ * Userinfo is dropped up to the last `@`, however a parser splits it.
+ */
+export const displayUrl = (input: string): string => {
+	const userinfo = lenientUserinfo(input);
+	const scheme = input.indexOf("://");
+	const start = scheme === -1 ? 0 : scheme + 3;
+	const raw = userinfo
+		? input.slice(0, start) + input.slice(start + userinfo.length + 1)
+		: input;
 	try {
 		const url = new URL(raw);
 		if (url.protocol === "http:" || url.protocol === "https:")
@@ -270,7 +307,6 @@ export const displayUrl = (raw: string): string => {
 	} catch {
 		// Not a URL: git shorthands and scp-like `git@host:path` specs.
 	}
-	const scheme = raw.indexOf("://");
 	const hostEnd = scheme === -1 ? -1 : raw.indexOf("/", scheme + 3);
 	const at = raw.lastIndexOf("@", hostEnd === -1 ? undefined : hostEnd);
 	const withoutUser =
@@ -278,8 +314,25 @@ export const displayUrl = (raw: string): string => {
 			? raw.slice(0, scheme + 3) + raw.slice(at + 1)
 			: raw;
 	const q = withoutUser.indexOf("?");
-	return truncate(q === -1 ? withoutUser : withoutUser.slice(0, q), 120);
+	return truncate(
+		(q === -1 ? withoutUser : withoutUser.slice(0, q)).replace(
+			PARAM,
+			(param, sep: string, name: string, value: string) =>
+				SECRET_NAME.test(name) ? `${sep}${name}=${redact(value)}` : param,
+		),
+		120,
+	);
 };
+
+/**
+ * A host to show for `raw`. A host WHATWG took from what another parser
+ * reads as userinfo (`https://token\@host`) may be a credential, so it is
+ * masked.
+ */
+export const displayHost = (raw: string, host: string): string =>
+	host && lenientUserinfo(raw).toLowerCase().includes(host.toLowerCase())
+		? redact(host)
+		: host;
 
 /** A dependency spec safe to show: URL specs lose credentials and query strings. */
 export const displaySpec = (spec: string): string =>
