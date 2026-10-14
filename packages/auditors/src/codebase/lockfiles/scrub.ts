@@ -11,6 +11,8 @@ import { isRecord } from "../util";
 
 /** Longer strings are cut first; findings never need more. */
 const MAX_SCRUBBED = 16_384;
+/** Characters a token or URL part can hold, for cutting at a word boundary. */
+const WORD_CHAR = /[\w.~+/=%-]/;
 
 /**
  * Characters that end a URL's authority. Not `\`, which other parsers keep,
@@ -80,7 +82,21 @@ const BASIC = /\b(Basic(?:\s+|%20))([A-Za-z0-9+/]{8,}={0,2})/gi;
 
 /** Query and fragment parameters; names stop at delimiters. */
 const PARAM = /([?#&;])([^=?#&;\s]*)=([^?#&;\s"']*)/g;
-const SECRET_NAME = /token|auth|key|secret|passw|pwd|sig|credential/i;
+const SECRET_NAME =
+	/token|auth|key|secret|passw|pwd|sig|credential|code|session|sid|ticket/i;
+
+/** A parameter name as a server reads it (`%74oken` is `token`). */
+const decodedName = (name: string) => {
+	try {
+		return decodeURIComponent(name);
+	} catch {
+		return name;
+	}
+};
+
+/** UUIDs: classic npm tokens are lower-case v4 UUIDs. */
+const UUID =
+	/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
 
 /** A path segment after one that names a credential (`/_authToken/x`, `/t/x`). */
 const PATH_TOKEN =
@@ -93,14 +109,24 @@ const looksRandom = (run: string) =>
 
 /** `s` without userinfo, credential parameters or token-like values. */
 export const scrubText = (input: string): string => {
-	const s =
-		input.length > MAX_SCRUBBED ? `${input.slice(0, MAX_SCRUBBED)}…` : input;
+	// A token cut by the cap no longer matches its pattern, so the cut drops
+	// the whole word it lands in (a backward scan: an anchored regex would
+	// backtrack quadratically).
+	let s = input;
+	if (input.length > MAX_SCRUBBED) {
+		let end = MAX_SCRUBBED;
+		while (end > 0 && WORD_CHAR.test(input[end - 1] as string)) end--;
+		s = `${input.slice(0, end)}…`;
+	}
 	return stripScpUserinfo(stripUrlUserinfo(s))
 		.replace(KNOWN_TOKEN, mask)
 		.replace(JWT, mask)
+		.replace(UUID, mask)
 		.replace(BASIC, (_, basic: string, value: string) => basic + mask(value))
 		.replace(PARAM, (param, sep: string, name: string, value: string) =>
-			SECRET_NAME.test(name) && value ? `${sep}${name}=${mask(value)}` : param,
+			SECRET_NAME.test(decodedName(name)) && value
+				? `${sep}${name}=${mask(value)}`
+				: param,
 		)
 		.replace(
 			PATH_TOKEN,
@@ -116,7 +142,7 @@ const scrubValue = (v: unknown): unknown =>
 			? v.map(scrubValue)
 			: isRecord(v)
 				? Object.fromEntries(
-						Object.entries(v).map(([k, x]) => [k, scrubValue(x)]),
+						Object.entries(v).map(([k, x]) => [scrubText(k), scrubValue(x)]),
 					)
 				: v;
 

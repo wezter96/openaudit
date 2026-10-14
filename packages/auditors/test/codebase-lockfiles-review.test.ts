@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Finding } from "@openaudit/core";
 
-import { escapesRoot, lockfiles, scrubText } from "../src/codebase/lockfiles";
+import {
+	escapesRoot,
+	lockfiles,
+	scrubFinding,
+	scrubText,
+} from "../src/codebase/lockfiles";
 import { runAuditor } from "./helpers";
 
 /*
@@ -637,6 +642,37 @@ describe("output boundary: no credential in any finding", () => {
 		expect(scrubText("npm:u@1.0.0")).toBe("npm:u@1.0.0");
 	});
 
+	test("the scrub masks lower-case tokens, encoded names, keys and cut tokens", () => {
+		const uuid = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+		for (const s of [
+			// Classic npm tokens are lower-case UUIDs.
+			`https://npm.example.com/${uuid}/pkg`,
+			`token ${uuid} in prose`,
+			"https://h/x?code=lowercasesecretvalue",
+			"https://h/x?%74oken=lowercasesecretvalue",
+			"https://h/x?session=lowercasesecretvalue",
+		]) {
+			const out = scrubText(s);
+			expect(out).not.toContain(uuid);
+			expect(out).not.toContain("lowercasesecretvalue");
+		}
+		// A token cut by the length cap keeps no recognisable prefix of itself.
+		const cut = scrubText(
+			`${"x".repeat(16_384 - 10)} ghp_A1b2C3d4E5f6G7h8I9j0K1l2`,
+		);
+		expect(cut).not.toContain("A1b2C3");
+		// Object keys are strings that leave the auditor too.
+		const finding = scrubFinding({
+			ruleId: "code.lockfiles/x",
+			severity: "low",
+			category: "security",
+			title: "t",
+			message: "m",
+			meta: { "https://u:lowercasesecretvalue@h": 1 },
+		} as unknown as Parameters<typeof scrubFinding>[0]);
+		expect(JSON.stringify(finding)).not.toContain("lowercasesecretvalue");
+	});
+
 	test("the scrub is bounded on hostile strings", () => {
 		const n = 2_000_000;
 		const start = performance.now();
@@ -648,6 +684,9 @@ describe("output boundary: no credential in any finding", () => {
 			"/t".repeat(n / 2),
 			"eyJ".repeat(n / 3),
 			"u:p@ ".repeat(n / 5),
+			`${"a".repeat(n)} `,
+			"0f1e2d3c-".repeat(n / 9),
+			"?%".repeat(n / 2),
 		])
 			scrubText(s);
 		expect(performance.now() - start).toBeLessThan(2000);

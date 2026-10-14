@@ -82,8 +82,10 @@ export { parseYarnLock } from "./yarn";
  * Every finding passes through scrubFinding (scrub.ts) on the way out:
  * userinfo (after any run of `/` and `\` that WHATWG accepts for a special
  * scheme, across tabs and newlines, scp-like, or as `%40`), credential-named
- * query, fragment and path parameters, JWTs, basic auth, well-known token
- * prefixes and long mixed-case alphanumeric runs are masked with `redact`.
+ * query, fragment and path parameters (names percent-decoded first), JWTs,
+ * basic auth, UUIDs (classic npm tokens), well-known token prefixes and long
+ * mixed-case alphanumeric runs are masked with `redact`, in keys as in values;
+ * a string cut at the length cap loses the whole word the cut lands in.
  * A secret that looks like none of these (a short or lower-case token in a
  * path segment with an ordinary name, or a URL password holding a literal
  * space, which ends the authority here) can still be shown, and a host WHATWG
