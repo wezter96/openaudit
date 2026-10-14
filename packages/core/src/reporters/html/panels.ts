@@ -4,6 +4,7 @@ import {
 	groupByOwasp,
 	hasComplianceMapping,
 } from "../../compliance";
+import { CATEGORY_LABEL } from "../../labels";
 import {
 	type AuditorResult,
 	CATEGORIES,
@@ -39,18 +40,7 @@ export const t = (value: unknown): string => e(sanitizeText(value));
 const tm = (value: unknown): string =>
 	e(sanitizeText(value, { multiline: true }));
 
-export const CATEGORY_LABEL: Record<Category, string> = {
-	security: "Security",
-	accessibility: "Accessibility",
-	performance: "Performance",
-	seo: "SEO",
-	privacy: "Privacy",
-	"best-practices": "Best practices",
-	reliability: "Reliability",
-	maintainability: "Maintainability",
-	"supply-chain": "Supply chain",
-	compliance: "Compliance",
-};
+export { CATEGORY_LABEL };
 
 const CATEGORY_LEDE: Record<Category, string> = {
 	security:

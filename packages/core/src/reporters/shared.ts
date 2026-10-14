@@ -1,4 +1,4 @@
-import type { Finding, Location, Report, Severity } from "../model";
+import type { Finding, Location, Report } from "../model";
 import { severityRank } from "../model";
 
 /**
@@ -53,13 +53,7 @@ export const targetLabel = (report: Report): string => {
 	return baseName(t.root ?? t.file ?? t.input);
 };
 
-export const SEVERITY_LABEL: Record<Severity, string> = {
-	critical: "Critical",
-	high: "High",
-	medium: "Medium",
-	low: "Low",
-	info: "Info",
-};
+export { SEVERITY_LABEL } from "../labels";
 
 export const escapeHtml = (value: unknown): string =>
 	// Escapes all five HTML-significant characters, "&" first.

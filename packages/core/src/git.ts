@@ -1,6 +1,5 @@
-import { correlate } from "./correlate";
-import type { AuditorResult, Report } from "./model";
-import { summarize } from "./scoring";
+import type { Report } from "./model";
+import { filterFindings } from "./scoring";
 
 /*
  * Git inside an audited target is hostile: `.git/config` can name an
@@ -85,27 +84,16 @@ export const limitToChangedFiles = (
 ): Report => {
 	const keep = new Set(files);
 	let dropped = 0;
-	const results = report.results.map((r): AuditorResult => {
-		const findings = r.findings.filter((f) => {
-			const file = f.location?.file?.replace(/^\.\//, "");
-			const inDiff = file !== undefined && keep.has(file);
-			if (!inDiff) dropped++;
-			return inDiff;
-		});
-		if (findings.length === r.findings.length) return r;
-		const status =
-			r.status === "passed" || r.status === "failed"
-				? findings.some((f) => f.severity !== "info")
-					? "failed"
-					: "passed"
-				: r.status;
-		return { ...r, status, findings };
+	const { results, summary } = filterFindings(report.results, (f) => {
+		const file = f.location?.file?.replace(/^\.\//, "");
+		const inDiff = file !== undefined && keep.has(file);
+		if (!inDiff) dropped++;
+		return inDiff;
 	});
-	const correlated = correlate(results);
 	return {
 		...report,
-		results: correlated,
-		summary: summarize(correlated),
+		results,
+		summary,
 		diff: { base, changedFiles: keep.size },
 		...(dropped
 			? {

@@ -1,11 +1,9 @@
 import {
-	type AuditorResult,
-	correlate,
 	type Finding,
+	filterFindings,
 	matchesPattern,
 	type Report,
 	type SuppressionSummary,
-	summarize,
 } from "@openaudit/core";
 
 /** One place findings can be suppressed from: a config file or a baseline. */
@@ -52,32 +50,16 @@ export const applySuppressions = (
 	}));
 	const globs = active.map((s) => (s.paths ?? []).map((p) => new Bun.Glob(p)));
 
-	const results = report.results.map((r): AuditorResult => {
-		const findings = r.findings.filter((f) => {
-			for (const [i, s] of active.entries()) {
-				const reason = reasonFor(f, s, globs[i] ?? []);
-				const count = counts[i];
-				if (reason && count) {
-					count[reason]++;
-					return false;
-				}
+	const { results, summary } = filterFindings(report.results, (f) => {
+		for (const [i, s] of active.entries()) {
+			const reason = reasonFor(f, s, globs[i] ?? []);
+			const count = counts[i];
+			if (reason && count) {
+				count[reason]++;
+				return false;
 			}
-			return true;
-		});
-		if (findings.length === r.findings.length) return r;
-		const status =
-			r.status === "passed" || r.status === "failed"
-				? findings.some((f) => f.severity !== "info")
-					? "failed"
-					: "passed"
-				: r.status;
-		return { ...r, status, findings };
+		}
+		return true;
 	});
-
-	// Suppressing a kept finding promotes one of its duplicates.
-	const correlated = correlate(results);
-	return {
-		report: { ...report, results: correlated, summary: summarize(correlated) },
-		suppressed: counts,
-	};
+	return { report: { ...report, results, summary }, suppressed: counts };
 };
