@@ -4,6 +4,7 @@ export * from "./correlate";
 export * from "./engine";
 export * from "./errors";
 export * from "./git";
+export * from "./jsonc";
 export * from "./model";
 export * from "./reporters";
 export * from "./scoring";
