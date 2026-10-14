@@ -79,6 +79,13 @@ jobs:
           bunx wrangler versions upload --preview-alias "$alias" | tee upload.log
           url=$(grep -o 'https://[^ ]*workers\.dev' upload.log | grep -- "^https://$alias-" | head -1)
           if [ -z "$url" ]; then url=$(grep -o 'https://[^ ]*workers\.dev' upload.log | head -1); fi
+          if [ -z "$url" ]; then
+            # preview_urls in wrangler.jsonc takes effect with the next
+            # `wrangler deploy` on main; the account also needs a workers.dev
+            # subdomain.
+            echo "::warning title=No preview URL::Cloudflare returned no preview URL for this version."
+            exit 0
+          fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "### Preview: $url" >> "$GITHUB_STEP_SUMMARY"
 
@@ -145,6 +152,7 @@ jobs:
 
   ui:
     needs: deploy
+    if: needs.deploy.outputs.url != ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
