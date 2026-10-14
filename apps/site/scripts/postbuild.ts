@@ -220,8 +220,9 @@ const decodeEntities = (s: string) =>
 /**
  * The copied pages get the same head links and social tags as Astro's pages,
  * and the site's navigation bar (scripts/site-bar.ts). The bar's stylesheet
- * is hashed into the report's own CSP; the architecture page's policy is
- * built from its inline styles further down, so it includes the bar's.
+ * and theme script are hashed into the report's own CSP; the architecture
+ * page's policy is built from its inline styles and scripts further down, so
+ * it includes the bar's.
  */
 const COPIED: Record<
 	string,
@@ -266,10 +267,15 @@ for (const f of html.filter(copied)) {
 	].join("\n");
 	page = page.replace("</head>", `${tags}\n</head>`);
 	const bar = withSiteBar(page, { base: BASE, current: info.path });
-	page = bar.page.replace(
-		/(<meta http-equiv="Content-Security-Policy" content="[^"]*style-src )/,
-		`$1${sha(bar.style)} `,
-	);
+	page = bar.page
+		.replace(
+			/(<meta http-equiv="Content-Security-Policy" content="[^"]*style-src )/,
+			`$1${sha(bar.style)} `,
+		)
+		.replace(
+			/(<meta http-equiv="Content-Security-Policy" content="[^"]*script-src )/,
+			`$1${sha(bar.script)} `,
+		);
 	await Bun.write(f, page);
 }
 

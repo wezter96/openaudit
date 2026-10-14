@@ -41,15 +41,23 @@ const PAGES = [
 ];
 const WIDTHS = [
 	{ width: 375, height: 667 },
+	// the largest phones: wide enough for buttons to share a row with a title
+	{ width: 430, height: 932 },
 	{ width: 768, height: 1024 },
 	{ width: 1280, height: 800 },
 ];
 /**
- * Menus that open over the page, by selector; each must leave the page where
- * it was. Disclosures that open in place (FAQ, "All N wrapped tools") push
+ * Menus that open over the page, by trigger and the panel it opens; each must
+ * leave the page where it was and fit on screen. Disclosures that open in place (FAQ, "All N wrapped tools") push
  * the content below them down on purpose, so they are not listed.
  */
-const MENUS = ["[data-menu]", "#dl-button", ".oa-bar-menu summary"];
+const MENUS: Record<string, string> = {
+	"[data-menu]": "#site-nav",
+	"#dl-button": "#dl-menu",
+	".oa-bar-menu summary": ".oa-bar-menu nav",
+};
+/** Theme switches: one click must change the theme, a second puts it back. */
+const THEMES = ["[data-theme-toggle]", "[data-oa-theme]"];
 
 const failures: string[] = [];
 const fail = (where: string, what: string) =>
@@ -93,7 +101,7 @@ const checkPage = async (page: Page, where: string, path: string) => {
 	});
 	if (wide) fail(where, `scrolls sideways (${wide})`);
 
-	for (const selector of MENUS) {
+	for (const [selector, panel] of Object.entries(MENUS)) {
 		const trigger = page.locator(selector).first();
 		if (!(await trigger.isVisible().catch(() => false))) continue;
 		await trigger.scrollIntoViewIfNeeded();
@@ -103,6 +111,16 @@ const checkPage = async (page: Page, where: string, path: string) => {
 		await page.waitForTimeout(500);
 		const after = await layout(page);
 		if (before !== after) fail(where, `opening ${selector} moved the page`);
+		const off = await page.evaluate((sel) => {
+			const el = document.querySelector(sel);
+			if (!el) return "";
+			const r = el.getBoundingClientRect();
+			if (r.width === 0) return "";
+			return r.left < -1 || r.right > window.innerWidth + 1
+				? `${Math.round(r.left)} to ${Math.round(r.right)} in a ${window.innerWidth}px viewport`
+				: "";
+		}, panel);
+		if (off) fail(where, `${panel} opens off screen (${off})`);
 		await page.keyboard.press("Escape");
 		if (selector !== "#dl-button") {
 			// Escape doesn't close these; click again so the next check starts
@@ -110,6 +128,28 @@ const checkPage = async (page: Page, where: string, path: string) => {
 			if (await trigger.isVisible().catch(() => false)) await trigger.click();
 		}
 		await page.waitForTimeout(200);
+	}
+
+	for (const selector of THEMES) {
+		const button = page.locator(selector).first();
+		if (!(await button.isVisible().catch(() => false))) continue;
+		const theme = () =>
+			page.evaluate(() => {
+				const d = document.documentElement;
+				return (
+					d.dataset.theme ??
+					(matchMedia("(prefers-color-scheme: dark)").matches
+						? "dark"
+						: "light")
+				);
+			});
+		const first = await theme();
+		await button.click();
+		const second = await theme();
+		await button.click();
+		if (first === second) fail(where, `${selector} doesn't switch the theme`);
+		else if ((await theme()) !== first)
+			fail(where, `${selector} doesn't switch the theme back`);
 	}
 
 	await page.evaluate(() => {
