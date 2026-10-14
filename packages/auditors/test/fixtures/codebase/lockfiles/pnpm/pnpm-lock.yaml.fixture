@@ -1,0 +1,101 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+overrides:
+  ms: 2.1.3
+
+importers:
+
+  .:
+    dependencies:
+      bufferutil:
+        specifier: 4.0.8
+        version: 4.0.8
+      is-number:
+        specifier: github:jonschlinkert/is-number
+        version: https://codeload.github.com/jonschlinkert/is-number/tar.gz/98e8ff1da1a89f93d1397a24d7413ed15421c139
+      is-odd:
+        specifier: https://codeload.github.com/i-voted-for-trump/is-odd/tar.gz/refs/tags/3.0.1
+        version: https://codeload.github.com/i-voted-for-trump/is-odd/tar.gz/refs/tags/3.0.1
+      local-pkg:
+        specifier: file:./local-pkg
+        version: file:local-pkg
+      ms:
+        specifier: 2.1.3
+        version: 2.1.3
+      outside-link:
+        specifier: link:../../outside
+        version: link:../../outside
+      tarball-pkg:
+        specifier: https://cdn.example/tarball-pkg-1.0.0.tgz
+        version: https://cdn.example/tarball-pkg-1.0.0.tgz
+      utf-8-validate:
+        specifier: 6.0.4
+        version: 6.0.4
+
+packages:
+
+  bufferutil@4.0.8:
+    resolution: {integrity: sha512-4T53u4PdgsXqKaIctwF8ifXlRTTmEPJ8iEPWFdGZvcf7sbwYo6FKFEX9eNNAnzFZ7EzJAQ3CJeOtCRA4rDp7Pw==}
+    engines: {node: '>=6.14.2'}
+
+  is-number@6.0.0:
+    resolution: {integrity: sha512-Wu1VHeILBK8KAWJUAiSZQX94GmOE45Rg6/538fKwiloUu21KncEkYGPqob2oSZ5mUT73vLGrHQjKw3KMPwfDzg==}
+    engines: {node: '>=0.10.0'}
+
+  is-number@https://codeload.github.com/jonschlinkert/is-number/tar.gz/98e8ff1da1a89f93d1397a24d7413ed15421c139:
+    resolution: {tarball: https://codeload.github.com/jonschlinkert/is-number/tar.gz/98e8ff1da1a89f93d1397a24d7413ed15421c139}
+    version: 7.0.0
+    engines: {node: '>=0.12.0'}
+
+  is-odd@https://codeload.github.com/i-voted-for-trump/is-odd/tar.gz/refs/tags/3.0.1:
+    resolution: {tarball: https://codeload.github.com/i-voted-for-trump/is-odd/tar.gz/refs/tags/3.0.1}
+    version: 3.0.1
+    engines: {node: '>=4'}
+
+  local-pkg@file:local-pkg:
+    resolution: {directory: local-pkg, type: directory}
+
+  ms@2.1.3:
+    resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
+
+  node-gyp-build@4.8.4:
+    resolution: {integrity: sha512-LA4ZjwlnUblHVgq0oBF3Jl/6h/Nvs5fzBLwdEF4nuxnFdsfajde4WfxtJr3CaiH+F6ewcIB/q4jQ4UzPyid+CQ==}
+    hasBin: true
+
+  tarball-pkg@https://cdn.example/tarball-pkg-1.0.0.tgz:
+    resolution: {tarball: https://cdn.example/tarball-pkg-1.0.0.tgz}
+    version: 1.0.0
+
+  utf-8-validate@6.0.4:
+    resolution: {integrity: sha512-xu9GQDeFp+eZ6LnCywXN/zBancWvOpUMzgjLPSjy4BRHSmTelvn2E0DG0o1sTiw5hkCKBHo8rwSKncfRfv2EEQ==}
+    engines: {node: '>=6.14.2'}
+
+snapshots:
+
+  bufferutil@4.0.8:
+    dependencies:
+      node-gyp-build: 4.8.4
+
+  is-number@6.0.0: {}
+
+  is-number@https://codeload.github.com/jonschlinkert/is-number/tar.gz/98e8ff1da1a89f93d1397a24d7413ed15421c139: {}
+
+  is-odd@https://codeload.github.com/i-voted-for-trump/is-odd/tar.gz/refs/tags/3.0.1:
+    dependencies:
+      is-number: 6.0.0
+
+  local-pkg@file:local-pkg: {}
+
+  ms@2.1.3: {}
+
+  node-gyp-build@4.8.4: {}
+
+  tarball-pkg@https://cdn.example/tarball-pkg-1.0.0.tgz: {}
+
+  utf-8-validate@6.0.4:
+    dependencies:
+      node-gyp-build: 4.8.4
