@@ -8,7 +8,8 @@ name: Site
 # - report (main only): audits this commit inside the full scanner image,
 #   caches the report for the next fast deploy, and deploys again with it,
 #   unless a newer commit has reached main meanwhile.
-# - ui: scripts/check-ui.ts in WebKit and Chromium against what was deployed.
+# - ui: scripts/check-ui.ts in WebKit and Chromium against what was deployed
+#   (on main, once the report job has deployed the fresh report).
 
 on:
   push:
@@ -148,8 +149,11 @@ jobs:
           bunx wrangler deploy
 
   ui:
-    needs: deploy
-    if: needs.deploy.outputs.url != ''
+    # On main, after the report job, so it checks the report that stays live
+    # rather than the cached one the fast deploy shipped. Elsewhere the report
+    # job is skipped and this runs right after the preview upload.
+    needs: [deploy, report]
+    if: always() && needs.deploy.outputs.url != '' && needs.report.result != 'failure'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

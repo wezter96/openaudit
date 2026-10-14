@@ -76,7 +76,7 @@ Every internal link goes through `u()` in `src/lib/site.ts`, so it follows the b
 
 - `deploy` builds the site with the last self-audit (from the Actions cache). On `main` it runs `wrangler deploy`, so a change is live in about a minute. On any other branch it uploads a preview version (`wrangler versions upload --preview-alias <branch>`) and prints its URL in the job summary.
 - `report` (main only) audits the commit inside `ghcr.io/wezter96/openaudit:edge-full`, caches the report for the next deploy and deploys again, unless a newer commit has reached `main` meanwhile.
-- `ui` runs `check:ui` against what `deploy` published.
+- `ui` runs `check:ui` against what was published: on `main` after `report`, so it sees the fresh report; elsewhere right after the preview upload.
 
 Without the Cloudflare secrets, the deploy steps fail.
 
