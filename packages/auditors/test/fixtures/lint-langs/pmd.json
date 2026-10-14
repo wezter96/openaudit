@@ -1,0 +1,136 @@
+{
+  "formatVersion": 0,
+  "pmdVersion": "7.28.0",
+  "timestamp": "2026-10-14T10:34:40.510+02:00",
+  "files": [
+    {
+      "filename": "/repo/java/src/main/java/com/example/Accounts.java",
+      "violations": [
+        {
+          "beginline": 9,
+          "begincolumn": 17,
+          "endline": 9,
+          "endcolumn": 30,
+          "description": "Avoid unused private fields such as \u0027unusedCounter\u0027.",
+          "rule": "UnusedPrivateField",
+          "ruleset": "Best Practices",
+          "priority": 3,
+          "externalInfoUrl": "https://docs.pmd-code.org/snapshot/pmd_rules_java_bestpractices.html#unusedprivatefield"
+        },
+        {
+          "beginline": 12,
+          "begincolumn": 28,
+          "endline": 12,
+          "endcolumn": 39,
+          "description": "Double checked locking is not thread safe in Java.",
+          "rule": "DoubleCheckedLocking",
+          "ruleset": "Multithreading",
+          "priority": 1,
+          "externalInfoUrl": "https://docs.pmd-code.org/snapshot/pmd_rules_java_multithreading.html#doublecheckedlocking"
+        },
+        {
+          "beginline": 24,
+          "begincolumn": 16,
+          "endline": 24,
+          "endcolumn": 22,
+          "description": "Use equals() to compare object references.",
+          "rule": "CompareObjectsWithEquals",
+          "ruleset": "Error Prone",
+          "priority": 3,
+          "externalInfoUrl": "https://docs.pmd-code.org/snapshot/pmd_rules_java_errorprone.html#compareobjectswithequals"
+        },
+        {
+          "beginline": 24,
+          "begincolumn": 16,
+          "endline": 24,
+          "endcolumn": 22,
+          "description": "Use equals() to compare strings instead of \u0027\u003d\u003d\u0027 or \u0027!\u003d\u0027",
+          "rule": "UseEqualsToCompareStrings",
+          "ruleset": "Error Prone",
+          "priority": 3,
+          "externalInfoUrl": "https://docs.pmd-code.org/snapshot/pmd_rules_java_errorprone.html#useequalstocomparestrings"
+        },
+        {
+          "beginline": 29,
+          "begincolumn": 29,
+          "endline": 29,
+          "endcolumn": 31,
+          "description": "Ensure that resources like this FileInputStream object are closed after use",
+          "rule": "CloseResource",
+          "ruleset": "Error Prone",
+          "priority": 3,
+          "externalInfoUrl": "https://docs.pmd-code.org/snapshot/pmd_rules_java_errorprone.html#closeresource"
+        },
+        {
+          "beginline": 31,
+          "begincolumn": 11,
+          "endline": 32,
+          "endcolumn": 10,
+          "description": "Avoid empty catch blocks",
+          "rule": "EmptyCatchBlock",
+          "ruleset": "Error Prone",
+          "priority": 3,
+          "externalInfoUrl": "https://docs.pmd-code.org/snapshot/pmd_rules_java_errorprone.html#emptycatchblock"
+        },
+        {
+          "beginline": 44,
+          "begincolumn": 30,
+          "endline": 44,
+          "endcolumn": 47,
+          "description": "Avoid using implementation types like \u0027ArrayList\u0027; use the interface instead",
+          "rule": "LooseCoupling",
+          "ruleset": "Best Practices",
+          "priority": 3,
+          "externalInfoUrl": "https://docs.pmd-code.org/snapshot/pmd_rules_java_bestpractices.html#loosecoupling"
+        },
+        {
+          "beginline": 46,
+          "begincolumn": 9,
+          "endline": 48,
+          "endcolumn": 10,
+          "description": "This for loop can be replaced by a foreach loop",
+          "rule": "ForLoopCanBeForeach",
+          "ruleset": "Best Practices",
+          "priority": 3,
+          "externalInfoUrl": "https://docs.pmd-code.org/snapshot/pmd_rules_java_bestpractices.html#forloopcanbeforeach"
+        }
+      ]
+    },
+    {
+      "filename": "/repo/java/src/main/java/com/example/Crypto.java",
+      "violations": [
+        {
+          "beginline": 9,
+          "begincolumn": 47,
+          "endline": 9,
+          "endcolumn": 65,
+          "description": "Do not use hard coded encryption keys",
+          "rule": "HardCodedCryptoKey",
+          "ruleset": "Security",
+          "priority": 3,
+          "externalInfoUrl": "https://docs.pmd-code.org/snapshot/pmd_rules_java_security.html#hardcodedcryptokey"
+        },
+        {
+          "beginline": 10,
+          "begincolumn": 32,
+          "endline": 10,
+          "endcolumn": 87,
+          "description": "Do not use hard coded initialization vector in crypto operations",
+          "rule": "InsecureCryptoIv",
+          "ruleset": "Security",
+          "priority": 3,
+          "externalInfoUrl": "https://docs.pmd-code.org/snapshot/pmd_rules_java_security.html#insecurecryptoiv"
+        }
+      ]
+    }
+  ],
+  "suppressedViolations": [],
+  "processingErrors": [
+    {
+      "filename": "/repo/java/src/main/java/com/example/Broken.java",
+      "message": "ParseException: Parse exception in file \u0027/repo/java/src/main/java/com/example/Broken.java\u0027 at line 4, column 23: Encountered \"{\".\nWas expecting:\n    \")\" ...",
+      "detail": "net.sourceforge.pmd.lang.ast.ParseException: Parse exception in file \u0027/repo/java/src/main/java/com/example/Broken.java\u0027 at line 4, column 23: Encountered \"{\".\nWas expecting:\n    \")\" ...\n\tat net.sourceforge.pmd.lang.java.ast.JavaParserImpl.generateParseException(JavaParserImpl.java:14986)\n\tat net.sourceforge.pmd.lang.java.ast.JavaParserImpl.jj_consume_token(JavaParserImpl.java:14867)\n\tat net.sourceforge.pmd.lang.java.ast.JavaParserImpl.FormalParameters(JavaParserImpl.java:1853)\n\tat net.sourceforge.pmd.lang.java.ast.JavaParserImpl.MethodDeclaration(JavaParserImpl.java:1770)\n\tat net.sourceforge.pmd.lang.java.ast.JavaParserImpl.ClassOrInterfaceBodyDeclaration(JavaParserImpl.java:1483)\n\tat net.sourceforge.pmd.lang.java.ast.JavaParserImpl.ClassOrInterfaceBody(JavaParserImpl.java:1443)\n\tat net.sourceforge.pmd.lang.java.ast.JavaParserImpl.ClassOrInterfaceDeclaration(JavaParserImpl.java:825)\n\tat net.sourceforge.pmd.lang.java.ast.JavaParserImpl.TypeDeclaration(JavaParserImpl.java:757)\n\tat net.sourceforge.pmd.lang.java.ast.JavaParserImpl.CompilationUnit(JavaParserImpl.java:385)\n\tat net.sourceforge.pmd.lang.java.ast.JavaParser.parseImpl(JavaParser.java:57)\n\tat net.sourceforge.pmd.lang.java.ast.JavaParser.parseImpl(JavaParser.java:25)\n\tat net.sourceforge.pmd.lang.ast.impl.javacc.JjtreeParserAdapter.parse(JjtreeParserAdapter.java:36)\n\tat net.sourceforge.pmd.lang.impl.PmdRunnable.parse(PmdRunnable.java:112)\n\tat net.sourceforge.pmd.lang.impl.PmdRunnable.processSource(PmdRunnable.java:132)\n\tat net.sourceforge.pmd.lang.impl.PmdRunnable.run(PmdRunnable.java:80)\n\tat java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:572)\n\tat java.base/java.util.concurrent.FutureTask.run(FutureTask.java:317)\n\tat java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)\n\tat java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)\n\tat java.base/java.lang.Thread.run(Thread.java:1583)\n"
+    }
+  ],
+  "configurationErrors": []
+}

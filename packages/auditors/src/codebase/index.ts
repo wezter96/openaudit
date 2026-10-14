@@ -10,6 +10,8 @@ import {
 	clippy,
 	golangciLint,
 	mypy,
+	phpstan,
+	pmd,
 	ruff,
 	shellcheck,
 	staticcheck,
@@ -58,6 +60,8 @@ export const codebaseAuditors: ReadonlyArray<Auditor> = [
 	clippy,
 	mypy,
 	golangciLint,
+	phpstan,
+	pmd,
 	spectral,
 	secretsHistory,
 ];
