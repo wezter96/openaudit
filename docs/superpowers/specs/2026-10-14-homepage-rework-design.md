@@ -17,7 +17,7 @@ The home page speaks to developers who live in a terminal. The owner wants it to
 ## Home page, in order
 
 1. **Hero.** H1: "Your AI writes the code. Who checks it?" Sub-line: openaudit checks what you ship for security holes, leaked keys, slow pages and accessibility problems, then hands your AI the list to fix. Main action: a copy box holding the handoff sentence (below), with a one-line hint ("Paste this into Cursor, Claude Code, Codex or any agent that can run commands"). Secondary: "See a live report". Badges: Free · Open source · Runs on your machine. The dial stays on the right, with its bigger labels. `PITCH` stays as the tagline for OG cards, the footer and llms.txt.
-2. **The problem** (eyebrow "The problem"). Headline in two tones, e.g. "AI ships fast. Its mistakes ship too." Three short cards, each one real risk and its cost in plain words:
+2. **The problem** (eyebrow "The problem"). Headline: "AI ships fast. Its mistakes ship too.", with the second sentence in the accent. Three short cards, each one real risk and its cost in plain words:
    - a leaked API key that someone else runs up a bill on;
    - an admin page anyone can open, because nothing checks who's asking;
    - a site that fails accessibility rules, which the European Accessibility Act has enforced in the EU since 28 June 2025.
