@@ -1,4 +1,9 @@
-import { type AuditorError, redact, type Workspace } from "@openaudit/core";
+import {
+	type AuditorError,
+	MAX_TEXT_BYTES,
+	redact,
+	type Workspace,
+} from "@openaudit/core";
 import { Effect } from "effect";
 
 /** Shared helpers for codebase auditors: file selection, reading, matching. */
@@ -205,7 +210,12 @@ export const readTextFiles = (
 				Effect.gen(function* () {
 					const size = yield* ws.size(path);
 					if (size === 0 || size > maxBytes) return undefined;
-					const text = yield* ws.readText(path);
+					// readText refuses files over MAX_TEXT_BYTES; callers that allow
+					// more (lockfiles, up to 20 MB) read the bytes instead.
+					const text =
+						size > MAX_TEXT_BYTES
+							? new TextDecoder().decode(yield* ws.readBytes(path))
+							: yield* ws.readText(path);
 					if (text.includes("\u0000")) return undefined;
 					if (
 						!options.allowMinified &&

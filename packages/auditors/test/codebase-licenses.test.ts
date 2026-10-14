@@ -243,6 +243,32 @@ describe("code.licenses", () => {
 		}
 	});
 
+	test("reads lockfiles larger than the 2 MB text limit", async () => {
+		// Workspace.readText refuses files over 2 MB, and readTextFiles used to
+		// swallow that, so a big package-lock.json was silently not checked.
+		const dir = await mkdtemp(join(tmpdir(), "openaudit-licenses-big-"));
+		try {
+			const lock = JSON.stringify({
+				name: "big",
+				lockfileVersion: 3,
+				packages: {
+					"": { name: "big", description: "x".repeat(2_500_000) },
+					"node_modules/gpl-lib": { version: "1.0.0", license: "GPL-3.0-only" },
+				},
+			});
+			expect(lock.length).toBeGreaterThan(2 * 1024 * 1024);
+			await Bun.write(join(dir, "package-lock.json"), lock);
+			const report = await runAuditor(licenses, dir, {
+				settings: { "code.licenses": { deny: ["GPL-*"] } },
+			});
+			expect(result(report).findings.map((f) => f.ruleId)).toContain(
+				"code.licenses/denied-license",
+			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
 	test("ignorePackages and the unknown severity", async () => {
 		const report = await audit({
 			deny: ["GPL-*", "AGPL-*"],
