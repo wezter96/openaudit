@@ -62,7 +62,7 @@ if (menu && nav) {
 const flash = (button: HTMLElement, label?: HTMLElement | null) => {
 	button.classList.add("copied");
 	const before = label?.textContent;
-	if (label) label.textContent = "Copied";
+	if (label) label.textContent = button.dataset.copiedLabel ?? "Copied";
 	window.setTimeout(() => {
 		button.classList.remove("copied");
 		if (label && before) label.textContent = before;

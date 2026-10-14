@@ -1,61 +1,91 @@
 ---
 import { HANDOFF, HANDOFF_AGENTS } from "../lib/site";
 import Icon from "./Icon.astro";
+
+interface Props {
+	/** Distinguishes the hint's id when the box appears twice on a page. */
+	readonly id?: string;
+}
+const { id = "handoff" } = Astro.props;
 ---
 
-<figure class="handoff">
-	<figcaption>Paste this into your AI</figcaption>
-	<div class="handoff-box">
+<div class="handoff">
+	<button
+		class="btn primary run-ai needs-js"
+		type="button"
+		data-copy-text={HANDOFF}
+		data-copied-label="Copied. Paste it into your AI"
+		aria-describedby={`${id}-hint`}
+	>
+		<Icon name="robot" class="idle" />
+		<Icon name="check" class="done" />
+		<span class="copy-label">Run it with your AI</span>
+	</button>
+	<p class="handoff-hint" id={`${id}-hint`}>Copies a one-line prompt for {HANDOFF_AGENTS}.</p>
+	<details class="peek">
+		<summary>What gets copied?</summary>
 		<p>{HANDOFF}</p>
-		<button class="copy-btn needs-js" type="button" data-copy-text={HANDOFF} aria-label="Copy the sentence for your AI">
-			<Icon name="copy" class="idle" />
-			<Icon name="check" class="done" />
-			<span class="copy-label">Copy</span>
-		</button>
-	</div>
-	<p class="handoff-hint">Works in {HANDOFF_AGENTS}: any agent that can run commands.</p>
-</figure>
+	</details>
+</div>
 
 <style>
 	.handoff {
-		margin: 0;
 		max-width: 34rem;
 	}
 
-	figcaption {
-		font-size: 0.8125rem;
-		font-weight: 650;
-		letter-spacing: 0.06em;
-		text-transform: uppercase;
-		color: var(--accent);
-	}
-
-	.handoff-box {
-		display: flex;
-		align-items: flex-start;
-		gap: 0.9rem;
-		margin-top: 0.6rem;
-		padding: 0.9rem 0.75rem 0.9rem 1.1rem;
-		background: var(--paper-2);
-		border: 1px solid var(--hair);
-		border-left: 3px solid var(--accent);
-		border-radius: 10px;
-		box-shadow: var(--lift);
-	}
-
-	.handoff-box p {
-		flex: 1;
-		min-width: 0;
+	.run-ai {
+		min-height: 3.25rem;
+		padding-inline: 1.4rem;
 		font-size: 1.0625rem;
-		font-weight: 550;
-		line-height: 1.45;
-		color: var(--ink);
-		overflow-wrap: anywhere;
+	}
+
+	.run-ai :global(.done) {
+		display: none;
+	}
+
+	.run-ai:global(.copied) :global(.idle) {
+		display: none;
+	}
+
+	.run-ai:global(.copied) :global(.done) {
+		display: block;
 	}
 
 	.handoff-hint {
 		margin-top: 0.6rem;
 		font-size: 0.875rem;
 		color: var(--graphite);
+	}
+
+	.peek {
+		margin-top: 0.35rem;
+		font-size: 0.875rem;
+		color: var(--graphite);
+	}
+
+	.peek summary {
+		cursor: pointer;
+		width: fit-content;
+		text-decoration: underline;
+		text-decoration-color: var(--hair);
+		text-underline-offset: 0.2em;
+	}
+
+	.peek summary:hover {
+		color: var(--accent);
+	}
+
+	.peek p {
+		margin-top: 0.5rem;
+		padding: 0.6rem 0.8rem;
+		border-left: 2px solid var(--accent);
+		background: var(--paper-2);
+		color: var(--ink);
+		overflow-wrap: anywhere;
+	}
+
+	/* without script the button can't copy, so the sentence shows instead */
+	:global(html:not(.js)) .peek summary {
+		display: none;
 	}
 </style>
