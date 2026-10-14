@@ -473,6 +473,31 @@ describe("tflint auditor", () => {
 		);
 	});
 
+	test("drops issues in files openaudit does not read (symlinks)", async () => {
+		process.env.OPENAUDIT_TFLINT_PLUGIN_DIR = join(
+			tmpdir(),
+			"openaudit-no-such-dir",
+		);
+		// tflint follows a symlinked .tf file; its messages could quote the
+		// target's content, so only files the Workspace lists may be reported.
+		const report = await runWithExec(tflint, TF, present, async (cmd) => {
+			const dir = cmd.find((a) => a.startsWith("--chdir=./"))?.slice(10);
+			return dir === "."
+				? {
+						code: 2,
+						stdout: sampleText("tflint.json").replace(
+							/"filename":\s*"[^"]+"/g,
+							'"filename": "linked.tf"',
+						),
+						stderr: "",
+					}
+				: { code: 0, stdout: '{"issues":[],"errors":[]}', stderr: "" };
+		});
+		expect(
+			report.results[0]?.findings.map((f) => f.location?.file),
+		).not.toContain("linked.tf");
+	});
+
 	test("enables cloud rulesets installed in the trusted plugin dir", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "openaudit-tflint-plugins-"));
 		try {

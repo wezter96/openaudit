@@ -341,7 +341,13 @@ export const tflint = defineAuditor({
 					return yield* new AuditorError({
 						message: `tflint failed: ${truncate(parsed.errors[0] ?? "", 300)}`,
 					});
-				findings.push(...parsed.findings);
+				// tflint follows symlinked .tf files, which the Workspace never reads;
+				// their messages could quote content from outside the target.
+				findings.push(
+					...parsed.findings.filter(
+						(f) => !f.location?.file || texts.has(f.location.file),
+					),
+				);
 			}
 			return findings;
 		}),
