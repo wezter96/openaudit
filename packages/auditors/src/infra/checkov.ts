@@ -8,6 +8,8 @@ import {
 } from "@openaudit/core";
 import { Effect } from "effect";
 
+import { escapeRegex, gitignoredPaths } from "../tool";
+
 import { DOCKERFILE_RE } from "./dockerfile";
 import { asArray, asRecord } from "./shared";
 
@@ -100,8 +102,13 @@ export const checkov = defineAuditor({
 				ctx.target.type === "file" && ctx.target.file
 					? ["-f", ctx.target.file]
 					: ["-d", "."];
+			// --skip-path takes a regex over paths relative to the cwd (the root).
+			const skip = (yield* gitignoredPaths(ws)).flatMap((p) => [
+				"--skip-path",
+				`^(\\./|/)?${escapeRegex(p)}${p.endsWith("/") ? "" : "$"}`,
+			]);
 			const result = yield* ctx.exec.run(
-				[bin, ...scope, "-o", "json", "--quiet", "--compact"],
+				[bin, ...scope, ...skip, "-o", "json", "--quiet", "--compact"],
 				{ cwd: ws.root, timeoutMs: 280_000 },
 			);
 			// Exit code 1 means "failed checks"; anything else non-zero is a crash.

@@ -73,6 +73,7 @@ const noWorkspacesLayer = Layer.succeed(Workspaces, {
 		root,
 		absolute: (p) => p,
 		files: Effect.fail(disabled("File access")),
+		ignored: Effect.succeed([]),
 		glob: () => Effect.fail(disabled("File access")),
 		readText: () => Effect.fail(disabled("File access")),
 		readBytes: () => Effect.fail(disabled("File access")),

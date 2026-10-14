@@ -397,6 +397,8 @@ export const secretsHistory = defineAuditor({
 	engine: "external",
 	tool: "gitleaks",
 	defaultEnabled: false,
+	// A secret committed once stays in history after its file is gitignored.
+	keepIgnored: true,
 	run: (ctx) =>
 		Effect.gen(function* () {
 			const ws = yield* requireWorkspace(ctx);

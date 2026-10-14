@@ -158,6 +158,7 @@ export const jscpd = defineAuditor({
 						"--silent",
 						"--min-lines",
 						"10",
+						"--gitignore",
 						"--ignore",
 						[...JSCPD_IGNORES, ...projectIgnores].join(","),
 					],

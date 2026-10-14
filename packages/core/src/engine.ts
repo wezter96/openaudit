@@ -14,7 +14,7 @@ import {
 	type TargetKind,
 } from "./model";
 import { summarize } from "./scoring";
-import { Exec, Http, Workspaces } from "./services";
+import { Exec, Http, ignoredPathMatcher, Workspaces } from "./services";
 import { resolveTarget } from "./target";
 
 export const VERSION = "0.2.0";
@@ -116,18 +116,31 @@ const isSuppressed = (f: Finding, s: Suppressions | undefined): boolean => {
 	return false;
 };
 
+/** Drops findings in gitignored files and counts them. */
+interface IgnoredFilter {
+	readonly matches: (path: string) => boolean;
+	dropped: number;
+}
+
 const finalize = (
 	auditor: Auditor,
 	inputs: ReadonlyArray<FindingInput>,
 	suppress: Suppressions | undefined,
+	ignored: IgnoredFilter | undefined,
 ): Finding[] => {
 	const seen = new Set<string>();
 	const out: Finding[] = [];
+	const filter = auditor.keepIgnored ? undefined : ignored;
 	for (const input of inputs) {
 		const fingerprint = input.fingerprint ?? fingerprintOf(auditor.id, input);
 		if (seen.has(fingerprint)) continue;
 		seen.add(fingerprint);
 		const f: Finding = { ...input, auditor: auditor.id, fingerprint };
+		const file = f.location?.file;
+		if (filter && file && filter.matches(file)) {
+			filter.dropped++;
+			continue;
+		}
 		if (!isSuppressed(f, suppress)) out.push(f);
 	}
 	return out.sort(
@@ -139,6 +152,7 @@ const runOne = (
 	auditor: Auditor,
 	ctx: AuditContext,
 	input: RunAuditInput,
+	ignored: IgnoredFilter | undefined,
 ): Effect.Effect<AuditorResult> => {
 	const base = {
 		auditor: auditor.id,
@@ -172,7 +186,7 @@ const runOne = (
 				}),
 		}),
 		Effect.map((inputs): AuditorResult => {
-			const findings = finalize(auditor, inputs, input.suppress);
+			const findings = finalize(auditor, inputs, input.suppress, ignored);
 			return {
 				...base,
 				status: findings.some((f) => f.severity !== "info")
@@ -255,6 +269,22 @@ export const runAudit = (
 			log: (message) => Effect.logDebug(message),
 		};
 
+		// Wrapped tools walk the folder themselves; findings in files git
+		// ignores are dropped here, whichever tool reported them.
+		const workspace = ctx.workspace;
+		const ignoredPaths = workspace
+			? yield* workspace.ignored.pipe(
+					Effect.catch(() => Effect.succeed([] as ReadonlyArray<string>)),
+				)
+			: [];
+		const ignored: IgnoredFilter | undefined =
+			workspace && ignoredPaths.length
+				? {
+						matches: ignoredPathMatcher(workspace.root, ignoredPaths),
+						dropped: 0,
+					}
+				: undefined;
+
 		const selected = selectAuditors(
 			input.auditors,
 			info.kinds,
@@ -266,7 +296,7 @@ export const runAudit = (
 			selected,
 			(auditor) =>
 				Effect.sync(() => emit({ type: "start", auditor })).pipe(
-					Effect.andThen(runOne(auditor, ctx, input)),
+					Effect.andThen(runOne(auditor, ctx, input, ignored)),
 					Effect.tap((result) =>
 						Effect.sync(() => emit({ type: "finish", result })),
 					),
@@ -285,6 +315,18 @@ export const runAudit = (
 			durationMs: finishedAt.getTime() - startedAt.getTime(),
 			summary: summarize(results),
 			results,
+			...(ignored?.dropped
+				? {
+						suppressed: [
+							{
+								source: ".gitignore",
+								rules: 0,
+								paths: ignored.dropped,
+								fingerprints: 0,
+							},
+						],
+					}
+				: {}),
 		} satisfies Report;
 	});
 

@@ -78,6 +78,12 @@ export interface Auditor {
 	readonly network?: boolean;
 	/** Runs when no explicit selection is given. Defaults to true. */
 	readonly defaultEnabled?: boolean;
+	/**
+	 * Reads gitignored or historic files on purpose (installed packages, git
+	 * history), so the engine keeps its findings in ignored paths. Every
+	 * other auditor's findings there are dropped and counted.
+	 */
+	readonly keepIgnored?: boolean;
 	readonly run: (
 		ctx: AuditContext,
 	) => Effect.Effect<ReadonlyArray<FindingInput>, AuditorError | SkipAudit>;

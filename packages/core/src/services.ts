@@ -3,6 +3,7 @@ import { join, relative, resolve, sep } from "node:path";
 import { Context, Effect, Layer } from "effect";
 
 import { AuditorError } from "./errors";
+import { GIT_HARDENING_ENV } from "./git";
 
 /* -------------------------------------------------------------------------- */
 /*                                  Workspace                                 */
@@ -44,6 +45,12 @@ export interface Workspace {
 	readonly root: string;
 	/** All non-ignored files (respects .gitignore inside git repos). Cached. */
 	readonly files: Effect.Effect<ReadonlyArray<string>, AuditorError>;
+	/**
+	 * Untracked paths that .gitignore excludes, directories with a trailing
+	 * `/`. Tracked files are never in it, so a target can't hide committed
+	 * code by ignoring it. Empty outside a git repo. Cached.
+	 */
+	readonly ignored: Effect.Effect<ReadonlyArray<string>, AuditorError>;
 	/** Files matching a glob such as `**\/*.{ts,tsx}` (Bun.Glob syntax). */
 	readonly glob: (
 		pattern: string,
@@ -77,44 +84,64 @@ const walk = async (root: string): Promise<string[]> => {
 	return out;
 };
 
+/** Variables that would point git at another repository than the target. */
+const GIT_LOCATION_VARS = [
+	"GIT_DIR",
+	"GIT_WORK_TREE",
+	"GIT_INDEX_FILE",
+	"GIT_OBJECT_DIRECTORY",
+	"GIT_ALTERNATE_OBJECT_DIRECTORIES",
+	"GIT_COMMON_DIR",
+	"GIT_CEILING_DIRECTORIES",
+];
+
 /**
- * Lists files via git so .gitignore is honoured. The target may be an untrusted
- * repository, so repo-level config that can execute commands is overridden.
+ * Runs `git ls-files` in the target and returns its NUL-separated paths, or
+ * undefined when the target isn't a git repo. The target may be untrusted,
+ * so it runs with the hardened environment, and no inherited variable can
+ * point it at another repository.
  */
-const gitFiles = async (root: string): Promise<string[] | undefined> => {
+const lsFiles = async (
+	root: string,
+	args: ReadonlyArray<string>,
+): Promise<string[] | undefined> => {
 	try {
+		const env: Record<string, string | undefined> = {
+			...process.env,
+			...GIT_HARDENING_ENV,
+		};
+		for (const name of GIT_LOCATION_VARS) delete env[name];
 		const proc = Bun.spawn(
 			[
 				"git",
-				"-c",
-				"core.fsmonitor=false",
 				"-c",
 				"core.untrackedCache=false",
 				"-c",
 				`core.hooksPath=${devNull}`,
 				"ls-files",
-				"-co",
+				...args,
 				"--exclude-standard",
 				"-z",
 			],
-			{
-				cwd: root,
-				stdout: "pipe",
-				stderr: "ignore",
-				env: {
-					...process.env,
-					GIT_CONFIG_NOSYSTEM: "1",
-					GIT_TERMINAL_PROMPT: "0",
-				},
-			},
+			{ cwd: root, stdout: "pipe", stderr: "ignore", env },
 		);
 		const text = await new Response(proc.stdout).text();
 		if ((await proc.exited) !== 0) return undefined;
+		return text.split("\0").filter(Boolean);
+	} catch {
+		return undefined;
+	}
+};
+
+/** Lists files via git so .gitignore is honoured. */
+const gitFiles = async (root: string): Promise<string[] | undefined> => {
+	try {
+		const listed = await lsFiles(root, ["-co"]);
+		if (!listed) return undefined;
 		const ignored = new Set(DEFAULT_IGNORES);
-		const files = text
-			.split("\0")
-			.filter(Boolean)
-			.filter((f) => !f.split("/").some((part) => ignored.has(part)));
+		const files = listed.filter(
+			(f) => !f.split("/").some((part) => ignored.has(part)),
+		);
 		const regular: string[] = [];
 		for (const f of files.slice(0, MAX_FILES)) {
 			// Skip symlinks: they can point outside the workspace.
@@ -128,6 +155,30 @@ const gitFiles = async (root: string): Promise<string[] | undefined> => {
 };
 
 const devNull = process.platform === "win32" ? "NUL" : "/dev/null";
+
+/**
+ * A test for root-relative paths against `Workspace.ignored`: true for an
+ * ignored file or anything inside an ignored directory. Paths may start with
+ * `./` or be absolute under `root`.
+ */
+export const ignoredPathMatcher = (
+	root: string,
+	ignored: ReadonlyArray<string>,
+): ((path: string) => boolean) => {
+	const files = new Set<string>();
+	const dirs: string[] = [];
+	for (const p of ignored) {
+		if (p.endsWith("/")) dirs.push(p);
+		else files.add(p);
+	}
+	const prefix = toPosix(resolve(root)) + "/";
+	return (path) => {
+		let p = toPosix(path);
+		if (p.startsWith(prefix)) p = p.slice(prefix.length);
+		while (p.startsWith("./")) p = p.slice(2);
+		return files.has(p) || dirs.some((d) => p.startsWith(d));
+	};
+};
 
 /** Max bytes `readBytes` will load (mobile artifacts can be large). */
 export const MAX_BINARY_BYTES = 512 * 1024 * 1024;
@@ -151,6 +202,21 @@ export const makeWorkspace = (rootInput: string): Workspace => {
 			throw new Error(`Path resolves outside workspace: ${p}`);
 		return rf;
 	};
+
+	let ignoredCache: Promise<string[]> | undefined;
+	const ignored = Effect.tryPromise({
+		try: () => {
+			ignoredCache ??= lsFiles(root, ["-oi", "--directory"]).then((paths) =>
+				(paths ?? []).slice(0, MAX_FILES),
+			);
+			return ignoredCache;
+		},
+		catch: (cause) =>
+			new AuditorError({
+				message: `Failed to list ignored files in ${root}`,
+				cause,
+			}),
+	});
 
 	let cache: Promise<string[]> | undefined;
 	const listFiles = () => {
@@ -181,6 +247,7 @@ export const makeWorkspace = (rootInput: string): Workspace => {
 		root,
 		absolute,
 		files,
+		ignored,
 		glob: (pattern) =>
 			Effect.map(files, (all) => {
 				const g = new Bun.Glob(pattern);

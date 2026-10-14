@@ -16,6 +16,7 @@ import { Effect } from "effect";
 import {
 	arr,
 	cweTags,
+	gitignoredPaths,
 	inIgnoredDir,
 	num,
 	owaspTags,
@@ -478,6 +479,9 @@ export const trivyFs = defineAuditor({
 				"trivy",
 				"Install: brew install trivy (https://trivy.dev/latest/getting-started/installation/).",
 			);
+			const skip = (yield* gitignoredPaths(ws)).flatMap((p) =>
+				p.endsWith("/") ? ["--skip-dirs", p.slice(0, -1)] : ["--skip-files", p],
+			);
 			// From a scratch dir: trivy reads trivy.yaml from its cwd.
 			const res = yield* withTempDir("openaudit-trivy-", (cwd) =>
 				runTool(
@@ -492,6 +496,7 @@ export const trivyFs = defineAuditor({
 						"--misconfig-scanners",
 						TRIVY_MISCONFIG_SCANNERS.join(","),
 						...DEFAULT_IGNORES.flatMap((d) => ["--skip-dirs", `**/${d}`]),
+						...skip,
 						"--quiet",
 						ws.root,
 					],

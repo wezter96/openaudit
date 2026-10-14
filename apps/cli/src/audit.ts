@@ -341,7 +341,11 @@ const audit = async (
 			})),
 		},
 	]);
-	let suppressed = applied.suppressed.filter(hasSuppressionNotice);
+	// The engine's own count (findings in gitignored files) comes first.
+	let suppressed = [
+		...(result.success.suppressed ?? []),
+		...applied.suppressed.filter(hasSuppressionNotice),
+	];
 	let report: Report = suppressed.length
 		? { ...applied.report, suppressed }
 		: applied.report;

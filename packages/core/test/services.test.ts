@@ -118,3 +118,101 @@ describe("Http", () => {
 		expect(sent).toEqual(["Bearer user"]);
 	});
 });
+
+describe("gitignore", () => {
+	const repo = mkdtempSync(join(tmpdir(), "openaudit-gitignore-"));
+	const git = (...args: string[]) =>
+		Bun.spawnSync(["git", ...args], {
+			cwd: repo,
+			env: {
+				...process.env,
+				GIT_AUTHOR_NAME: "t",
+				GIT_AUTHOR_EMAIL: "t@example.com",
+				GIT_COMMITTER_NAME: "t",
+				GIT_COMMITTER_EMAIL: "t@example.com",
+			},
+		});
+	mkdirSync(join(repo, "src"));
+	mkdirSync(join(repo, "logs"));
+	writeFileSync(join(repo, "src", "a.ts"), "export {}");
+	writeFileSync(join(repo, "hidden.js"), "committed, then ignored");
+	git("init", "-q");
+	git("add", "src/a.ts", "hidden.js");
+	git("commit", "-qm", "init");
+	writeFileSync(join(repo, ".gitignore"), ".env\nlogs/\nhidden.js\n");
+	writeFileSync(join(repo, ".env"), "KEY=abc");
+	writeFileSync(join(repo, "logs", "a.log"), "x");
+	afterAll(() => rmSync(repo, { recursive: true, force: true }));
+
+	const ws = makeWorkspace(repo);
+	test("lists tracked files and leaves out untracked ignored ones", async () => {
+		expect([...(await Effect.runPromise(ws.files))].sort()).toEqual([
+			".gitignore",
+			"hidden.js",
+			"src/a.ts",
+		]);
+		expect([...(await Effect.runPromise(ws.ignored))].sort()).toEqual([
+			".env",
+			"logs/",
+		]);
+	});
+
+	test("an inherited GIT_DIR can't point the listing elsewhere", async () => {
+		const saved = process.env.GIT_DIR;
+		process.env.GIT_DIR = join(dir, "nowhere.git");
+		try {
+			const fresh = makeWorkspace(repo);
+			expect(await Effect.runPromise(fresh.files)).toContain("src/a.ts");
+		} finally {
+			if (saved === undefined) delete process.env.GIT_DIR;
+			else process.env.GIT_DIR = saved;
+		}
+	});
+
+	const reporter = (id: string, keepIgnored?: boolean) =>
+		defineAuditor({
+			id,
+			title: id,
+			description: id,
+			categories: ["security"],
+			targets: ["codebase"],
+			engine: "external",
+			...(keepIgnored ? { keepIgnored } : {}),
+			run: () =>
+				Effect.succeed(
+					[
+						".env",
+						"./logs/a.log",
+						join(repo, ".env"),
+						"hidden.js",
+						"src/a.ts",
+					].map((file, i) => ({
+						ruleId: `${id}/r${i}`,
+						title: "t",
+						message: "m",
+						severity: "high" as const,
+						category: "security" as const,
+						location: { file },
+					})),
+				),
+		});
+
+	test("findings in ignored files are dropped and counted", async () => {
+		const report = await Effect.runPromise(
+			runAudit({
+				target: repo,
+				auditors: [reporter("test.walker"), reporter("test.history", true)],
+			}).pipe(Effect.provide(CoreLive)),
+		);
+		const files = (id: string) =>
+			report.results
+				.find((r) => r.auditor === id)
+				?.findings.map((f) => f.location?.file);
+		// Committed files stay even though .gitignore now matches them.
+		expect(files("test.walker")).toEqual(["hidden.js", "src/a.ts"]);
+		expect(files("test.history")).toHaveLength(5);
+		expect(report.suppressed).toEqual([
+			{ source: ".gitignore", rules: 0, paths: 3, fingerprints: 0 },
+		]);
+	});
+});

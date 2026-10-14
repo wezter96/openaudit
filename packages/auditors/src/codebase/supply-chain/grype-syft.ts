@@ -6,10 +6,19 @@ import {
 	requireTool,
 	requireWorkspace,
 	type Severity,
+	type Workspace,
 } from "@openaudit/core";
 import { Effect } from "effect";
 
-import { arr, cweTags, num, parseJson, severityOf, str } from "../../tool";
+import {
+	arr,
+	cweTags,
+	gitignoredPaths,
+	num,
+	parseJson,
+	severityOf,
+	str,
+} from "../../tool";
 import { severityFromScore } from "../dependencies";
 import { isRecord, truncate } from "../util";
 import { run, scanPath, vulnFinding, withTempDir } from "./shared";
@@ -31,6 +40,15 @@ const grypeSeverity = (vuln: Record<string, unknown>): Severity => {
 };
 
 /** Parses `grype -o json`. */
+/** grype and syft `--exclude` globs, relative to the scanned directory, for what .gitignore excludes. */
+const anchoreExcludes = (ws: Workspace) =>
+	Effect.map(gitignoredPaths(ws), (paths) =>
+		paths.flatMap((p) => [
+			"--exclude",
+			p.endsWith("/") ? `./${p}**` : `./${p}`,
+		]),
+	);
+
 export const parseGrypeReport = (
 	json: unknown,
 	root: string,
@@ -119,8 +137,9 @@ export const grype = defineAuditor({
 				"grype",
 				"Install: brew install grype or curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh.",
 			);
+			const exclude = yield* anchoreExcludes(ws);
 			const res = yield* withTempDir((dir) =>
-				run(ctx, [bin, `dir:${ws.root}`, "-o", "json", "-q"], {
+				run(ctx, [bin, `dir:${ws.root}`, ...exclude, "-o", "json", "-q"], {
 					cwd: dir,
 					okCodes: [0],
 					env: { GRYPE_CHECK_FOR_APP_UPDATE: "false" },
@@ -324,7 +343,15 @@ export const syftLicenses = defineAuditor({
 						}),
 					);
 			}
-			const args = [bin, "scan", `dir:${ws.root}`, "-o", "syft-json", "-q"];
+			const args = [
+				bin,
+				"scan",
+				`dir:${ws.root}`,
+				...(yield* anchoreExcludes(ws)),
+				"-o",
+				"syft-json",
+				"-q",
+			];
 			if (sbomOut)
 				args.push("-o", `cyclonedx-json=${resolve(ws.root, sbomOut)}`);
 			const res = yield* withTempDir((dir) =>

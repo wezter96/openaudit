@@ -157,6 +157,7 @@ A config found inside the audited target is written by whoever controls the targ
 
 openaudit treats every target as hostile:
 - **Files:** reads are confined to the project root and never follow symlinks out of it.
+- **Ignored files:** what `.gitignore` excludes isn't scanned. Wrapped tools that walk the folder get it as a skip list, and findings any tool still reports there are dropped and counted in the report. Committed files are always scanned, even if `.gitignore` matches them, so a repository can't hide its own code. History scans and the licence check read ignored files on purpose.
 - **HTTP:** user-supplied headers go only to the exact target origin, and credentials are stripped on cross-origin redirects.
 - **Agents:** openaudit's own agents have no shell, and the browser is held to the target origin at the network layer. deepsec's reviewer does get a sandboxed shell, which is why it is opt-in.
 - **Wrapped tools:** tools never build or install the target. They run from temporary directories so project config can't redirect them (pnpm hook files, pa11y config, oxlint JS plugins, Spectral custom functions). Linters whose config is code (ESLint, clippy, mypy, golangci-lint) are opt-in.

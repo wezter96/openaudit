@@ -14,7 +14,17 @@ import {
 } from "@openaudit/core";
 import { Effect } from "effect";
 
-import { arr, jsonLines, num, parseJson, relPath, runTool, str } from "../tool";
+import {
+	arr,
+	escapeRegex,
+	gitignoredPaths,
+	jsonLines,
+	num,
+	parseJson,
+	relPath,
+	runTool,
+	str,
+} from "../tool";
 import { cweUrl, extOf, isRecord, kebab, scrubLine, truncate } from "./util";
 
 /**
@@ -134,7 +144,14 @@ export const trufflehog = defineAuditor({
 			);
 			const verify = ctx.options.settings?.["code.trufflehog"]?.verify === true;
 			// Skip the directories every built-in auditor skips (dependencies,
-			// .git objects, build output, caches): one regex per line.
+			// .git objects, build output, caches) and what .gitignore excludes:
+			// one regex per line.
+			const root = escapeRegex(ws.root);
+			const ignored = (yield* gitignoredPaths(ws)).map((p) =>
+				p.endsWith("/")
+					? `^${root}/${escapeRegex(p)}`
+					: `^${root}/${escapeRegex(p)}$`,
+			);
 			const excludes = join(
 				tmpdir(),
 				`openaudit-trufflehog-${crypto.randomUUID()}.txt`,
@@ -142,9 +159,10 @@ export const trufflehog = defineAuditor({
 			yield* Effect.promise(() =>
 				Bun.write(
 					excludes,
-					DEFAULT_IGNORES.map(
-						(d) => `(^|/)${d.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/`,
-					).join("\n"),
+					[
+						...DEFAULT_IGNORES.map((d) => `(^|/)${escapeRegex(d)}/`),
+						...ignored,
+					].join("\n"),
 				),
 			);
 			const res = yield* runTool(
@@ -255,6 +273,10 @@ export const bandit = defineAuditor({
 				"bandit",
 				"Install: pipx install bandit or pip install bandit (https://bandit.readthedocs.io).",
 			);
+			// bandit's -x is a comma list, so a path with a comma can't be in it.
+			const ignored = (yield* gitignoredPaths(ws))
+				.filter((p) => !p.includes(","))
+				.map((p) => (p.endsWith("/") ? `${ws.root}/${p}*` : `${ws.root}/${p}`));
 			// Exit 1 = issues found.
 			const res = yield* runTool(
 				ctx,
@@ -266,7 +288,10 @@ export const bandit = defineAuditor({
 					"json",
 					"-q",
 					"-x",
-					"*/node_modules/*,*/.venv/*,*/venv/*,*/.git/*,*/site-packages/*",
+					[
+						"*/node_modules/*,*/.venv/*,*/venv/*,*/.git/*,*/site-packages/*",
+						...ignored,
+					].join(","),
 				],
 				ws.root,
 				[0, 1],

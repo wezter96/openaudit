@@ -455,6 +455,8 @@ export const licenses = defineAuditor({
 	targets: ["codebase"],
 	engine: "builtin",
 	network: false,
+	// Installed packages in node_modules and virtualenvs are gitignored.
+	keepIgnored: true,
 	run: (ctx) =>
 		Effect.gen(function* () {
 			const settings = yield* readLicenseSettings(

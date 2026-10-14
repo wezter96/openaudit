@@ -6,6 +6,7 @@ import {
 	AuditorError,
 	DEFAULT_IGNORES,
 	type Severity,
+	type Workspace,
 } from "@openaudit/core";
 import { Effect } from "effect";
 
@@ -47,6 +48,23 @@ const IGNORED_DIRS = new Set(DEFAULT_IGNORES);
  */
 export const inIgnoredDir = (file: string | undefined): boolean =>
 	file?.split("/").some((part) => IGNORED_DIRS.has(part)) === true;
+
+/** Most gitignored paths passed to one tool's own skip flags. */
+const MAX_TOOL_IGNORES = 200;
+
+/**
+ * The workspace's gitignored paths (directories end in `/`) for a tool that
+ * walks the folder itself, so it never reads them. Capped and never failing:
+ * the engine drops findings in any ignored path a tool still reports.
+ */
+export const gitignoredPaths = (ws: Workspace) =>
+	ws.ignored.pipe(
+		Effect.map((paths) => paths.slice(0, MAX_TOOL_IGNORES)),
+		Effect.catch(() => Effect.succeed([] as ReadonlyArray<string>)),
+	);
+
+export const escapeRegex = (s: string): string =>
+	s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export const str = (v: unknown): string | undefined =>
 	typeof v === "string" ? v : undefined;

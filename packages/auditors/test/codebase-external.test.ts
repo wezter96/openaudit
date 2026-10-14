@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	type Auditor,
 	Exec,
@@ -123,10 +131,11 @@ const runWithExec = (
 		cmd: ReadonlyArray<string>,
 		opts?: { cwd?: string },
 	) => Promise<ExecResult>,
+	target = fixture("codebase", "external"),
 ): Promise<Report> =>
 	Effect.runPromise(
 		runAudit({
-			target: fixture("codebase", "external"),
+			target,
 			auditors: [auditor],
 			selection: { only: [auditor.id] },
 		}).pipe(
@@ -212,6 +221,59 @@ describe("external tool auditors", () => {
 		expect(report.results[0]?.findings.map((f) => f.location?.file)).toEqual([
 			"src/config.js",
 		]);
+	});
+
+	test("trivy skips what .gitignore excludes, and its findings there are dropped", async () => {
+		const repo = mkdtempSync(join(tmpdir(), "openaudit-trivy-ignore-"));
+		try {
+			mkdirSync(join(repo, "logs"));
+			writeFileSync(join(repo, "Dockerfile"), "FROM alpine");
+			writeFileSync(join(repo, ".gitignore"), ".env\nlogs/\n");
+			writeFileSync(join(repo, ".env"), "KEY=abc");
+			writeFileSync(join(repo, "logs", "a.log"), "x");
+			Bun.spawnSync(["git", "init", "-q"], { cwd: repo });
+			let args: ReadonlyArray<string> = [];
+			const result = (Target: string) => ({
+				Target,
+				Class: "config",
+				Type: "dockerfile",
+				Misconfigurations: [
+					{
+						ID: "DS002",
+						AVDID: "AVD-DS-0002",
+						Title: "Image user should not be 'root'",
+						Severity: "HIGH",
+						Status: "FAIL",
+					},
+				],
+			});
+			const report = await runWithExec(
+				trivyFs,
+				(bin) => `/usr/local/bin/${bin}`,
+				async (cmd) => {
+					args = cmd;
+					return {
+						code: 0,
+						stdout: JSON.stringify({
+							Results: [result("Dockerfile"), result(".env")],
+						}),
+						stderr: "",
+					};
+				},
+				repo,
+			);
+			expect(args.join(" ")).toContain("--skip-files .env");
+			expect(args.join(" ")).toContain("--skip-dirs logs");
+			expect(report.results[0]?.findings.map((f) => f.location?.file)).toEqual([
+				"Dockerfile",
+			]);
+			expect(report.suppressed?.[0]).toMatchObject({
+				source: ".gitignore",
+				paths: 1,
+			});
+		} finally {
+			rmSync(repo, { recursive: true, force: true });
+		}
 	});
 
 	test("trivy skips dependency and build directories", async () => {
