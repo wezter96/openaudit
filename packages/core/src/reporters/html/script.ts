@@ -121,11 +121,11 @@ each(panel.querySelectorAll(".legend li"),function(li,i){anim(li,[{opacity:0,tra
 each(panel.querySelectorAll("[data-rise]"),function(r,i){if(i>14)return;var at=(first?700:200)+i*45;anim(r,[{opacity:0,transform:"translateY(10px)"},{opacity:1,transform:"none"}],{duration:700,delay:at,easing:SOFT,fill:"backwards"});grow(r.querySelectorAll(".spectrum rect"),at+160);});
 }
 
-/* ---- disclosure with height animation ---- */
+/* ---- disclosure with height animation (the report's own, not a host page's) ---- */
 var running=new WeakMap();
 d.addEventListener("click",function(ev){
 var sum=closest(ev.target,"summary");if(!sum||still)return;
-var det=sum.parentNode;if(!det||det.tagName!=="DETAILS"||ev.defaultPrevented)return;
+var det=sum.parentNode;if(!det||det.tagName!=="DETAILS"||ev.defaultPrevented||!closest(det,".frame"))return;
 if(closest(ev.target,"a"))return;
 ev.preventDefault();
 var prev=running.get(det);if(prev){prev.cancel();}
