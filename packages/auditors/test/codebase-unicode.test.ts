@@ -293,6 +293,22 @@ describe("code.unicode", () => {
 				path: "a.js",
 				text: fill("\u202Ea\u2066\n"),
 			},
+			"PHP comments full of closing tags": {
+				path: "a.php",
+				text: fill("// \u200B ?>\n"),
+			},
+			"Java comments full of escapes": {
+				path: "A.java",
+				text: fill("// \u200B \\u000a\n"),
+			},
+			"Rust lifetimes and strings on every line": {
+				path: "a.rs",
+				text: fill('fn f<\'a>() { "\u200B" }\n'),
+			},
+			"Ruby format strings everywhere": {
+				path: "a.rb",
+				text: fill('"%s\u200B" '),
+			},
 		};
 		// Bounds are loose on purpose: CI runners are several times slower than
 		// a laptop, and the quadratic behaviour these guard against takes minutes.
@@ -498,6 +514,101 @@ describe("code.unicode", () => {
 		test("a shebang script is read even with a NUL byte", () => {
 			const bytes = new TextEncoder().encode("#!/bin/sh\n\u0000echo \u202E\n");
 			expect(decodeTexts(bytes, true)).toHaveLength(1);
+		});
+	});
+
+	describe("final hardening", () => {
+		const sev = (path: string, text: string, rule = "invisible-character") =>
+			scanUnicode({ path, text })
+				.filter((f) => f.ruleId === `code.unicode/${rule}`)
+				.map((f) => f.severity);
+
+		test("literals the lexer cannot vouch for in that language", () => {
+			// Rust lifetimes are not strings.
+			expect(sev("a.rs", "fn f<'a>(\u3164: &'a str) {}\n")).toEqual(["high"]);
+			// Java decodes \u escapes before lexing: \u000a ends the comment and
+			// " ends the string.
+			expect(sev("A.java", "// note \\u000a int \u3164 = 1;\n")).toEqual([
+				"high",
+			]);
+			expect(
+				sev("A.java", 'String s = "a\\u0022; int \u3164 = 1; //";\n'),
+			).toEqual(["high"]);
+			// C# ends line comments at NEL; PHP at `?>`.
+			expect(sev("a.cs", "// note\u0085int \u3164 = 1;\n")).toEqual(["high"]);
+			expect(sev("a.php", "<?php\n// note ?> <?php $\u3164 = 1;\n")).toEqual([
+				"high",
+			]);
+		});
+
+		test("multi-line and prefixed literals the lexer does not model", () => {
+			// A Rust string spans lines; the lexer reads its end as a new string.
+			expect(sev("a.rs", 'let s = "\n"; let \u3164 = "x";\n')).toEqual([
+				"high",
+			]);
+			expect(sev("a.rs", 'let s = r#"\n// "#; let \u3164 = 1;\n')).toEqual([
+				"high",
+			]);
+			// Ruby `?"` is a character, `%q(` and heredocs are strings.
+			expect(sev("a.rb", 'a = ?"; \u3164 = 1; b = ?"\n')).toEqual(["high"]);
+			expect(sev("a.rb", "x = %q(\n# ) ; \u3164 = 1\n")).toEqual(["high"]);
+			expect(sev("a.php", "<?php $x = <<<E\n# x\nE; $\u3164 = 1;\n")).toEqual([
+				"high",
+			]);
+			// Simple literals before any of that are still trusted.
+			expect(sev("a.rs", "let s = \"a\u200Bb\"; let c = 'x';\n")).toEqual([
+				"medium",
+			]);
+			expect(sev("a.rb", 'puts "%s a\u200Bb"\n')).toEqual(["medium"]);
+			expect(sev("A.java", '// a\u200Bb\nString s = "\\u00e9";\n')).toEqual([
+				"medium",
+			]);
+		});
+
+		test("names that only start like prose are code", () => {
+			for (const path of ["README.js", "LICENSE.sh"])
+				expect(sev(path, "const \u3164 = 1;\n")).toEqual(["high"]);
+		});
+
+		test("scripts in agent folders and shebang files are code", () => {
+			expect(sev(".claude/skills/x/run.py", "\u3164 = 1\n")).toEqual(["high"]);
+			expect(sev("README", "#!/bin/sh\necho \u202E\n", "bidi-control")).toEqual(
+				["high"],
+			);
+		});
+
+		test("every default-ignorable character is covered", () => {
+			for (const ch of [
+				"\u17B4",
+				"\u180B",
+				"\u034F",
+				"\u206A",
+				"\u{1D173}",
+				"\uFFF9",
+				"\u{1BCA0}",
+			])
+				expect(sev("a.js", `const a${ch} = 1;\n`)).toEqual(["high"]);
+		});
+
+		test("flag sequences must match exactly", () => {
+			const tag = (s: string) =>
+				[...s]
+					.map((c) => String.fromCodePoint(0xe0000 + (c.codePointAt(0) ?? 0)))
+					.join("");
+			const flag = "\u{1F3F4}";
+			const end = "\u{E007F}";
+			expect(
+				sev("a.md", `${flag}${tag("gbeng")}${end}`, "tag-characters"),
+			).toEqual([]);
+			for (const text of [
+				`${flag}${tag("gbengx")}${end}`,
+				`${flag}${tag("GBENG")}${end}`,
+				`${flag}\uFE0F${tag("gbeng")}${end}`,
+				`${flag}${tag("gbeng")}\u{E0001}${end}`,
+				`${flag}${tag("gbeng")}`,
+				`\u{1F3F3}${tag("gbeng")}${end}`,
+			])
+				expect(sev("a.md", text, "tag-characters")).toEqual(["high"]);
 		});
 	});
 });
