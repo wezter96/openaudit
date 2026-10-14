@@ -188,7 +188,8 @@ export const SECRET_RULES: ReadonlyArray<SecretRule> = [
 	},
 ];
 
-const SECRET_KEY_NAME =
+/** Names of variables and keys that usually hold a credential. */
+export const SECRET_KEY_NAME =
 	/(?:password|passwd|passphrase|pwd|secret|api[_-]?key|apikey|access[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key|signing[_-]?key|encryption[_-]?key|bearer)/i;
 
 /** `key = "value"` style assignments in code and config. */

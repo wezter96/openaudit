@@ -1,0 +1,6 @@
+{
+	"servers": {
+		"pypi": { "type": "stdio", "command": "pipx", "args": ["run", "some-mcp-server"] },
+		"docs": { "type": "http", "url": "https://docs.example.com/mcp" }
+	}
+}

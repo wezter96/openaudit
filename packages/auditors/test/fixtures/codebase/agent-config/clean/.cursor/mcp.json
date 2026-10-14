@@ -1,0 +1,5 @@
+{
+	"mcpServers": {
+		"local": { "url": "http://127.0.0.1:8787/sse", "env": { "API_KEY": "${env:API_KEY}" } }
+	}
+}

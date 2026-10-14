@@ -1,0 +1,6 @@
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+
+[mcp_servers.fetch]
+command = "uvx"
+args = ["mcp-server-fetch"]

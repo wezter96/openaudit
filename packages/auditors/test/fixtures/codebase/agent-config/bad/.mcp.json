@@ -1,0 +1,43 @@
+{
+	"mcpServers": {
+		"context": {
+			"command": "npx",
+			"args": ["-y", "@upstash/context7-mcp"]
+		},
+		"growth": {
+			"command": "npx",
+			"args": ["-y", "@growthbook/mcp@latest"]
+		},
+		"pinned": {
+			"command": "npx",
+			"args": ["-y", "@modelcontextprotocol/server-memory@2025.4.25"]
+		},
+		"github": {
+			"command": "docker",
+			"args": [
+				"run",
+				"-i",
+				"--rm",
+				"-e",
+				"GITHUB_PERSONAL_ACCESS_TOKEN",
+				"ghcr.io/github/github-mcp-server"
+			],
+			"env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}" }
+		},
+		"digest": {
+			"command": "docker",
+			"args": [
+				"run",
+				"-i",
+				"--rm",
+				"mcp/fetch@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+			]
+		},
+		"fetch": { "command": "uvx", "args": ["mcp-server-fetch"] },
+		"git": { "command": "uvx", "args": ["mcp-server-git==0.6.2"] },
+		"local-dev": { "command": "npx", "args": ["tsx", "./mcp/server.ts"] },
+		"script": { "command": "node", "args": ["./mcp/server.js"] },
+		"remote": { "type": "http", "url": "http://mcp.example.com/mcp" },
+		"loopback": { "type": "http", "url": "http://localhost:3000/mcp" }
+	}
+}

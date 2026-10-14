@@ -1,0 +1,12 @@
+{
+	"permissions": {
+		"allow": [
+			"Bash",
+			"Bash(npm run test *)",
+			"WebFetch",
+			"WebFetch(domain:docs.example.com)"
+		],
+		"defaultMode": "bypassPermissions"
+	},
+	"enableAllProjectMcpServers": true
+}

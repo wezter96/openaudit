@@ -1,6 +1,7 @@
 import type { Auditor } from "@openaudit/core";
 
 import { accessibility } from "./accessibility";
+import { agentConfig } from "./agent-config";
 import { api } from "./api";
 import { dependencies } from "./dependencies";
 import { gitleaks, osvScanner, semgrep, trivyFs } from "./external";
@@ -42,6 +43,7 @@ export const codebaseAuditors: ReadonlyArray<Auditor> = [
 	strictness,
 	api,
 	codePrivacy,
+	agentConfig,
 	gitleaks,
 	semgrep,
 	osvScanner,
