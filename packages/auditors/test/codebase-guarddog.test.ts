@@ -121,7 +121,7 @@ describe("guarddog manifests", () => {
 		expect(
 			guarddogRequirements(`a==${"1!=".repeat(5000)}1 ${" ,".repeat(5000)}@`),
 		).toBeUndefined();
-		expect(performance.now() - started).toBeLessThan(500);
+		expect(performance.now() - started).toBeLessThan(3000);
 	});
 });
 

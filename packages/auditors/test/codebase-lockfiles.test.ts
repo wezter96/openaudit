@@ -283,7 +283,7 @@ describe("code.lockfiles", () => {
 			);
 			const start = performance.now();
 			const r = await runAuditor(lockfiles, hostile);
-			expect(performance.now() - start).toBeLessThan(2000);
+			expect(performance.now() - start).toBeLessThan(8000);
 			expect(r.results[0]?.status).not.toBe("error");
 		} finally {
 			await rm(hostile, { recursive: true, force: true });

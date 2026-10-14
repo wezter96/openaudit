@@ -294,11 +294,13 @@ describe("code.unicode", () => {
 				text: fill("\u202Ea\u2066\n"),
 			},
 		};
+		// Bounds are loose on purpose: CI runners are several times slower than
+		// a laptop, and the quadratic behaviour these guard against takes minutes.
 		test("a 16 MB file in quick mode", () => {
 			const text = fill("a\u202E\u{E0041}\n", 16 * MB);
 			const start = performance.now();
 			const findings = scanUnicode({ path: "a.js", text });
-			expect(performance.now() - start).toBeLessThan(1500);
+			expect(performance.now() - start).toBeLessThan(10_000);
 			expect(findings).toHaveLength(40);
 		});
 
@@ -306,7 +308,7 @@ describe("code.unicode", () => {
 			test(name, () => {
 				const start = performance.now();
 				const findings = scanUnicode(file, { mode: "thorough" });
-				expect(performance.now() - start).toBeLessThan(1000);
+				expect(performance.now() - start).toBeLessThan(5000);
 				expect(findings.length).toBeLessThanOrEqual(5 * 20);
 				for (const f of findings) {
 					expect(f.message.length).toBeLessThan(1000);

@@ -358,7 +358,7 @@ describe("evasion", () => {
 		]) {
 			const start = performance.now();
 			scanInstructionFile({ path: "AGENTS.md", text });
-			expect(performance.now() - start).toBeLessThan(2000);
+			expect(performance.now() - start).toBeLessThan(8000);
 		}
 	});
 });
