@@ -2,11 +2,12 @@ import type { Grade, Report, Severity } from "../model";
 import {
 	formatDuration,
 	formatLocation,
+	hasSuppressionNotice,
 	plural,
 	type SuppressionSummary,
 	sanitizeText,
 	sortedFindings,
-	suppressedTotal,
+	suppressionDetails,
 	suppressionLine,
 	targetLabel,
 } from "./shared";
@@ -156,8 +157,9 @@ export const toTerminal = (
 	}
 
 	for (const s of options.suppressed ?? []) {
-		if (suppressedTotal(s) > 0)
-			out.push("", paint("yellow", t(suppressionLine(s))));
+		if (!hasSuppressionNotice(s)) continue;
+		out.push("", paint("yellow", t(suppressionLine(s))));
+		for (const d of suppressionDetails(s)) out.push(paint("dim", `  ${t(d)}`));
 	}
 
 	const a = summary.auditors;

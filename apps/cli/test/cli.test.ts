@@ -332,7 +332,7 @@ describe("untrusted target config", () => {
 		await rm(root, { recursive: true, force: true });
 	});
 
-	test("discloses suppressions and --no-config bypasses them", async () => {
+	test("discloses suppressions", async () => {
 		const root = await project({
 			only: ["code.hygiene"],
 			ignore: {
@@ -356,6 +356,73 @@ describe("untrusted target config", () => {
 			{ source: "openaudit.config.json", rules: 1, paths: 1, fingerprints: 0 },
 		]);
 
+		await rm(root, { recursive: true, force: true });
+	});
+
+	test("discloses reasons, and expired suppressions stop applying", async () => {
+		const root = await project({
+			only: ["code.hygiene"],
+			ignore: {
+				paths: [
+					{ path: ".gitignore", reason: "Generated", until: "2999-12-31" },
+				],
+				rules: [
+					{
+						rule: "code.hygiene/lockfile-missing",
+						reason: "No dependencies yet",
+						until: "2000-01-01",
+					},
+				],
+			},
+		});
+		const json = await cli(["--json", "--fail-on", "medium"], root);
+		expect(json.stderr).toContain(
+			'1 suppression(s) expired and no longer apply: rule code.hygiene/lockfile-missing (until 2000-01-01). Fix the findings, or remove the entries or move their "until" dates.',
+		);
+		// The lockfile finding is back and trips the gate.
+		expect(json.code).toBe(1);
+		const report = JSON.parse(json.stdout);
+		const rules = report.results[0].findings.map(
+			(f: { ruleId: string }) => f.ruleId,
+		);
+		expect(rules).toContain("code.hygiene/lockfile-missing");
+		expect(report.suppressed).toEqual([
+			{
+				source: "openaudit.config.json",
+				rules: 0,
+				paths: 1,
+				fingerprints: 0,
+				entries: [
+					{
+						kind: "path",
+						value: ".gitignore",
+						reason: "Generated",
+						until: "2999-12-31",
+						count: 1,
+					},
+				],
+				expired: [
+					{
+						kind: "rule",
+						value: "code.hygiene/lockfile-missing",
+						reason: "No dependencies yet",
+						until: "2000-01-01",
+					},
+				],
+			},
+		]);
+		const terminal = await cli([], root);
+		expect(terminal.stdout).toContain(
+			"1 by path .gitignore (until 2999-12-31): Generated",
+		);
+		await rm(root, { recursive: true, force: true });
+	});
+
+	test("--no-config bypasses suppressions", async () => {
+		const root = await project({
+			only: ["code.hygiene"],
+			ignore: { rules: ["code.hygiene/lockfile-missing"] },
+		});
 		const bypass = await cli(
 			[
 				"--json",

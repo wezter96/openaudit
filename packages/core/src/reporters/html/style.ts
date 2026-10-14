@@ -296,6 +296,7 @@ main:focus{outline:0}
 .callout svg{width:1.1rem;height:1.1rem;flex:none;margin-top:.1rem;fill:none;stroke:var(--graphite);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .callout.warn{border:0;border-left:2px solid var(--c-medium);padding:.85rem 1rem;background:color-mix(in srgb,var(--c-medium) 9%,transparent);border-radius:0 6px 6px 0;margin-top:.75rem}
 .callout.warn svg{stroke:var(--t-medium)}
+.callout ul{margin:.4rem 0 0;padding-left:1.1rem}
 
 /* category panel */
 .cat-score{display:flex;align-items:center;gap:1.1rem}
