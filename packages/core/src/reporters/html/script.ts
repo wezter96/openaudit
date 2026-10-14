@@ -247,6 +247,10 @@ function toggleMenu(how,refocus){
 if(!menu)return;
 if(!how){if(menu.hidden)return;menu.hidden=true;menuBtn.setAttribute("aria-expanded","false");if(refocus)menuBtn.focus();return;}
 menu.hidden=false;menuBtn.setAttribute("aria-expanded","true");
+/* keep the menu on screen wherever the button wrapped to */
+menu.style.translate="";var mr=menu.getBoundingClientRect(),edge=12,dx=0;
+if(mr.right>w.innerWidth-edge)dx=w.innerWidth-edge-mr.right;if(mr.left+dx<edge)dx=edge-mr.left;
+if(dx)menu.style.translate=Math.round(dx)+"px 0";
 var list=items();(how<0?list[list.length-1]:list[0]).focus();
 anim(menu,[{opacity:0,transform:"translateY(-6px) scale(.98)"},{opacity:1,transform:"none"}],{duration:420,easing:SETTLE});
 each(list,function(it,i){anim(it,[{opacity:0,transform:"translateY(-4px)"},{opacity:1,transform:"none"}],{duration:380,delay:40+i*35,easing:SOFT,fill:"backwards"});});

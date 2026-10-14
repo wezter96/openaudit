@@ -48,6 +48,21 @@ const SOFT = spring(210, 29, 600);
 const NOISE =
 	"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 .5 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
 
+/**
+ * The dark palette. It applies when the system is dark and the reader hasn't
+ * picked light, or when a host page sets data-theme="dark" (openaudit.se's
+ * theme switch does).
+ */
+const DARK = `--paper:#0b111b;--paper-2:#111a27;--paper-3:#172233;--ink:#e7ecf3;--graphite:#9aa7b9;--hair:#2a374c;--hair-soft:#1b2636;--dot:rgba(154,167,185,.08);
+--accent:#8fa2ff;--accent-soft:#1a2246;--focus:#8fa2ff;
+--c-critical:#ff4f75;--c-high:#ff7442;--c-medium:#ffb13d;--c-low:#e9d38a;--c-info:#6f7b8e;--c-none:#243145;
+--t-critical:#ff8aa3;--t-high:#ff9f7a;--t-medium:#ffc46e;--t-low:#e9d38a;--t-info:#a6b1c1;
+--g-A:#4fd49b;--g-B:#a6d96c;--g-C:#ffc46e;--g-D:#ff9f7a;--g-F:#ff8aa3;
+--a-A:#3cc98c;--a-B:#98cf55;--a-C:#ffb13d;--a-D:#ff7442;--a-F:#ff4f75;
+--ok:#4fd49b;--s-failed:#d9788a;--s-error:#ffb13d;
+--lift:0 1px 2px rgba(0,0,0,.4),0 14px 30px -14px rgba(0,0,0,.7);
+--grain-blend:screen;--grain:.16`;
+
 export const STYLE = `
 :root{color-scheme:light dark;
 --paper:#eef1f4;--paper-2:#f8fafb;--paper-3:#e4e8ed;--ink:#0d1522;--graphite:#4a5668;--hair:#c9d1db;--hair-soft:#dce2e9;--dot:rgba(13,21,34,.085);
@@ -63,16 +78,10 @@ export const STYLE = `
 --mono:ui-monospace,"SF Mono",SFMono-Regular,"JetBrains Mono","Cascadia Mono","Segoe UI Mono",Menlo,Consolas,monospace;
 --settle:cubic-bezier(.22,1.25,.36,1);--soft:cubic-bezier(.2,.8,.2,1);--rail:15.5rem}
 @supports (transition-timing-function:linear(0,1)){:root{--settle:${SETTLE};--soft:${SOFT}}}
-@media (prefers-color-scheme:dark){:root{
---paper:#0b111b;--paper-2:#111a27;--paper-3:#172233;--ink:#e7ecf3;--graphite:#9aa7b9;--hair:#2a374c;--hair-soft:#1b2636;--dot:rgba(154,167,185,.08);
---accent:#8fa2ff;--accent-soft:#1a2246;--focus:#8fa2ff;
---c-critical:#ff4f75;--c-high:#ff7442;--c-medium:#ffb13d;--c-low:#e9d38a;--c-info:#6f7b8e;--c-none:#243145;
---t-critical:#ff8aa3;--t-high:#ff9f7a;--t-medium:#ffc46e;--t-low:#e9d38a;--t-info:#a6b1c1;
---g-A:#4fd49b;--g-B:#a6d96c;--g-C:#ffc46e;--g-D:#ff9f7a;--g-F:#ff8aa3;
---a-A:#3cc98c;--a-B:#98cf55;--a-C:#ffb13d;--a-D:#ff7442;--a-F:#ff4f75;
---ok:#4fd49b;--s-failed:#d9788a;--s-error:#ffb13d;
---lift:0 1px 2px rgba(0,0,0,.4),0 14px 30px -14px rgba(0,0,0,.7);
---grain-blend:screen;--grain:.16}}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){${DARK}}}
+:root[data-theme=dark]{${DARK}}
+:root[data-theme=light]{color-scheme:light}
+:root[data-theme=dark]{color-scheme:dark}
 *,*::before,*::after{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%;scroll-padding-top:4.5rem}
 body{margin:0;background-color:var(--paper);background-image:radial-gradient(circle at 1px 1px,var(--dot) 1px,transparent 0);background-size:20px 20px;color:var(--ink);font:400 .9375rem/1.55 var(--sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
