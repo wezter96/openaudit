@@ -38,6 +38,7 @@ ARG ACTIONLINT_VERSION=1.7.12
 ARG SCORECARD_VERSION=5.6.0
 ARG UV_VERSION=0.13.0
 ARG KUBECONFORM_VERSION=0.8.0
+ARG OASDIFF_VERSION=1.32.1
 ARG TFLINT_VERSION=0.64.0
 # TFLint cloud rulesets, enabled by iac.tflint from /opt/tflint-plugins.
 ARG TFLINT_AWS_VERSION=0.49.0
@@ -85,6 +86,7 @@ ARG CHECKOV_VERSION=3.3.29
 ARG RUFF_VERSION=0.17.0
 ARG MOBSFSCAN_VERSION=1.0.1
 ARG GUARDDOG_VERSION=3.2.0
+ARG SSLYZE_VERSION=6.3.1
 
 # Node tools (bun global installs).
 ARG SPECTRAL_VERSION=6.17.0
@@ -119,6 +121,7 @@ ARG ZIZMOR_VERSION
 ARG ZIZMOR_SHA256_AMD64
 ARG ZIZMOR_SHA256_ARM64
 ARG KUBECONFORM_VERSION
+ARG OASDIFF_VERSION
 ARG TFLINT_VERSION
 ARG TFLINT_AWS_VERSION
 ARG TFLINT_AZURERM_VERSION
@@ -224,6 +227,10 @@ u=$(gh zizmorcore/zizmor "v$ZIZMOR_VERSION")
 fetch "$u/zizmor-$X-unknown-linux-gnu.tar.gz" "$ZZSHA" zizmor.tgz
 tar -xzf zizmor.tgz -C /out zizmor
 
+u=$(gh oasdiff/oasdiff "v$OASDIFF_VERSION")
+fetch "$u/oasdiff_${OASDIFF_VERSION}_linux_$A.tar.gz" "$u/checksums.txt" oasdiff.tgz
+tar -xzf oasdiff.tgz -C /out oasdiff
+
 u=$(gh yannh/kubeconform "v$KUBECONFORM_VERSION")
 fetch "$u/kubeconform-linux-$A.tar.gz" "$u/CHECKSUMS" kubeconform.tgz
 tar -xzf kubeconform.tgz -C /out kubeconform
@@ -299,6 +306,7 @@ ARG CHECKOV_VERSION
 ARG RUFF_VERSION
 ARG MOBSFSCAN_VERSION
 ARG GUARDDOG_VERSION
+ARG SSLYZE_VERSION
 USER 0
 # hadolint ignore=DL3008
 RUN apt-get update \
@@ -314,7 +322,7 @@ ENV UV_TOOL_DIR=/opt/uv/tools \
 RUN set -eux; \
     for spec in "semgrep==$SEMGREP_VERSION" "bandit==$BANDIT_VERSION" "pip-audit==$PIP_AUDIT_VERSION" \
                 "checkov==$CHECKOV_VERSION" "ruff==$RUFF_VERSION" "mobsfscan==$MOBSFSCAN_VERSION" \
-                "guarddog==$GUARDDOG_VERSION"; do \
+                "guarddog==$GUARDDOG_VERSION" "sslyze==$SSLYZE_VERSION"; do \
       uv tool install "$spec"; \
     done; \
     ls /opt/uv/bin
