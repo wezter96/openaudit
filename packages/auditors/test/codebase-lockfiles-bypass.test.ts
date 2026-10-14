@@ -620,7 +620,7 @@ c@^1.0.0: {version: "1.0.0", resolved: "http://evil.example/c-1.0.0.tgz", integr
 			"comment/.npmrc": "strict-ssl=false ; legacy proxy\r",
 		});
 		expect(rules(findings)).toEqual([
-			"tls-verification-disabled medium strict-ssl=false ; legacy proxy",
+			"tls-verification-disabled medium strict-ssl=false",
 			"unexpected-host medium a@1.0.0",
 			"unexpected-host medium a@1.0.0",
 		]);
