@@ -296,6 +296,7 @@ const audit = async (
 					model: flags.model ?? opts.model,
 					headers: { ...opts.headers, ...parseHeaders(flags.header) },
 					settings: opts.settings,
+					diffBase: flags.diff,
 				},
 				selection: { only, narrow, exclude, categories },
 				// Suppressions are applied afterwards so they can be counted and disclosed.

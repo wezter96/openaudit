@@ -321,6 +321,7 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 				headers: args.headers,
 				agentic: args.agentic,
 				model: args.model,
+				diffBase: args.diffBase,
 			};
 			const selection = {
 				only: args.only,

@@ -18,6 +18,7 @@ import {
 	staticcheck,
 } from "./lint-langs";
 import { mobsfscan } from "./mobsfscan";
+import { oasdiff } from "./oasdiff";
 import { performanceAuditor } from "./performance";
 import { privacy as codePrivacy } from "./privacy";
 import { quality } from "./quality";
@@ -65,5 +66,6 @@ export const codebaseAuditors: ReadonlyArray<Auditor> = [
 	phpstan,
 	pmd,
 	spectral,
+	oasdiff,
 	secretsHistory,
 ];

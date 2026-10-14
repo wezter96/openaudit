@@ -169,6 +169,43 @@ describe("--diff", () => {
 		expect(bad.code).toBe(2);
 		await rm(repo, { recursive: true, force: true });
 	});
+
+	test("hands the base ref to auditors that compare against it", async () => {
+		const repo = await mkdtemp(join(tmpdir(), "openaudit-diff-ref-"));
+		await writeFile(
+			join(repo, "openapi.yaml"),
+			"openapi: 3.0.3\ninfo: {title: t, version: '1'}\npaths: {}\n",
+		);
+		const git = (...args: string[]) =>
+			Bun.spawnSync(["git", "-C", repo, ...args], {
+				env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: repo },
+			});
+		git("init", "-q", "-b", "main");
+		git(
+			"-c",
+			"user.email=t@t",
+			"-c",
+			"user.name=t",
+			"commit",
+			"-qm",
+			"base",
+			"--allow-empty",
+		);
+		const oasdiff = (r: string) =>
+			JSON.parse(r).results.find(
+				(x: { auditor: string }) => x.auditor === "code.oasdiff",
+			);
+		const plain = await cli([".", "--json", "--only", "code.oasdiff"], repo);
+		expect(oasdiff(plain.stdout).status).toBe("skipped");
+		expect(oasdiff(plain.stdout).message).toContain("Only runs with --diff");
+		const diff = await cli(
+			[".", "--json", "--only", "code.oasdiff", "--diff", "main"],
+			repo,
+		);
+		// Passed (the spec is new since main), or skipped for a missing oasdiff.
+		expect(oasdiff(diff.stdout).message ?? "").not.toContain("--diff");
+		await rm(repo, { recursive: true, force: true });
+	});
 });
 
 describe("openaudit init + config", () => {
