@@ -502,3 +502,65 @@ describe("second review: registries set through environment variables", () => {
 		]);
 	});
 });
+
+describe("second review, round 2", () => {
+	const GH_TOKEN = `ghp_${"S3cr3tT0kenR".repeat(3)}`;
+
+	test("no raw secret anywhere: archive URLs, pip sources, versions, refs and paths", async () => {
+		const secrets = [
+			"SECRETM13",
+			"SECRETN14",
+			"SECRETO15",
+			"SECRETP16",
+			"SECRETQ17",
+			GH_TOKEN,
+		];
+		const findings = await audit({
+			"berry/yarn.lock": `__metadata:
+  version: 8
+
+"a@npm:^1.0.0":
+  version: 1.0.0
+  resolution: "a@npm:1.0.0::__archiveUrl=https%3A%2F%2Fuser%3ASECRETM13%40evil.example%2Fa-1.0.0.tgz%3Ftoken%3DSECRETN14"
+  checksum: 10c0/abc
+`,
+			"requirements.txt": [
+				"--extra-index-url https://u:SECRETO15@pypi.example/simple",
+				"-f https://SECRETP16@pypi.example/wheels/",
+				"",
+			].join("\n"),
+			"version/package-lock.json": npmLock(
+				{},
+				{ lockfileVersion: "SECRETQ17" },
+			),
+			"package-lock.json": npmLock({
+				"node_modules/e": {
+					version: "1.0.0",
+					resolved: `git+https://github.com/org/e.git#${GH_TOKEN}`,
+				},
+				"node_modules/f": {
+					version: "1.0.0",
+					resolved: `https://npm.example/${GH_TOKEN}/f/-/f-1.0.0.tgz`,
+					integrity: SHA512,
+				},
+			}),
+		});
+		expect(rules(findings).length).toBeGreaterThanOrEqual(6);
+		const text = JSON.stringify(findings).toLowerCase();
+		for (const s of secrets) expect(text).not.toContain(s.toLowerCase());
+	});
+
+	test("several __archiveUrl parameters are not resolved to the first", async () => {
+		const findings = await audit({
+			"yarn.lock": `__metadata:
+  version: 8
+
+"a@npm:^1.0.0":
+  version: 1.0.0
+  resolution: "a@npm:1.0.0::__archiveUrl=https%3A%2F%2Fregistry.npmjs.org%2Fa%2F-%2Fa-1.0.0.tgz&__archiveUrl=https%3A%2F%2Fevil.example%2Fa-1.0.0.tgz"
+  checksum: 10c0/abc
+`,
+		});
+		expect(rules(findings)).toEqual(["unexpected-host medium a@1.0.0"]);
+	});
+});

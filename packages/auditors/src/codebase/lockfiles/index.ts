@@ -80,8 +80,9 @@ export { parseYarnLock } from "./yarn";
  * Findings never echo userinfo (up to the last `@`, however a parser splits
  * it) or token-like query and fragment parameters. A host WHATWG takes from
  * what another parser reads as userinfo is masked, so such a finding may
- * not name the host that is fetched. Tokens in a URL path (some hosted
- * registries put them there) are not recognised.
+ * not name the host that is fetched. Tokens in a URL path or git ref are
+ * only recognised by a well-known prefix (GitHub, GitLab, npm); others,
+ * such as some hosted registries' path tokens, are shown.
  */
 
 const isRequirements = (path: string) =>
