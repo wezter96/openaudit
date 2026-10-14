@@ -101,30 +101,10 @@ const faqs = [
 		transition: transform 0.5s var(--settle);
 	}
 
-	details[open] .plus {
+	details[open]:not(.closing) .plus {
 		transform: rotate(45deg);
 	}
 
-	/* where the browser can animate to auto height, answers unfold */
-	@media (prefers-reduced-motion: no-preference) {
-		@supports (interpolate-size: allow-keywords) {
-			.qs {
-				interpolate-size: allow-keywords;
-			}
-
-			details::details-content {
-				height: 0;
-				overflow: clip;
-				transition:
-					height 0.45s var(--soft),
-					content-visibility 0.45s allow-discrete;
-			}
-
-			details[open]::details-content {
-				height: auto;
-			}
-		}
-	}
 
 	details p {
 		padding: 0 2.5rem 1.25rem 0;

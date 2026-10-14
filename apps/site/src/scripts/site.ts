@@ -59,14 +59,39 @@ if (menu && nav) {
 }
 
 /* ---- copy buttons: commands and code blocks ---- */
+const SOFT = "cubic-bezier(0.2, 0.8, 0.2, 1)";
+/**
+ * Swaps a button's label. With motion, the button eases to its new width
+ * and the label rises into place, so the change reads as one movement.
+ */
+const relabel = (button: HTMLElement, label: HTMLElement, text: string) => {
+	const from = button.getBoundingClientRect().width;
+	label.textContent = text;
+	if (still) return;
+	const to = button.getBoundingClientRect().width;
+	if (Math.abs(from - to) > 1)
+		button.animate([{ width: `${from}px` }, { width: `${to}px` }], {
+			duration: 380,
+			easing: SOFT,
+		});
+	if (label !== button)
+		label.animate(
+			[
+				{ opacity: 0, transform: "translateY(0.35em)" },
+				{ opacity: 1, transform: "none" },
+			],
+			{ duration: 320, easing: SOFT },
+		);
+};
 const flash = (button: HTMLElement, label?: HTMLElement | null) => {
+	if (button.classList.contains("copied")) return;
 	button.classList.add("copied");
 	const before = label?.textContent;
-	if (label) label.textContent = button.dataset.copiedLabel ?? "Copied";
+	if (label) relabel(button, label, button.dataset.copiedLabel ?? "Copied");
 	window.setTimeout(() => {
 		button.classList.remove("copied");
-		if (label && before) label.textContent = before;
-	}, 1600);
+		if (label && before) relabel(button, label, before);
+	}, 2200);
 };
 const copy = async (text: string): Promise<boolean> => {
 	try {
@@ -160,4 +185,37 @@ root.classList.add("ready");
 /* ---- WebMCP: read-only tools for in-browser agents, where supported ---- */
 if ("modelContext" in document || "modelContext" in navigator) {
 	void import("./webmcp");
+}
+
+/* ---- disclosures: open and close at their natural height ---- */
+const DISCLOSURES =
+	"details.fold, details.peek, details.more-tools, .qs details";
+for (const d of document.querySelectorAll<HTMLDetailsElement>(DISCLOSURES)) {
+	const summary = d.querySelector("summary");
+	if (!summary) continue;
+	let running: Animation | undefined;
+	summary.addEventListener("click", (event) => {
+		if (still || running) return;
+		event.preventDefault();
+		const closing = d.open;
+		const start = d.getBoundingClientRect().height;
+		if (!closing) d.open = true;
+		const end = closing
+			? summary.getBoundingClientRect().height +
+				Number.parseFloat(getComputedStyle(d).borderTopWidth) +
+				Number.parseFloat(getComputedStyle(d).borderBottomWidth)
+			: d.getBoundingClientRect().height;
+		d.classList.toggle("closing", closing);
+		d.style.overflow = "clip";
+		running = d.animate([{ height: `${start}px` }, { height: `${end}px` }], {
+			duration: closing ? 280 : 420,
+			easing: SOFT,
+		});
+		running.onfinish = () => {
+			if (closing) d.open = false;
+			d.classList.remove("closing");
+			d.style.overflow = "";
+			running = undefined;
+		};
+	});
 }

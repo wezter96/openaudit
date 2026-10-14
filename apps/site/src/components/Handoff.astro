@@ -17,8 +17,10 @@ const { id = "handoff" } = Astro.props;
 		data-copied-label="Copied. Paste it into your AI"
 		aria-describedby={`${id}-hint`}
 	>
-		<Icon name="robot" class="idle" />
-		<Icon name="check" class="done" />
+		<span class="ico" aria-hidden="true">
+			<Icon name="robot" class="idle" />
+			<Icon name="check" class="done" />
+		</span>
 		<span class="copy-label">Run it with your AI</span>
 	</button>
 	<p class="handoff-hint" id={`${id}-hint`}>Copies a one-line prompt for {HANDOFF_AGENTS}.</p>
@@ -39,16 +41,37 @@ const { id = "handoff" } = Astro.props;
 		font-size: 1.0625rem;
 	}
 
-	.run-ai :global(.done) {
-		display: none;
+	.run-ai {
+		white-space: nowrap;
+		overflow: hidden;
 	}
 
-	.run-ai:global(.copied) :global(.idle) {
-		display: none;
+	/* the robot turns into a check: both icons share one cell */
+	.ico {
+		display: grid;
+		flex: none;
 	}
 
-	.run-ai:global(.copied) :global(.done) {
-		display: block;
+	.ico > :global(svg) {
+		grid-area: 1 / 1;
+		transition:
+			opacity 0.2s,
+			transform 0.45s var(--settle);
+	}
+
+	.ico > :global(.done) {
+		opacity: 0;
+		transform: scale(0.3) rotate(-90deg);
+	}
+
+	.run-ai:global(.copied) .ico > :global(.idle) {
+		opacity: 0;
+		transform: scale(0.3) rotate(90deg);
+	}
+
+	.run-ai:global(.copied) .ico > :global(.done) {
+		opacity: 1;
+		transform: none;
 	}
 
 	.handoff-hint {

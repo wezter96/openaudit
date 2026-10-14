@@ -1196,32 +1196,13 @@ html:not(.js) .needs-js {
 	transition: transform 0.5s var(--settle);
 }
 
-.fold[open] .plus {
+/* animating shut (.closing), the plus turns back straight away */
+.fold[open]:not(.closing) .plus {
 	transform: rotate(45deg);
 }
 
 .fold[open] {
 	padding-bottom: 1.5rem;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-	@supports (interpolate-size: allow-keywords) {
-		.fold {
-			interpolate-size: allow-keywords;
-		}
-
-		.fold::details-content {
-			height: 0;
-			overflow: clip;
-			transition:
-				height 0.5s var(--soft),
-				content-visibility 0.5s allow-discrete;
-		}
-
-		.fold[open]::details-content {
-			height: auto;
-		}
-	}
 }
 
 /* --------------------------------------------------------------- tables */
