@@ -391,12 +391,7 @@ const becomesGet = (res: Response, hop: Hop): boolean =>
 
 const WEB_PROTOCOLS = new Set(["http:", "https:"]);
 
-const nextHop = (
-	hop: Hop,
-	location: Url,
-	res: Response,
-	first: Url,
-): Hop => {
+const nextHop = (hop: Hop, location: Url, res: Response, first: Url): Hop => {
 	const next = new URL(location, hop.url);
 	if (!WEB_PROTOCOLS.has(next.protocol))
 		throw new Error(`Refusing redirect to ${next.protocol}`);
