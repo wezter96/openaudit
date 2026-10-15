@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { type AuditContext, AuditorError } from "@openaudit/core";
 import { Effect } from "effect";
 
@@ -50,7 +50,7 @@ const LOG_HARDENING: ReadonlyArray<readonly [string, string]> = [
 ];
 
 const commonDirOf = async (gitDir: string) => {
-	const common = await readFile(resolve(gitDir, "commondir"), "utf8").catch(
+	const common = await readFile(join(gitDir, "commondir"), "utf8").catch(
 		() => undefined,
 	);
 	return common === undefined
@@ -58,7 +58,58 @@ const commonDirOf = async (gitDir: string) => {
 		: resolve(gitDir, common.replace(/[\r\n]+$/, ""));
 };
 
-const logArgs = (git: string, since: number) => [
+const OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+const REF = /^refs\/[\w./-]+$/;
+
+const readTrimmed = (path: string) =>
+	readFile(path, "utf8").then(
+		(text) => text.trim(),
+		() => undefined,
+	);
+
+/** A branch's commit, from its loose ref file or from `packed-refs`. */
+const refCommit = async (common: string, ref: string) => {
+	if (!REF.test(ref) || ref.includes("..")) return undefined;
+	const loose = await readTrimmed(join(common, ref));
+	if (loose !== undefined) return loose;
+	const packed = (await readTrimmed(join(common, "packed-refs"))) ?? "";
+	const line = packed.split("\n").find((l) => l.endsWith(` ${ref}`));
+	return line?.split(" ")[0];
+};
+
+/**
+ * The commit HEAD points to, read from the files rather than asked of git,
+ * so git never loads the target's configuration.
+ */
+export const headCommit = async (
+	gitDir: string,
+	common: string,
+): Promise<string | undefined> => {
+	const head = (await readTrimmed(join(gitDir, "HEAD"))) ?? "";
+	const ref = /^ref: (.+)$/.exec(head)?.[1];
+	const id = ref === undefined ? head : await refCommit(common, ref);
+	return id !== undefined && OBJECT_ID.test(id) ? id : undefined;
+};
+
+/**
+ * A throwaway git directory that borrows only the target's objects: an empty
+ * config, HEAD at the commit to read, and the target's shallow list.
+ */
+const scratchGitDir = async (dir: string, common: string, head: string) => {
+	await mkdir(join(dir, "refs"), { recursive: true });
+	const format =
+		head.length === 64
+			? "\trepositoryformatversion = 1\n[extensions]\n\tobjectFormat = sha256\n"
+			: "\trepositoryformatversion = 0\n";
+	await writeFile(join(dir, "config"), `[core]\n\tbare = true\n${format}`);
+	await writeFile(join(dir, "HEAD"), `${head}\n`);
+	const shallow = await readFile(join(common, "shallow")).catch(
+		() => undefined,
+	);
+	if (shallow) await writeFile(join(dir, "shallow"), shallow);
+};
+
+const logArgs = (git: string, since: number, head: string) => [
 	git,
 	"log",
 	"--no-merges",
@@ -71,16 +122,37 @@ const logArgs = (git: string, since: number) => [
 	`--max-count=${MAX_COMMITS}`,
 	`--format=${RECORD}%H${FIELD}%aN${FIELD}%at`,
 	"--name-only",
-	"HEAD",
+	head,
 	"--",
 ];
 
+const runLog = (ctx: AuditContext, git: string, common: string, head: string) =>
+	withTempDir("openaudit-history-", (tmp) =>
+		Effect.gen(function* () {
+			const dir = join(tmp, "git");
+			yield* Effect.promise(() => scratchGitDir(dir, common, head));
+			const since = Math.floor(Date.now() / 1000) - HISTORY_DAYS * 86_400;
+			return yield* ctx.exec.run(logArgs(git, since, head), {
+				cwd: tmp,
+				timeoutMs: 120_000,
+				env: {
+					...gitHardeningEnv(tmp, LOG_HARDENING),
+					GIT_DIR: dir,
+					GIT_COMMON_DIR: dir,
+					GIT_OBJECT_DIRECTORY: join(common, "objects"),
+					GIT_ALTERNATE_OBJECT_DIRECTORIES: "",
+					GIT_PAGER: "cat",
+				},
+			});
+		}),
+	);
+
 /**
- * The last year of non-merge commits on HEAD, read from the target's own git
- * directory after `confineGitDir` checked it stays inside the target. `git
- * log --name-only` compares commits, never the working tree, and runs with
- * the shared hardening plus the overrides above, so the target's config
- * cannot make it run anything.
+ * The last year of non-merge commits on HEAD. `confineGitDir` first checks
+ * the target's git directory stays inside the target; git then runs on a
+ * scratch git directory that borrows only the target's objects, so the
+ * target's config, hooks and attributes are never read. `git log
+ * --name-only` compares commits, never the working tree.
  */
 export const readHistory = (
 	ctx: AuditContext,
@@ -99,20 +171,11 @@ export const readHistory = (
 		});
 		if ("refused" in confined) return { unavailable: confined.refused };
 		const common = yield* Effect.promise(() => commonDirOf(confined.gitDir));
-		const since = Math.floor(Date.now() / 1000) - HISTORY_DAYS * 86_400;
-		const res = yield* withTempDir("openaudit-history-", (home) =>
-			ctx.exec.run(logArgs(git, since), {
-				cwd: home,
-				timeoutMs: 120_000,
-				env: {
-					...gitHardeningEnv(home, LOG_HARDENING),
-					GIT_DIR: confined.gitDir,
-					GIT_COMMON_DIR: common,
-					GIT_ALTERNATE_OBJECT_DIRECTORIES: "",
-					GIT_PAGER: "cat",
-				},
-			}),
+		const head = yield* Effect.promise(() =>
+			headCommit(confined.gitDir, common),
 		);
+		if (!head) return { commits: [] };
+		const res = yield* runLog(ctx, git, common, head);
 		if (res.code !== 0)
 			return {
 				unavailable: `git log failed: ${res.stderr.trim().split("\n")[0] ?? ""}`,

@@ -335,8 +335,13 @@ export const similarity = (
 	return (2 * (prev[b.length] ?? 0)) / (a.length + b.length);
 };
 
-/** Token lists this long are compared; longer ones would cost too much. */
-const MAX_TOKENS = 2000;
+/** Token lists up to this long are compared; longer ones would cost too much. */
+const MAX_TOKENS = 1500;
+/**
+ * Comparison work per file (token pairs examined). A file of many similar,
+ * long functions would otherwise cost quadratic time per pair, times pairs.
+ */
+const MAX_COMPARE_CELLS = 4_000_000;
 
 const similarPair = (a: FunctionMetrics, b: FunctionMetrics, min: number) => {
 	const [short, long] = [a.tokens.length, b.tokens.length].sort(
@@ -344,6 +349,23 @@ const similarPair = (a: FunctionMetrics, b: FunctionMetrics, min: number) => {
 	);
 	if ((short ?? 0) / (long ?? 1) < min) return false;
 	return similarity(a.tokens, b.tokens) >= min;
+};
+
+/** Functions similar to another one, within the comparison budget. */
+const similarFunctions = (
+	candidates: ReadonlyArray<FunctionMetrics>,
+	min: number,
+) => {
+	const hits = new Set<FunctionMetrics>();
+	let budget = MAX_COMPARE_CELLS;
+	candidates.forEach((a, i) => {
+		for (const b of candidates.slice(i + 1)) {
+			budget -= a.tokens.length * b.tokens.length;
+			if (budget < 0) return;
+			if (similarPair(a, b, min)) hits.add(a).add(b);
+		}
+	});
+	return hits;
 };
 
 const duplication = (
@@ -359,11 +381,7 @@ const duplication = (
 			f.tokens.length <= MAX_TOKENS &&
 			!isOff(f, "Code Duplication"),
 	);
-	const hits = new Set<FunctionMetrics>();
-	candidates.forEach((a, i) => {
-		for (const b of candidates.slice(i + 1))
-			if (similarPair(a, b, min)) hits.add(a).add(b);
-	});
+	const hits = similarFunctions(candidates, min);
 	if (!hits.size) return [];
 	return smell(
 		"Code Duplication",

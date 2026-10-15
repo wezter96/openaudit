@@ -258,6 +258,29 @@ const readRuleSets = (ws: {
 		Effect.orElseSucceed((): MatchedRuleSet[] => []),
 	);
 
+/**
+ * Measures one file. A file the parser cannot handle (pathological nesting
+ * that overflows the stack, say) is left out rather than failing the audit.
+ */
+const scoreFile = (
+	ts: typeof import("typescript"),
+	{ path, text }: { readonly path: string; readonly text: string },
+	sets: ReadonlyArray<MatchedRuleSet>,
+): Scored | undefined => {
+	try {
+		const metrics = analyzeJs(ts, path, text);
+		const smells = smellsOf(metrics, rulesFor(path, sets), isTestPath(path));
+		return {
+			path,
+			codeLines: metrics.codeLines,
+			score: scoreOf(smells),
+			smells,
+		};
+	} catch {
+		return undefined;
+	}
+};
+
 const loadTypeScript = Effect.tryPromise({
 	try: async () => (await import("typescript")).default,
 	catch: () => undefined,
@@ -280,20 +303,7 @@ export const codeHealth = defineAuditor({
 			if (!files.length)
 				return yield* skip("No JavaScript or TypeScript files.");
 			const sets = yield* readRuleSets(ws);
-			const scored: Scored[] = files.map(({ path, text }) => {
-				const metrics = analyzeJs(ts, path, text);
-				const smells = smellsOf(
-					metrics,
-					rulesFor(path, sets),
-					isTestPath(path),
-				);
-				return {
-					path,
-					codeLines: metrics.codeLines,
-					score: scoreOf(smells),
-					smells,
-				};
-			});
+			const scored = files.flatMap((f) => scoreFile(ts, f, sets) ?? []);
 			const history = yield* readHistory(ctx, ws.root);
 			const hotspots =
 				"commits" in history

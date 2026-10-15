@@ -167,6 +167,16 @@ describe("code.history auditor (real git)", () => {
 		expect(loss?.message).toContain("Ada");
 	});
 
+	test("finds HEAD in packed refs and when detached", async () => {
+		const { repo } = hostileRepo();
+		git(repo, ["pack-refs", "--all"]);
+		const packed = await runAuditor(codeHistory, repo);
+		expect(packed.results[0]?.findings.length).toBe(2);
+		git(repo, ["checkout", "-q", "--detach"]);
+		const detached = await runAuditor(codeHistory, repo);
+		expect(detached.results[0]?.findings.length).toBe(2);
+	});
+
 	test("skips outside a git repository", async () => {
 		const root = mkdtempSync(join(tmpdir(), "openaudit-history-"));
 		tmps.push(root);
