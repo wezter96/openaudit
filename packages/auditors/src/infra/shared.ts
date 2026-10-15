@@ -7,6 +7,7 @@ import {
 } from "@openaudit/core";
 import { Effect } from "effect";
 import {
+	type Document,
 	isMap,
 	isPair,
 	isScalar,
@@ -14,6 +15,8 @@ import {
 	LineCounter,
 	type Node,
 	parseAllDocuments,
+	type YAMLMap,
+	type YAMLSeq,
 } from "yaml";
 
 /**
@@ -55,6 +58,12 @@ export const readOptional = (ws: Workspace, file: string) =>
 const NOT_K8S_RE =
 	/(^|\/)(\.github\/|\.gitlab-ci|(docker-)?compose[^/]*\.ya?ml$|pnpm-lock|\.pre-commit|mkdocs|openapi|swagger)/;
 
+/** Readable YAML with top-level `apiVersion` and `kind`, and no Helm templating. */
+const isPlainManifest = (text: string | undefined): text is string => {
+	if (text === undefined || text.includes("{{")) return false;
+	return /^apiVersion:\s*\S/m.test(text) && /^kind:\s*\S/m.test(text);
+};
+
 /**
  * Plain Kubernetes manifests (YAML with top-level `apiVersion` and `kind`),
  * keyed by path with their text. Helm templates (`{{`) are not valid YAML and
@@ -67,14 +76,7 @@ export const kubernetesManifests = (ctx: AuditContext) =>
 		for (const file of files) {
 			if (ctx.target.type !== "file" && NOT_K8S_RE.test(file)) continue;
 			const text = yield* readOptional(ws, file);
-			if (
-				text === undefined ||
-				!/^apiVersion:\s*\S/m.test(text) ||
-				!/^kind:\s*\S/m.test(text) ||
-				text.includes("{{")
-			)
-				continue;
-			manifests.set(file, text);
+			if (isPlainManifest(text)) manifests.set(file, text);
 		}
 		return { ws, manifests };
 	});
@@ -97,56 +99,98 @@ export interface ParsedYaml {
 const nodeStart = (node: unknown): number | undefined =>
 	(node as Node | undefined)?.range?.[0];
 
+/** A YAML node together with the source offset of the closest located ancestor. */
+interface Cursor {
+	readonly node: unknown;
+	readonly offset: number | undefined;
+}
+
+const keyText = (key: unknown): string =>
+	isScalar(key) ? String(key.value) : String(key);
+
+const mapChild = (
+	map: YAMLMap,
+	key: string | number,
+	cursor: Cursor,
+): Cursor | undefined => {
+	const pair = map.items.find(
+		(p) => isPair(p) && keyText(p.key) === String(key),
+	);
+	if (!pair) return undefined;
+	return { node: pair.value, offset: nodeStart(pair.key) ?? cursor.offset };
+};
+
+const seqChild = (
+	seq: YAMLSeq,
+	index: number,
+	cursor: Cursor,
+): Cursor | undefined => {
+	const item = seq.items[index];
+	if (item === undefined) return undefined;
+	return { node: item, offset: nodeStart(item) ?? cursor.offset };
+};
+
+/** The child of `cursor` at `key`, or `undefined` when there is none. */
+const childAt = (cursor: Cursor, key: string | number): Cursor | undefined => {
+	const { node } = cursor;
+	if (isMap(node)) return mapChild(node, key, cursor);
+	if (isSeq(node) && typeof key === "number")
+		return seqChild(node, key, cursor);
+	return undefined;
+};
+
+/** Offset of the key (or item) at `path`, falling back to the closest ancestor. */
+const offsetAt = (root: unknown, path: YamlPath): number | undefined => {
+	let cursor: Cursor = { node: root, offset: nodeStart(root) };
+	for (const key of path) {
+		const next = childAt(cursor, key);
+		if (!next) break;
+		cursor = next;
+	}
+	return cursor.offset;
+};
+
+/** Plain JS value of a document, or `undefined` when it has errors or cannot be converted. */
+const documentValue = (
+	doc: Document.Parsed,
+): { readonly value: unknown } | undefined => {
+	if (doc.errors.length > 0) return undefined;
+	try {
+		return { value: doc.toJS({ maxAliasCount: 1000 }) };
+	} catch {
+		return undefined;
+	}
+};
+
+const yamlDoc = (
+	doc: Document.Parsed,
+	counter: LineCounter,
+): YamlDoc | undefined => {
+	const converted = documentValue(doc);
+	if (!converted) return undefined;
+	const lineOf = (path: YamlPath): number | undefined => {
+		const offset = offsetAt(doc.contents, path);
+		return offset === undefined ? undefined : counter.linePos(offset).line;
+	};
+	return { value: converted.value, lineOf };
+};
+
 /** Parses (multi-document) YAML and keeps enough source info to report lines. */
 export const parseYaml = (text: string): ParsedYaml => {
 	const counter = new LineCounter();
-	let hasErrors = false;
-	const docs: YamlDoc[] = [];
-	for (const doc of parseAllDocuments(text, { lineCounter: counter })) {
-		if (doc.errors.length > 0) {
-			hasErrors = true;
-			continue;
-		}
-		let value: unknown;
-		try {
-			value = doc.toJS({ maxAliasCount: 1000 });
-		} catch {
-			hasErrors = true;
-			continue;
-		}
-		const lineOf = (path: YamlPath): number | undefined => {
-			let node: unknown = doc.contents;
-			let offset = nodeStart(node);
-			for (const key of path) {
-				if (isMap(node)) {
-					const pair = node.items.find(
-						(p) =>
-							isPair(p) &&
-							(isScalar(p.key) ? String(p.key.value) : String(p.key)) ===
-								String(key),
-					);
-					if (!pair) break;
-					offset = nodeStart(pair.key) ?? offset;
-					node = pair.value;
-				} else if (isSeq(node) && typeof key === "number") {
-					const item = node.items[key];
-					if (item === undefined) break;
-					offset = nodeStart(item) ?? offset;
-					node = item;
-				} else break;
-			}
-			return offset === undefined ? undefined : counter.linePos(offset).line;
-		};
-		docs.push({ value, lineOf });
-	}
-	return { docs, hasErrors };
+	const parsed = parseAllDocuments(text, { lineCounter: counter }).map((doc) =>
+		yamlDoc(doc, counter),
+	);
+	const docs = parsed.filter((doc): doc is YamlDoc => doc !== undefined);
+	return { docs, hasErrors: docs.length < parsed.length };
 };
 
 /** Narrows an unknown YAML value to a plain object. */
 export const asRecord = (v: unknown): Record<string, unknown> | undefined =>
-	v !== null && typeof v === "object" && !Array.isArray(v)
-		? (v as Record<string, unknown>)
-		: undefined;
+	isObject(v) && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+
+const isObject = (v: unknown): v is object =>
+	v !== null && typeof v === "object";
 
 /** Narrows an unknown YAML value to an array (empty otherwise). */
 export const asArray = (v: unknown): ReadonlyArray<unknown> =>
