@@ -38,46 +38,262 @@ const UNMODELLED_OPENER: Readonly<Record<string, RegExp>> = {
 const JAVA_ESCAPE = /\\u+[0-9A-Fa-f]{4}/;
 
 /**
- * Where the lexer may have lost track of literals: the first quote it left
- * open at a line end (a multi-line string, raw string or text block it reads
- * as one line), or the first heredoc or percent literal. Past it, nothing is
- * certain. One pass over the mask.
+ * Ruby's `?"` and `%q(` literals hide quotes from the lexer. In Java a `\u`
+ * escape is an ordinary character: `\u0022` is a quote, `\u000a` a line break.
  */
-const desyncOf = (text: string, lang: string, m: Uint8Array): number => {
-	let at = text.length;
+const PREFIX_TRAP: ReadonlyMap<string, RegExp> = new Map([
+	["ruby", /[?%]/],
+	["java", JAVA_ESCAPE],
+]);
+
+/** Comments start at their delimiter in the mask. */
+const COMMENT_START = /^(\/\/|\/\*|#)/;
+
+/** Characters that could fool the lexer in the code before a literal. */
+const LEXER_TRAPS = new Set(["/", "`", "#", "*"]);
+
+type Span = Place & { breakAt: number };
+
+/** The lexer's view of a text: its non-code mask and where it may be wrong. */
+interface Lexed {
+	readonly mask: Uint8Array;
+	/** Where each masked span starts, in order. */
+	readonly starts: Int32Array;
+	/** Past this index nothing is certain. */
+	readonly desync: number;
+}
+
+interface Source {
+	readonly text: string;
+	readonly lang: string | undefined;
+	readonly lines: Lines;
+}
+
+/** A masked span being judged. */
+interface Masked {
+	readonly s: number;
+	readonly end: number;
+	/** Code before the span on its line, when short enough to judge. */
+	readonly prefix: string | undefined;
+	/** Where a Java `\u` escape may end the span early. */
+	readonly escapeAt: number;
+}
+
+const isQuote = (c: string | undefined) => c === '"' || c === "'";
+
+/** Whether `'` starts a one-character literal here, not a string. */
+const isCharQuote = (c: string, lang: string | undefined) =>
+	c === "'" && CHAR_LITERAL.has(lang ?? "");
+
+/** End of the masked span running from `from`. */
+const spanEnd = (mask: Uint8Array, from: number) => {
+	let end = from;
+	while (end < mask.length && mask[end]) end++;
+	return end;
+};
+
+/** The first heredoc or percent literal outside the mask. */
+const firstUnmodelled = (text: string, lang: string, mask: Uint8Array) => {
 	const openers = UNMODELLED_OPENER[lang];
-	if (openers)
-		for (const o of text.matchAll(openers))
-			if (!m[o.index ?? 0]) {
-				at = o.index ?? 0;
-				break;
-			}
-	if (MODELLED_LITERALS.has(lang)) return at;
+	if (!openers) return text.length;
+	for (const o of text.matchAll(openers))
+		if (!mask[o.index ?? 0]) return o.index ?? 0;
+	return text.length;
+};
+
+/** The first quote before `at` that the mask leaves open at a line end. */
+const firstOpenQuote = (
+	{ text, lang }: Source,
+	mask: Uint8Array,
+	at: number,
+): number => {
 	for (let i = 0; i < at; i++) {
-		const c = text[i];
-		if (m[i] || (c !== '"' && c !== "'")) continue;
-		let j = i + 1;
-		while (j < m.length && m[j]) j++;
+		const c = text[i] ?? "";
+		if (mask[i] || !isQuote(c)) continue;
+		const j = spanEnd(mask, i + 1);
 		// One-line character literals cannot leave a string open.
-		if (text[j] !== c && !(c === "'" && CHAR_LITERAL.has(lang))) return i;
+		if (text[j] !== c && !isCharQuote(c, lang)) return i;
 		i = text[j] === c ? j : j - 1;
 	}
 	return at;
 };
 
+/**
+ * Where the lexer may have lost track of literals: the first quote it left
+ * open at a line end (a multi-line string, raw string or text block it reads
+ * as one line), or the first heredoc or percent literal. Past it, nothing is
+ * certain. One pass over the mask.
+ */
+const desyncOf = (source: Source, lang: string, mask: Uint8Array): number => {
+	const at = firstUnmodelled(source.text, lang, mask);
+	if (MODELLED_LITERALS.has(lang)) return at;
+	return firstOpenQuote(source, mask, at);
+};
+
+/** Index of the quote closing a literal whose body starts at `from`, or -1. */
+const closingQuote = (s: string, from: number, quote: string): number => {
+	for (let i = from; i < s.length; i++) {
+		if (s[i] === "\\") i++;
+		else if (s[i] === quote) return i;
+	}
+	return -1;
+};
+
 /** Code before a literal on its line, free of anything that could fool the lexer. */
 const isPlainPrefix = (prefix: string): boolean => {
 	if (prefix.includes("<!--") || prefix.includes("-->")) return false;
-	let quote = "";
 	for (let i = 0; i < prefix.length; i++) {
-		const c = prefix[i];
-		if (quote) {
-			if (c === "\\") i++;
-			else if (c === quote) quote = "";
-		} else if (c === '"' || c === "'") quote = c;
-		else if (c === "/" || c === "`" || c === "#" || c === "*") return false;
+		const c = prefix[i] ?? "";
+		if (LEXER_TRAPS.has(c)) return false;
+		if (!isQuote(c)) continue;
+		i = closingQuote(prefix, i + 1, c);
+		if (i < 0) return false;
 	}
-	return quote === "";
+	return true;
+};
+
+const isSpanStart = (mask: Uint8Array, i: number) =>
+	mask[i] === 1 && (i === 0 || mask[i - 1] === 0);
+
+const spanStarts = (mask: Uint8Array): Int32Array => {
+	const starts: number[] = [];
+	for (let i = 0; i < mask.length; i++)
+		if (isSpanStart(mask, i)) starts.push(i);
+	return Int32Array.from(starts);
+};
+
+const lex = (source: Source): Lexed | undefined => {
+	const { text, lang } = source;
+	if (!lang) return undefined;
+	let mask: Uint8Array;
+	try {
+		mask = nonCodeMask(text, lang);
+	} catch {
+		return undefined; // no mask: everything is code, the stricter reading
+	}
+	return {
+		mask,
+		starts: spanStarts(mask),
+		desync: desyncOf(source, lang, mask),
+	};
+};
+
+/** Start of the masked span holding `index`. */
+const spanStartOf = (starts: Int32Array, index: number) => {
+	let lo = 0;
+	let hi = starts.length - 1;
+	while (lo < hi) {
+		const mid = (lo + hi + 1) >> 1;
+		if ((starts[mid] ?? 0) <= index) lo = mid;
+		else hi = mid - 1;
+	}
+	return starts[lo] ?? 0;
+};
+
+/** A prefix holding literals the lexer does not see. */
+const hidesLiterals = (prefix: string, lang: string | undefined) =>
+	PREFIX_TRAP.get(lang ?? "")?.test(prefix) === true;
+
+const linePrefix = (
+	{ text, lang, lines }: Source,
+	desync: number,
+	s: number,
+): string | undefined => {
+	const lineStart = lines.startOf(lines.lineOf(s));
+	const prefix =
+		s - lineStart <= MAX_PREFIX && s < desync
+			? text.slice(lineStart, s)
+			: undefined;
+	return prefix && hidesLiterals(prefix, lang) ? undefined : prefix;
+};
+
+const javaEscapeAt = ({ text, lang }: Source, s: number, end: number) => {
+	const e = lang === "java" ? JAVA_ESCAPE.exec(text.slice(s, end)) : null;
+	return e ? s + e.index : end;
+};
+
+/**
+ * Line comments may also end at CR, NEL (C#), the Unicode line separators
+ * (JavaScript, C#) or, in PHP, at `?>`.
+ */
+const lineCommentBreak = ({ text, lang }: Source, span: Masked): number => {
+	const body = text.slice(span.s, span.end);
+	const lineBreak = /[\r\u0085\u2028\u2029]/.exec(body);
+	const close = lang === "php" ? body.indexOf("?>") : -1;
+	let breakAt = span.escapeAt;
+	if (lineBreak) breakAt = Math.min(breakAt, span.s + lineBreak.index);
+	if (close !== -1) breakAt = Math.min(breakAt, span.s + close);
+	return breakAt;
+};
+
+const judgeComment = (source: Source, span: Masked): Span => ({
+	region: "comment",
+	certain: span.prefix !== undefined && /^\s*$/.test(span.prefix),
+	breakAt:
+		source.text[span.s + 1] === "*"
+			? span.escapeAt
+			: lineCommentBreak(source, span),
+});
+
+/** A `'` literal longer than one character where `'` delimits characters. */
+const isLongCharLiteral = ({ text, lang }: Source, span: Masked) =>
+	isCharQuote(text[span.s - 1] ?? "", lang) &&
+	(span.end - span.s > 2 ||
+		Array.from(text.slice(span.s, span.end)).length > 1);
+
+const closesOnItsLine = (source: Source, span: Masked, quote: string) =>
+	isQuote(quote) &&
+	source.text[span.end] === quote &&
+	!isLongCharLiteral(source, span);
+
+/** Not prefixed (f"", r#"", $"", @""), interpolating or multi-line. */
+const isPlainLiteral = (text: string, { s, end }: Masked) =>
+	!/[\w#$@"'`]/.test(text[s - 2] ?? "") && !/[{$\r\n]/.test(text.slice(s, end));
+
+const hasPlainPrefix = ({ prefix }: Masked) =>
+	prefix !== undefined && isPlainPrefix(prefix.slice(0, -1));
+
+/**
+ * Strings start after their quote. Prefixed (f"", r#"", $"", @""),
+ * interpolating, multi-line or unclosed literals are never certain, nor is a
+ * `'` literal longer than one character where `'` delimits characters (it is
+ * a Rust lifetime or a C++ digit separator).
+ */
+const judgeString = (source: Source, span: Masked): Span => {
+	const { text } = source;
+	const quote = text[span.s - 1] ?? "";
+	return {
+		region: "string",
+		certain:
+			closesOnItsLine(source, span, quote) &&
+			isPlainLiteral(text, span) &&
+			hasPlainPrefix(span),
+		regex: text[span.s] === "/" && quote !== "/",
+		breakAt: span.escapeAt,
+	};
+};
+
+/** Judged once per masked span, so the work stays linear. */
+const judge = (source: Source, lexed: Lexed, s: number): Span => {
+	const end = spanEnd(lexed.mask, s);
+	const span: Masked = {
+		s,
+		end,
+		prefix: linePrefix(source, lexed.desync, s),
+		escapeAt: javaEscapeAt(source, s, end),
+	};
+	return COMMENT_START.test(source.text.slice(s, s + 2))
+		? judgeComment(source, span)
+		: judgeString(source, span);
+};
+
+const cached = <K, V>(cache: Map<K, V>, key: K, make: () => V): V => {
+	let value = cache.get(key);
+	if (value === undefined) {
+		value = make();
+		cache.set(key, value);
+	}
+	return value;
 };
 
 export const placeFinder = (
@@ -85,110 +301,19 @@ export const placeFinder = (
 	lang: string | undefined,
 	lines: Lines,
 ): ((index: number) => Place) => {
+	const source: Source = { text, lang, lines };
+	const spans = new Map<number, Span>();
 	let built = false;
-	let mask: Uint8Array | undefined;
-	let starts = new Int32Array(0);
-	let desync = text.length;
-	const spans = new Map<number, Place & { breakAt: number }>();
-
-	const build = () => {
-		built = true;
-		if (!lang) return;
-		try {
-			mask = nonCodeMask(text, lang);
-		} catch {
-			return; // no mask: everything is code, the stricter reading
-		}
-		const m = mask;
-		desync = desyncOf(text, lang, m);
-		const isStart = (i: number) => m[i] === 1 && (i === 0 || m[i - 1] === 0);
-		let count = 0;
-		for (let i = 0; i < m.length; i++) if (isStart(i)) count++;
-		starts = new Int32Array(count);
-		let k = 0;
-		for (let i = 0; i < m.length; i++) if (isStart(i)) starts[k++] = i;
-	};
-
-	// Judged once per masked span, so the work stays linear.
-	const judge = (s: number, m: Uint8Array): Place & { breakAt: number } => {
-		let end = s;
-		while (end < m.length && m[end]) end++;
-		const lineStart = lines.startOf(lines.lineOf(s));
-		let prefix =
-			s - lineStart <= MAX_PREFIX && s < desync
-				? text.slice(lineStart, s)
-				: undefined;
-		// Ruby's `?"` and `%q(` literals hide quotes from the lexer.
-		if (lang === "ruby" && prefix && /[?%]/.test(prefix)) prefix = undefined;
-		// In Java a `\u` escape is an ordinary character: `\u0022` is a quote,
-		// `\u000a` a line break.
-		let escapeAt = end;
-		if (lang === "java") {
-			if (prefix && JAVA_ESCAPE.test(prefix)) prefix = undefined;
-			const e = JAVA_ESCAPE.exec(text.slice(s, end));
-			if (e) escapeAt = s + e.index;
-		}
-		if (/^(\/\/|\/\*|#)/.test(text.slice(s, s + 2))) {
-			// The mask starts comments at their delimiter. Line comments may also
-			// end at CR, NEL (C#), the Unicode line separators (JavaScript, C#)
-			// or, in PHP, at `?>`.
-			let breakAt = escapeAt;
-			if (text[s + 1] !== "*") {
-				const body = text.slice(s, end);
-				const lineBreak = /[\r\u0085\u2028\u2029]/.exec(body);
-				if (lineBreak) breakAt = Math.min(breakAt, s + lineBreak.index);
-				const close = lang === "php" ? body.indexOf("?>") : -1;
-				if (close !== -1) breakAt = Math.min(breakAt, s + close);
-			}
-			return {
-				region: "comment",
-				certain: prefix !== undefined && /^\s*$/.test(prefix),
-				breakAt,
-			};
-		}
-		// Strings start after their quote. Prefixed (f"", r#"", $"", @""),
-		// interpolating, multi-line or unclosed literals are never certain,
-		// nor is a `'` literal longer than one character where `'` delimits
-		// characters (it is a Rust lifetime or a C++ digit separator).
-		const quote = text[s - 1] ?? "";
-		const certain =
-			(quote === '"' || quote === "'") &&
-			text[end] === quote &&
-			!(
-				quote === "'" &&
-				lang !== undefined &&
-				CHAR_LITERAL.has(lang) &&
-				(end - s > 2 || Array.from(text.slice(s, end)).length > 1)
-			) &&
-			!/[\w#$@"'`]/.test(text[s - 2] ?? "") &&
-			!/[{$\r\n]/.test(text.slice(s, end)) &&
-			prefix !== undefined &&
-			isPlainPrefix(prefix.slice(0, -1));
-		return {
-			region: "string",
-			certain,
-			regex: text[s] === "/" && quote !== "/",
-			breakAt: escapeAt,
-		};
-	};
-
+	let lexed: Lexed | undefined;
 	return (index) => {
-		if (!built) build();
-		const m = mask;
-		if (!m?.[index]) return IN_CODE;
-		let lo = 0;
-		let hi = starts.length - 1;
-		while (lo < hi) {
-			const mid = (lo + hi + 1) >> 1;
-			if ((starts[mid] ?? 0) <= index) lo = mid;
-			else hi = mid - 1;
+		if (!built) {
+			built = true;
+			lexed = lex(source);
 		}
-		const s = starts[lo] ?? 0;
-		let span = spans.get(s);
-		if (!span) {
-			span = judge(s, m);
-			spans.set(s, span);
-		}
+		const current = lexed;
+		if (!current?.mask[index]) return IN_CODE;
+		const s = spanStartOf(current.starts, index);
+		const span = cached(spans, s, () => judge(source, current, s));
 		// Past a CR or line separator, a line comment may already have ended.
 		return index <= span.breakAt
 			? span

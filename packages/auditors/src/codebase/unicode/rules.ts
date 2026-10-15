@@ -97,159 +97,219 @@ interface Context {
 	readonly placeAt: (index: number) => Place;
 }
 
-export const classify = (seg: Segment, ctx: Context): Hit | undefined => {
-	const { kind } = ctx;
-	const { cps, start: index } = seg;
-	switch (seg.group) {
-		case "bidi":
-			return {
-				rule: "bidi-control",
-				index,
-				severity: kind === "text" ? "medium" : "high",
-				confidence:
-					kind === "code" ? "high" : kind === "agent" ? "medium" : "low",
-				chars: cps,
-				message: (list) =>
-					kind === "code"
-						? `Contains ${list}. Bidirectional controls make code display in a different order than the compiler reads it, hiding logic in comments and strings (Trojan Source, CVE-2021-42574).`
-						: `Contains ${list}. Bidirectional controls make text display in a different order than tools and language models read it.`,
-			};
-		case "mark":
-			// Directional marks are normal in RTL prose; in code they still reorder.
-			if (kind !== "code") return undefined;
-			return {
-				rule: "bidi-control",
-				index,
-				severity: "medium",
-				confidence: "low",
-				chars: cps,
-				message: (list) =>
-					`Contains ${list}. Directional marks are invisible and can change how neighbouring code is displayed (Trojan Source, CVE-2021-42574).`,
-			};
-		case "tag": {
-			if (isFlagSequence(seg.head, ctx.prev)) return undefined;
-			const hidden = decodeTags(seg.head);
-			return {
-				rule: "tag-characters",
-				index,
-				severity: "high",
-				confidence: "high",
-				chars: cps,
-				message: () =>
-					hidden
-						? `Invisible Unicode tag characters spell out hidden text: "${truncate(scrubLine(hidden), 120)}". Humans cannot see it but language models and tools read it, a known prompt-injection technique.`
-						: "Contains invisible Unicode tag characters, which can carry text that humans cannot see but language models read.",
-			};
-		}
-		case "selector": {
-			const presentation = cps.every((c) => c === 0xfe0e || c === 0xfe0f);
-			// One selector per character is how variants work, except after ASCII
-			// letters, which have none.
-			const orphan = seg.count === 1 && /[A-Za-z]/.test(ctx.prev);
-			// Repeating one presentation selector is a copy-paste slip; mixing
-			// U+FE0E and U+FE0F can carry bits.
-			if (
-				!orphan &&
-				(seg.count < 2 ||
-					(presentation && (seg.count <= 2 || cps.length === 1)))
-			)
-				return undefined;
-			const decoded = orphan ? undefined : decodeSelectors(seg.head);
-			return {
-				rule: "variation-selector-run",
-				index,
-				severity: kind === "text" ? "medium" : "high",
-				confidence: "medium",
-				chars: cps,
-				message: () =>
-					orphan
-						? "Variation selectors follow characters that have no variants. One per character is a known way to hide bytes in plain-looking text."
-						: `A run of ${seg.count} variation selectors follows one character. Each selector can encode a byte, so this is a known way to hide payloads in code and prompts${decoded ? `; it decodes to "${truncate(scrubLine(decoded), 120)}"` : ""}.`,
-			};
-		}
-		case "invisible": {
-			if (index === 0 && cps[0] === 0xfeff && seg.count === 1) return undefined;
-			if (kind !== "code") {
-				const reported = cps.filter(
-					(cp) =>
-						!CODE_ONLY.has(cp) &&
-						!legitimateInvisible(cp, ctx.prev, ctx.next, "prose"),
-				);
-				if (!reported.length) return undefined;
-				return {
-					rule: "invisible-character",
-					index,
-					severity: kind === "agent" ? "medium" : "low",
-					confidence: kind === "agent" ? "medium" : "low",
-					chars: reported,
-					message: (list) =>
-						`Contains ${list}, which renders as nothing and makes text differ from what it looks like.`,
-				};
-			}
-			const place = ctx.placeAt(index);
-			const trusted = place.certain && place.region !== "code";
-			const markup = MARKUP_EXT.has(extOf(ctx.path));
-			// Soft hyphens are hyphenation hints in markup prose, and identifiers
-			// cannot contain them.
-			const reported = cps.filter(
-				(cp) =>
-					!(markup && cp === 0x00ad) &&
-					!legitimateInvisible(
-						cp,
-						ctx.prev,
-						ctx.next,
-						trusted && place.region === "comment" ? "comment" : "code",
-					),
-			);
-			if (!reported.length) return undefined;
-			// Soft hyphens cannot form identifiers in most languages, so outside
-			// plain code they stay medium.
-			const hyphens =
-				place.region !== "code" && reported.every((cp) => cp === 0x00ad);
-			if (!trusted)
-				return {
-					rule: "invisible-character",
-					index,
-					severity: markup || hyphens ? "medium" : "high",
-					confidence: "medium",
-					chars: reported,
-					message: (list) =>
-						place.region === "code"
-							? `Contains ${list} outside strings and comments. Invisible characters in code can make two identifiers look identical or hide parameters (the "invisible backdoor").`
-							: `Contains ${list} where the scanner cannot be sure it is inside a ${place.region}, so it is judged as code. Invisible characters in code can make two identifiers look identical or hide parameters (the "invisible backdoor").`,
-				};
-			// Soft hyphens are ordinary hyphenation hints in strings and comments.
-			if (reported.every((cp) => cp === 0x00ad)) return undefined;
-			// A raw BOM (CSV for Excel) or separator in a string is deliberate data,
-			// just invisible; zero-width characters inside words are the risk.
-			if (place.region === "string" && reported.every(isDeliberateInString))
-				return {
-					rule: "invisible-character",
-					index,
-					severity: "low",
-					confidence: "medium",
-					chars: reported,
-					message: (list) =>
-						`Contains a raw ${list} in a string. It is valid but invisible, so reviewers cannot tell it is there; write it as an escape.`,
-				};
-			const separator =
-				place.region === "comment" && reported.some(isSeparator);
-			return {
-				rule: "invisible-character",
-				index,
-				severity: separator ? "high" : "medium",
-				confidence: "medium",
-				chars: reported,
-				message: (list) =>
-					separator
-						? `Contains ${list} in a comment. JavaScript and C# treat it as a line break, so code after it runs although it looks commented out.`
-						: place.region === "string"
-							? `Contains ${list} in a string. Strings that look identical can then compare unequal, and reviewers cannot see the difference.`
-							: `Contains ${list} in a comment. It hides what reviewers see and often marks pasted text.`,
-			};
-		}
-	}
+type Classifier = (seg: Segment, ctx: Context) => Hit | undefined;
+
+const BIDI_CONFIDENCE: Readonly<Record<Kind, Confidence>> = {
+	code: "high",
+	agent: "medium",
+	text: "low",
 };
+
+const bidiHit: Classifier = ({ cps, start: index }, { kind }) => ({
+	rule: "bidi-control",
+	index,
+	severity: kind === "text" ? "medium" : "high",
+	confidence: BIDI_CONFIDENCE[kind],
+	chars: cps,
+	message: (list) =>
+		kind === "code"
+			? `Contains ${list}. Bidirectional controls make code display in a different order than the compiler reads it, hiding logic in comments and strings (Trojan Source, CVE-2021-42574).`
+			: `Contains ${list}. Bidirectional controls make text display in a different order than tools and language models read it.`,
+});
+
+const markHit: Classifier = ({ cps, start: index }, { kind }) => {
+	// Directional marks are normal in RTL prose; in code they still reorder.
+	if (kind !== "code") return undefined;
+	return {
+		rule: "bidi-control",
+		index,
+		severity: "medium",
+		confidence: "low",
+		chars: cps,
+		message: (list) =>
+			`Contains ${list}. Directional marks are invisible and can change how neighbouring code is displayed (Trojan Source, CVE-2021-42574).`,
+	};
+};
+
+const tagHit: Classifier = (seg, ctx) => {
+	if (isFlagSequence(seg.head, ctx.prev)) return undefined;
+	const hidden = decodeTags(seg.head);
+	return {
+		rule: "tag-characters",
+		index: seg.start,
+		severity: "high",
+		confidence: "high",
+		chars: seg.cps,
+		message: () =>
+			hidden
+				? `Invisible Unicode tag characters spell out hidden text: "${truncate(scrubLine(hidden), 120)}". Humans cannot see it but language models and tools read it, a known prompt-injection technique.`
+				: "Contains invisible Unicode tag characters, which can carry text that humans cannot see but language models read.",
+	};
+};
+
+const isPresentationOnly = (cps: ReadonlyArray<number>) =>
+	cps.every((c) => c === 0xfe0e || c === 0xfe0f);
+
+/**
+ * One selector per character is how variants work. Repeating one
+ * presentation selector is a copy-paste slip; mixing U+FE0E and U+FE0F can
+ * carry bits.
+ */
+const isOrdinarySelectorUse = ({ count, cps }: Segment) =>
+	count < 2 || (isPresentationOnly(cps) && (count <= 2 || cps.length === 1));
+
+/** A selector after an ASCII letter, which has no variants. */
+const isOrphan = ({ count }: Segment, prev: string) =>
+	count === 1 && /[A-Za-z]/.test(prev);
+
+const selectorHit: Classifier = (seg, ctx) => {
+	const orphan = isOrphan(seg, ctx.prev);
+	if (!orphan && isOrdinarySelectorUse(seg)) return undefined;
+	const decoded = orphan ? undefined : decodeSelectors(seg.head);
+	return {
+		rule: "variation-selector-run",
+		index: seg.start,
+		severity: ctx.kind === "text" ? "medium" : "high",
+		confidence: "medium",
+		chars: seg.cps,
+		message: () =>
+			orphan
+				? "Variation selectors follow characters that have no variants. One per character is a known way to hide bytes in plain-looking text."
+				: `A run of ${seg.count} variation selectors follows one character. Each selector can encode a byte, so this is a known way to hide payloads in code and prompts${decoded ? `; it decodes to "${truncate(scrubLine(decoded), 120)}"` : ""}.`,
+	};
+};
+
+const isSoftHyphen = (cp: number) => cp === 0x00ad;
+
+const isLeadingBom = ({ start, cps, count }: Segment) =>
+	start === 0 && cps[0] === 0xfeff && count === 1;
+
+const proseInvisibleHit: Classifier = ({ cps, start: index }, ctx) => {
+	const reported = cps.filter(
+		(cp) =>
+			!CODE_ONLY.has(cp) &&
+			!legitimateInvisible(cp, ctx.prev, ctx.next, "prose"),
+	);
+	if (!reported.length) return undefined;
+	const level = ctx.kind === "agent" ? "medium" : "low";
+	return {
+		rule: "invisible-character",
+		index,
+		severity: level,
+		confidence: level,
+		chars: reported,
+		message: (list) =>
+			`Contains ${list}, which renders as nothing and makes text differ from what it looks like.`,
+	};
+};
+
+/** Invisible characters in code, where the lexer places them. */
+interface Placed {
+	readonly index: number;
+	readonly place: Place;
+	readonly chars: ReadonlyArray<number>;
+}
+
+const untrustedHit = (
+	{ index, place, chars }: Placed,
+	markup: boolean,
+): Hit => {
+	// Soft hyphens cannot form identifiers in most languages, so outside
+	// plain code they stay medium.
+	const hyphens = place.region !== "code" && chars.every(isSoftHyphen);
+	return {
+		rule: "invisible-character",
+		index,
+		severity: markup || hyphens ? "medium" : "high",
+		confidence: "medium",
+		chars,
+		message: (list) =>
+			place.region === "code"
+				? `Contains ${list} outside strings and comments. Invisible characters in code can make two identifiers look identical or hide parameters (the "invisible backdoor").`
+				: `Contains ${list} where the scanner cannot be sure it is inside a ${place.region}, so it is judged as code. Invisible characters in code can make two identifiers look identical or hide parameters (the "invisible backdoor").`,
+	};
+};
+
+const literalMessage =
+	(region: Place["region"], separator: boolean) => (list: string) =>
+		separator
+			? `Contains ${list} in a comment. JavaScript and C# treat it as a line break, so code after it runs although it looks commented out.`
+			: region === "string"
+				? `Contains ${list} in a string. Strings that look identical can then compare unequal, and reviewers cannot see the difference.`
+				: `Contains ${list} in a comment. It hides what reviewers see and often marks pasted text.`;
+
+/** Invisible characters certainly inside a string or comment. */
+const literalHit = ({ index, place, chars }: Placed): Hit | undefined => {
+	// Soft hyphens are ordinary hyphenation hints in strings and comments.
+	if (chars.every(isSoftHyphen)) return undefined;
+	// A raw BOM (CSV for Excel) or separator in a string is deliberate data,
+	// just invisible; zero-width characters inside words are the risk.
+	if (place.region === "string" && chars.every(isDeliberateInString))
+		return {
+			rule: "invisible-character",
+			index,
+			severity: "low",
+			confidence: "medium",
+			chars,
+			message: (list) =>
+				`Contains a raw ${list} in a string. It is valid but invisible, so reviewers cannot tell it is there; write it as an escape.`,
+		};
+	const separator = place.region === "comment" && chars.some(isSeparator);
+	return {
+		rule: "invisible-character",
+		index,
+		severity: separator ? "high" : "medium",
+		confidence: "medium",
+		chars,
+		message: literalMessage(place.region, separator),
+	};
+};
+
+/** Certainly inside a string or comment. */
+const isTrusted = (place: Place) => place.certain && place.region !== "code";
+
+const lexicalContext = (place: Place) =>
+	isTrusted(place) && place.region === "comment" ? "comment" : "code";
+
+/**
+ * Soft hyphens are hyphenation hints in markup prose, and identifiers
+ * cannot contain them.
+ */
+const isMarkupHyphen = (cp: number, markup: boolean) =>
+	markup && isSoftHyphen(cp);
+
+const codeInvisibleHit: Classifier = ({ cps, start: index }, ctx) => {
+	const place = ctx.placeAt(index);
+	const trusted = isTrusted(place);
+	const markup = MARKUP_EXT.has(extOf(ctx.path));
+	const context = lexicalContext(place);
+	const chars = cps.filter(
+		(cp) =>
+			!isMarkupHyphen(cp, markup) &&
+			!legitimateInvisible(cp, ctx.prev, ctx.next, context),
+	);
+	if (!chars.length) return undefined;
+	const placed = { index, place, chars };
+	return trusted ? literalHit(placed) : untrustedHit(placed, markup);
+};
+
+const invisibleHit: Classifier = (seg, ctx) => {
+	if (isLeadingBom(seg)) return undefined;
+	return ctx.kind === "code"
+		? codeInvisibleHit(seg, ctx)
+		: proseInvisibleHit(seg, ctx);
+};
+
+const CLASSIFIERS: Readonly<Record<Group, Classifier>> = {
+	bidi: bidiHit,
+	mark: markHit,
+	tag: tagHit,
+	selector: selectorHit,
+	invisible: invisibleHit,
+};
+
+export const classify = (seg: Segment, ctx: Context): Hit | undefined =>
+	CLASSIFIERS[seg.group](seg, ctx);
 
 export interface Hit {
 	readonly rule: RuleId;

@@ -2,6 +2,7 @@ import {
 	defineAuditor,
 	type FindingInput,
 	requireWorkspace,
+	type Workspace,
 } from "@openaudit/core";
 import { Effect } from "effect";
 
@@ -53,6 +54,81 @@ const MAX_TOTAL_BYTES = 512 * 1024 * 1024;
 /** Agent files first, so the byte budget never pushes them out. */
 const PRIORITY: Readonly<Record<Kind, number>> = { agent: 0, code: 1, text: 2 };
 
+interface Sized {
+	readonly path: string;
+	/** -1 when the size could not be read. */
+	readonly size: number;
+	readonly kind: Kind | undefined;
+}
+
+/** The read budget, and the files left out of the scan. */
+interface Tally {
+	budget: number;
+	unread: number;
+	readonly tooLarge: string[];
+}
+
+const sizeOf = (ws: Workspace, path: string) =>
+	ws.size(path).pipe(
+		Effect.map((size): Sized => ({ path, size, kind: kindOf(path) })),
+		Effect.orElseSucceed(
+			(): Sized => ({
+				path,
+				size: -1,
+				kind: kindOf(path),
+			}),
+		),
+	);
+
+const rank = (f: Sized) =>
+	f.kind ? PRIORITY[f.kind] : isBinaryPath(f.path) ? 4 : 3;
+
+/** Whether a file is read, counting it when it is left out. */
+const admit = ({ path, size, kind }: Sized, tally: Tally): boolean => {
+	if (size === 0) return false;
+	if (size < 0) {
+		tally.unread++;
+		return false;
+	}
+	// Binary formats are only sniffed when small enough to be text.
+	if (isBinaryPath(path) && size > MAX_SCAN_BYTES) return false;
+	if (size > MAX_FILE_BYTES) {
+		if (kind) tally.tooLarge.push(path);
+		return false;
+	}
+	if (size > tally.budget) {
+		tally.unread++;
+		return false;
+	}
+	tally.budget -= size;
+	return true;
+};
+
+const scanBytes = ({ path, kind }: Sized, bytes: Uint8Array) => {
+	const texts = decodeTexts(bytes, !kind);
+	const quick = isBinaryPath(path) || texts.length > 1;
+	return texts.flatMap((text) =>
+		scanUnicode(
+			{ path, text },
+			{
+				kind: kindOf(path, text) ?? "code",
+				mode: quick ? "quick" : undefined,
+			},
+		),
+	);
+};
+
+const scanFile = (ws: Workspace, file: Sized, tally: Tally) =>
+	Effect.gen(function* () {
+		if (!admit(file, tally)) return [];
+		return scanBytes(file, yield* ws.readBytes(file.path));
+	}).pipe(
+		Effect.orElseSucceed(() => {
+			tally.unread++;
+			return [];
+		}),
+	);
+
 export const unicode = defineAuditor({
 	id: AUDITOR,
 	title: "Hidden Unicode",
@@ -70,67 +146,21 @@ export const unicode = defineAuditor({
 			// user's disclosed ignore paths still apply.
 			const sized = yield* Effect.forEach(
 				yield* ws.files,
-				(path) =>
-					ws.size(path).pipe(
-						Effect.map((size) => ({ path, size, kind: kindOf(path) })),
-						Effect.orElseSucceed(() => ({
-							path,
-							size: -1,
-							kind: kindOf(path),
-						})),
-					),
+				(path) => sizeOf(ws, path),
 				{ concurrency: 32 },
 			);
-			const rank = (f: { path: string; kind?: Kind }) =>
-				f.kind ? PRIORITY[f.kind] : isBinaryPath(f.path) ? 4 : 3;
 			const candidates = sized.sort(
 				(a, b) => rank(a) - rank(b) || a.size - b.size,
 			);
-			const tooLarge: string[] = [];
-			let unread = 0;
-			let budget = MAX_TOTAL_BYTES;
+			const tally: Tally = { budget: MAX_TOTAL_BYTES, unread: 0, tooLarge: [] };
 			const results = yield* Effect.forEach(
 				candidates,
-				({ path, size, kind }) =>
-					Effect.gen(function* () {
-						const binary = isBinaryPath(path);
-						if (size === 0) return [];
-						if (size < 0) {
-							unread++;
-							return [];
-						}
-						// Binary formats are only sniffed when small enough to be text.
-						if (binary && size > MAX_SCAN_BYTES) return [];
-						if (size > MAX_FILE_BYTES) {
-							if (kind) tooLarge.push(path);
-							return [];
-						}
-						if (size > budget) {
-							unread++;
-							return [];
-						}
-						budget -= size;
-						const texts = decodeTexts(yield* ws.readBytes(path), !kind);
-						return texts.flatMap((text) =>
-							scanUnicode(
-								{ path, text },
-								{
-									kind: kindOf(path, text) ?? "code",
-									mode: binary || texts.length > 1 ? "quick" : undefined,
-								},
-							),
-						);
-					}).pipe(
-						Effect.orElseSucceed(() => {
-							unread++;
-							return [];
-						}),
-					),
+				(file) => scanFile(ws, file, tally),
 				{ concurrency: 16 },
 			);
 			const findings = results.flat();
-			if (tooLarge.length || unread)
-				findings.push(incomplete(tooLarge.sort(), unread));
+			if (tally.tooLarge.length || tally.unread)
+				findings.push(incomplete(tally.tooLarge.sort(), tally.unread));
 			return findings;
 		}),
 });

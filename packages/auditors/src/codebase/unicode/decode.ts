@@ -8,6 +8,51 @@ const utf32 = (bytes: Uint8Array, littleEndian: boolean): string => {
 	return out;
 };
 
+const utf16 = (encoding: "utf-16le" | "utf-16be") => (bytes: Uint8Array) =>
+	new TextDecoder(encoding).decode(bytes);
+
+/** Byte order marks, longest first so UTF-32LE is not read as UTF-16LE. */
+const BOMS: ReadonlyArray<{
+	readonly bom: ReadonlyArray<number>;
+	readonly decode: (bytes: Uint8Array) => string;
+}> = [
+	{ bom: [0xff, 0xfe, 0, 0], decode: (bytes) => utf32(bytes, true) },
+	{ bom: [0, 0, 0xfe, 0xff], decode: (bytes) => utf32(bytes, false) },
+	{ bom: [0xff, 0xfe], decode: utf16("utf-16le") },
+	{ bom: [0xfe, 0xff], decode: utf16("utf-16be") },
+];
+
+const SHEBANG = [0x23, 0x21];
+
+const startsWith = (bytes: Uint8Array, prefix: ReadonlyArray<number>) =>
+	prefix.every((b, i) => bytes[i] === b);
+
+interface Nuls {
+	readonly even: number;
+	readonly odd: number;
+}
+
+const nulsOf = (head: Uint8Array): Nuls => {
+	let even = 0;
+	let odd = 0;
+	for (let i = 0; i < head.length; i++) {
+		if (head[i] !== 0) continue;
+		if (i % 2) odd++;
+		else even++;
+	}
+	return { even, odd };
+};
+
+/** UTF-16 without a BOM, told apart by where mostly-ASCII text has its NULs. */
+const utf16ByNuls = (
+	{ even, odd }: Nuls,
+	half: number,
+): "utf-16le" | "utf-16be" | undefined => {
+	if (odd > half * 0.6 && even < half * 0.1) return "utf-16le";
+	if (even > half * 0.6 && odd < half * 0.1) return "utf-16be";
+	return undefined;
+};
+
 /**
  * Every plausible reading of a file's bytes. UTF-32 and UTF-16 (with a BOM, or
  * detected from the NUL pattern of mostly-ASCII text) are decoded as such,
@@ -18,31 +63,12 @@ const utf32 = (bytes: Uint8Array, littleEndian: boolean): string => {
  */
 export const decodeTexts = (bytes: Uint8Array, sniff: boolean): string[] => {
 	const utf8 = () => new TextDecoder().decode(bytes);
-	const [b0, b1, b2, b3] = bytes;
-	if (b0 === 0xff && b1 === 0xfe && b2 === 0 && b3 === 0)
-		return [utf32(bytes, true), utf8()];
-	if (b0 === 0 && b1 === 0 && b2 === 0xfe && b3 === 0xff)
-		return [utf32(bytes, false), utf8()];
-	if (b0 === 0xff && b1 === 0xfe)
-		return [new TextDecoder("utf-16le").decode(bytes), utf8()];
-	if (b0 === 0xfe && b1 === 0xff)
-		return [new TextDecoder("utf-16be").decode(bytes), utf8()];
+	const marked = BOMS.find(({ bom }) => startsWith(bytes, bom));
+	if (marked) return [marked.decode(bytes), utf8()];
 	const head = bytes.subarray(0, 4096);
-	let even = 0;
-	let odd = 0;
-	for (let i = 0; i < head.length; i++)
-		if (head[i] === 0) {
-			if (i % 2) odd++;
-			else even++;
-		}
-	if (even + odd > 0) {
-		const half = head.length / 2;
-		if (odd > half * 0.6 && even < half * 0.1)
-			return [new TextDecoder("utf-16le").decode(bytes), utf8()];
-		if (even > half * 0.6 && odd < half * 0.1)
-			return [new TextDecoder("utf-16be").decode(bytes), utf8()];
-		const shebang = b0 === 0x23 && b1 === 0x21;
-		if (sniff && !shebang) return [];
-	}
-	return [utf8()];
+	const nuls = nulsOf(head);
+	if (nuls.even + nuls.odd === 0) return [utf8()];
+	const encoding = utf16ByNuls(nuls, head.length / 2);
+	if (encoding) return [new TextDecoder(encoding).decode(bytes), utf8()];
+	return sniff && !startsWith(bytes, SHEBANG) ? [] : [utf8()];
 };

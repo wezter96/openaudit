@@ -62,15 +62,39 @@ export const HIDDEN =
 
 export type Group = "bidi" | "mark" | "tag" | "selector" | "invisible";
 
-export const groupOf = (cp: number): Group => {
-	if ((cp >= 0x202a && cp <= 0x202e) || (cp >= 0x2066 && cp <= 0x2069))
-		return "bidi";
-	if (cp === 0x200e || cp === 0x200f || cp === 0x061c) return "mark";
-	if (cp >= 0xe0000 && cp <= 0xe007f) return "tag";
-	if ((cp >= 0xfe00 && cp <= 0xfe0f) || (cp >= 0xe0100 && cp <= 0xe01ef))
-		return "selector";
-	return "invisible";
-};
+type Range = readonly [number, number];
+
+const within = (cp: number, ranges: ReadonlyArray<Range>) =>
+	ranges.some(([lo, hi]) => cp >= lo && cp <= hi);
+
+/** Code point ranges of each group; anything else is `invisible`. */
+const GROUP_RANGES: ReadonlyArray<readonly [Group, ReadonlyArray<Range>]> = [
+	[
+		"bidi",
+		[
+			[0x202a, 0x202e],
+			[0x2066, 0x2069],
+		],
+	],
+	[
+		"mark",
+		[
+			[0x200e, 0x200f],
+			[0x061c, 0x061c],
+		],
+	],
+	["tag", [[0xe0000, 0xe007f]]],
+	[
+		"selector",
+		[
+			[0xfe00, 0xfe0f],
+			[0xe0100, 0xe01ef],
+		],
+	],
+];
+
+export const groupOf = (cp: number): Group =>
+	GROUP_RANGES.find(([, ranges]) => within(cp, ranges))?.[0] ?? "invisible";
 
 /** Characters that only make sense in code as escapes. */
 export const CODE_ONLY = new Set([
@@ -89,6 +113,45 @@ const isComplexScript = (ch: string) =>
 	/[\p{L}\p{M}]/u.test(ch) &&
 	!/[\p{Script=Latin}\p{Script=Common}\p{Script=Inherited}]/u.test(ch);
 
+type Context = "prose" | "code" | "comment";
+
+interface Around {
+	readonly prev: string;
+	readonly next: string;
+	readonly context: Context;
+}
+
+const isMongolian = (ch: string) => /\p{Script=Mongolian}/u.test(ch);
+
+/** Which neighbours make each invisible character plausible. */
+const NEIGHBOUR: ReadonlyMap<number, (ch: string) => boolean> = new Map([
+	[0x200b, isComplexScript],
+	[0x200c, isComplexScript],
+	[0x200d, isComplexScript],
+	[0x2060, isComplexScript],
+	[0x034f, isComplexScript], // grapheme joiner
+	[0x17b4, isComplexScript], // Khmer inherent vowels
+	[0x17b5, isComplexScript],
+	[0x180b, isMongolian],
+	[0x180c, isMongolian],
+	[0x180d, isMongolian],
+	[0x180e, isMongolian],
+	[0x180f, isMongolian],
+]);
+
+const joinsEmoji = (cp: number, { prev, next }: Around) =>
+	cp === 0x200d && (isEmojiPart(prev) || isEmojiPart(next));
+
+/** `**\u200B/` keeps a glob from closing a block comment. */
+const guardsCommentEnd = (cp: number, { prev, next, context }: Around) =>
+	cp === 0x200b && context === "comment" && prev === "*" && next === "/";
+
+const near = (
+	test: (ch: string) => boolean,
+	{ prev, next, context }: Around,
+) =>
+	context === "prose" ? test(prev) || test(next) : test(prev) && test(next);
+
 /**
  * True when an invisible character is plausibly part of the text around it.
  * Emoji are never identifier characters, so a joiner between them is safe
@@ -101,32 +164,12 @@ export const legitimateInvisible = (
 	cp: number,
 	prev: string,
 	next: string,
-	context: "prose" | "code" | "comment",
+	context: Context,
 ) => {
-	if (cp === 0x200d && (isEmojiPart(prev) || isEmojiPart(next))) return true;
-	// `**\u200B/` keeps a glob from closing a block comment.
-	if (cp === 0x200b && context === "comment" && prev === "*" && next === "/")
-		return true;
-	const near = (test: (ch: string) => boolean) =>
-		context === "prose" ? test(prev) || test(next) : test(prev) && test(next);
-	switch (cp) {
-		case 0x200b:
-		case 0x200c:
-		case 0x200d:
-		case 0x2060:
-		case 0x034f: // grapheme joiner
-		case 0x17b4: // Khmer inherent vowels
-		case 0x17b5:
-			return near(isComplexScript);
-		case 0x180b:
-		case 0x180c:
-		case 0x180d:
-		case 0x180e:
-		case 0x180f:
-			return near((ch) => /\p{Script=Mongolian}/u.test(ch));
-		default:
-			return false;
-	}
+	const around: Around = { prev, next, context };
+	if (joinsEmoji(cp, around) || guardsCommentEnd(cp, around)) return true;
+	const test = NEIGHBOUR.get(cp);
+	return test ? near(test, around) : false;
 };
 
 /** Escapes characters that render invisibly or reorder text. */
@@ -189,12 +232,12 @@ export const decodeSelectors = (
 export const charList = (cps: Iterable<number>) =>
 	[...new Set(cps)].map(label).join(", ");
 
-export const charBefore = (text: string, i: number): string => {
-	const low = text.charCodeAt(i - 1);
-	return i >= 2 && low >= 0xdc00 && low <= 0xdfff
+const isLowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff;
+
+export const charBefore = (text: string, i: number): string =>
+	i >= 2 && isLowSurrogate(text.charCodeAt(i - 1))
 		? text.slice(i - 2, i)
 		: (text[i - 1] ?? "");
-};
 
 export const charAt = (text: string, i: number): string =>
 	i < text.length ? String.fromCodePoint(text.codePointAt(i) ?? 0) : "";

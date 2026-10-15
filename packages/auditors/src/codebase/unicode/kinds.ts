@@ -118,6 +118,24 @@ const EXECUTABLE_CONFIG =
 const PROSE_NAME =
 	/^(README|LICEN[CS]E|COPYING|NOTICE|AUTHORS|CONTRIBUTORS|CHANGELOG|CHANGES|HISTORY|CODEOWNERS)$/i;
 
+const WORKFLOW = /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/;
+
+type PathTest = (path: string) => boolean;
+
+const CODE_PATH: ReadonlyArray<PathTest> = [
+	(path) => Boolean(languageOf(path)),
+	(path) => CODE_EXT.has(extOf(path)),
+	(path) => CODE_NAME.test(baseName(path)),
+	(path) => EXECUTABLE_CONFIG.test(path),
+	(path) => WORKFLOW.test(path),
+];
+
+const TEXT_PATH: ReadonlyArray<PathTest> = [
+	(path) => TEXT_EXT.has(extOf(path)),
+	(path) => /^\.env(\.|$)/.test(baseName(path)),
+	(path) => PROSE_NAME.test(baseName(path)),
+];
+
 /**
  * Undefined for unknown files, which are scanned as code. Scripts inside
  * agent folders (`.claude/skills/x/run.py`) are code, and so is any file
@@ -125,21 +143,8 @@ const PROSE_NAME =
  */
 export const kindOf = (path: string, text?: string): Kind | undefined => {
 	if (text?.startsWith("#!")) return "code";
-	const ext = extOf(path);
-	if (
-		languageOf(path) ||
-		CODE_EXT.has(ext) ||
-		CODE_NAME.test(baseName(path)) ||
-		EXECUTABLE_CONFIG.test(path) ||
-		/(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/.test(path)
-	)
-		return "code";
+	if (CODE_PATH.some((test) => test(path))) return "code";
 	if (AGENT_FILE.test(path)) return "agent";
-	if (
-		TEXT_EXT.has(ext) ||
-		/^\.env(\.|$)/.test(baseName(path)) ||
-		PROSE_NAME.test(baseName(path))
-	)
-		return "text";
+	if (TEXT_PATH.some((test) => test(path))) return "text";
 	return undefined;
 };

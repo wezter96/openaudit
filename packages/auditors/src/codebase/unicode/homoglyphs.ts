@@ -68,6 +68,69 @@ interface Homoglyph {
 	readonly mixed: boolean;
 }
 
+/** The identifier around `at`, reaching back no further than `from`. */
+const identifierAround = (text: string, at: number, from: number) => {
+	let start = at;
+	while (start > from && ID_PART.test(text[start - 1] ?? "")) start--;
+	let end = at + 1;
+	while (end < text.length && ID_PART.test(text[end] ?? "")) end++;
+	return { start, end };
+};
+
+/** End of the run of Cyrillic/Greek letters starting at `i`. */
+const runEnd = (chars: ReadonlyArray<string>, i: number) => {
+	let j = i;
+	while (j < chars.length && isGreekOrCyrillic(chars[j])) j++;
+	return j;
+};
+
+const isLookalikeRun = (run: ReadonlyArray<string>) =>
+	run.every((c) => LATIN_LOOKALIKE[c] !== undefined);
+
+const touchesLatin = (chars: ReadonlyArray<string>, i: number, j: number) =>
+	isLatinLetter(chars[i - 1]) || isLatinLetter(chars[j]);
+
+/** A run of look-alikes glued to Latin letters (`sayHello` with a Cyrillic H). */
+const hasGluedLookalikes = (chars: ReadonlyArray<string>): boolean => {
+	for (let i = 0; i < chars.length; i++) {
+		if (!isGreekOrCyrillic(chars[i])) continue;
+		const j = runEnd(chars, i);
+		if (isLookalikeRun(chars.slice(i, j)) && touchesLatin(chars, i, j))
+			return true;
+		i = j;
+	}
+	return false;
+};
+
+/** Passes for a Latin identifier of at least two letters. */
+const passesForLatin = (chars: ReadonlyArray<string>, lookalike: string) =>
+	/^[\w$]+$/.test(lookalike) &&
+	chars.filter((c) => /\p{L}/u.test(c)).length >= 2;
+
+/** Whether a word appears as an ASCII identifier, indexing the text once. */
+const asciiIdentifiersOf = (text: string) => {
+	let identifiers: Set<string> | undefined;
+	return (word: string) => {
+		identifiers ??= new Set(text.match(/[A-Za-z_$][\w$]*/g) ?? []);
+		return identifiers.has(word);
+	};
+};
+
+const homoglyphOf = (
+	identifier: string,
+	hasTwin: (word: string) => boolean,
+): Pick<Homoglyph, "lookalike" | "mixed"> | undefined => {
+	const chars = Array.from(identifier);
+	const hasLatin = chars.some(isLatinLetter);
+	const mixed = hasLatin && hasGluedLookalikes(chars);
+	const lookalike = chars.map((c) => LATIN_LOOKALIKE[c] ?? c).join("");
+	if (mixed) return { lookalike: truncate(lookalike, 80), mixed };
+	// An identifier made only of look-alikes whose Latin twin is in the file.
+	if (hasLatin || !passesForLatin(chars, lookalike)) return undefined;
+	if (!hasTwin(lookalike)) return undefined;
+	return { lookalike: truncate(lookalike, 80), mixed };
+};
+
 /**
  * Identifiers that pass for Latin: a run of Cyrillic/Greek look-alikes glued
  * to Latin letters (`sayHello` with a Cyrillic H), or an identifier made only
@@ -81,44 +144,16 @@ export const findHomoglyphs = (
 	isCode: (index: number) => boolean,
 ): Homoglyph[] => {
 	const out: Homoglyph[] = [];
-	let asciiIdentifiers: Set<string> | undefined;
+	const hasTwin = asciiIdentifiersOf(text);
 	let lastEnd = 0;
 	for (const m of text.matchAll(GREEK_OR_CYRILLIC)) {
 		const at = m.index ?? 0;
 		if (at < lastEnd) continue; // inside an identifier already checked
-		let start = at;
-		while (start > lastEnd && ID_PART.test(text[start - 1] ?? "")) start--;
-		let end = at + 1;
-		while (end < text.length && ID_PART.test(text[end] ?? "")) end++;
+		const { start, end } = identifierAround(text, at, lastEnd);
 		lastEnd = end;
 		if (!isCode(start)) continue;
-		const chars = Array.from(text.slice(start, end));
-		const hasLatin = chars.some(isLatinLetter);
-		let mixed = false;
-		for (let i = 0; i < chars.length && hasLatin && !mixed; i++) {
-			if (!isGreekOrCyrillic(chars[i])) continue;
-			let j = i;
-			while (j < chars.length && isGreekOrCyrillic(chars[j])) j++;
-			let lookalikes = true;
-			for (let k = i; k < j && lookalikes; k++)
-				lookalikes = LATIN_LOOKALIKE[chars[k] ?? ""] !== undefined;
-			mixed =
-				lookalikes && (isLatinLetter(chars[i - 1]) || isLatinLetter(chars[j]));
-			i = j;
-		}
-		const lookalike = chars.map((c) => LATIN_LOOKALIKE[c] ?? c).join("");
-		let wholeScript = false;
-		if (
-			!mixed &&
-			!hasLatin &&
-			/^[\w$]+$/.test(lookalike) &&
-			chars.filter((c) => /\p{L}/u.test(c)).length >= 2
-		) {
-			asciiIdentifiers ??= new Set(text.match(/[A-Za-z_$][\w$]*/g) ?? []);
-			wholeScript = asciiIdentifiers.has(lookalike);
-		}
-		if (mixed || wholeScript)
-			out.push({ start, end, lookalike: truncate(lookalike, 80), mixed });
+		const found = homoglyphOf(text.slice(start, end), hasTwin);
+		if (found) out.push({ start, end, ...found });
 	}
 	return out;
 };
