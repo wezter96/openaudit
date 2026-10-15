@@ -2,6 +2,7 @@ import type { Category, Finding, Severity } from "@openaudit/core/model";
 import { Button } from "@openaudit/ui/components/button";
 import { Input } from "@openaudit/ui/components/input";
 import { ChevronRight } from "lucide-react";
+import type React from "react";
 import { useId, useMemo, useState } from "react";
 
 import {
@@ -17,14 +18,165 @@ const PAGE = 50;
 const selectClass =
 	"h-9 w-full border border-input bg-surface px-2 text-sm text-ink";
 
-export function FindingsList({
-	findings,
-	headingId,
+/** What the findings are narrowed to; an empty category, auditor or query allows all. */
+interface Filters {
+	readonly severities: ReadonlySet<Severity>;
+	readonly category: Category | "";
+	readonly auditor: string;
+	/** Lowercased search text. */
+	readonly q: string;
+}
+
+const uniqueSorted = <T extends string>(values: ReadonlyArray<T>) =>
+	[...new Set(values)].sort();
+
+const countBySeverity = (findings: ReadonlyArray<Finding>) => {
+	const counts = new Map<Severity, number>();
+	for (const f of findings)
+		counts.set(f.severity, (counts.get(f.severity) ?? 0) + 1);
+	return counts;
+};
+
+const searchable = (f: Finding) => [
+	f.title,
+	f.message,
+	f.ruleId,
+	f.location?.file,
+	f.location?.url,
+	f.evidence,
+];
+
+const matchesQuery = (f: Finding, q: string) =>
+	!q || searchable(f).some((v) => v?.toLowerCase().includes(q));
+
+const matches = (f: Finding, filters: Filters) =>
+	filters.severities.has(f.severity) &&
+	(!filters.category || f.category === filters.category) &&
+	(!filters.auditor || f.auditor === filters.auditor) &&
+	matchesQuery(f, filters.q);
+
+function SeverityFilter({
+	counts,
+	selected,
+	onToggle,
 }: {
-	findings: ReadonlyArray<Finding>;
-	headingId?: string;
+	counts: ReadonlyMap<Severity, number>;
+	selected: ReadonlySet<Severity>;
+	onToggle: (s: Severity) => void;
 }) {
-	const id = useId();
+	return (
+		<fieldset>
+			<legend className="mb-1.5 font-medium text-sm">Severity</legend>
+			<div className="flex flex-wrap gap-x-3 gap-y-1">
+				{SEVERITY_ORDER.filter((s) => counts.has(s)).map((s) => (
+					<label
+						key={s}
+						className="inline-flex cursor-pointer items-center gap-1.5 text-sm"
+					>
+						<input
+							type="checkbox"
+							className="size-4 accent-[var(--signal)]"
+							checked={selected.has(s)}
+							onChange={() => onToggle(s)}
+						/>
+						{SEVERITY_LABEL[s]}
+						<span className="text-ink-soft tabular-nums">
+							({counts.get(s)})
+						</span>
+					</label>
+				))}
+			</div>
+		</fieldset>
+	);
+}
+
+/** A labelled select of one finding field; "" is the "All …" option. */
+function SelectFilter({
+	id,
+	label,
+	all,
+	value,
+	options,
+	onChange,
+}: {
+	id: string;
+	label: string;
+	all: string;
+	value: string;
+	options: ReadonlyArray<{ readonly value: string; readonly label: string }>;
+	onChange: (value: string) => void;
+}) {
+	return (
+		<div>
+			<label htmlFor={id} className="mb-1.5 block font-medium text-sm">
+				{label}
+			</label>
+			<select
+				id={id}
+				className={selectClass}
+				value={value}
+				onChange={(e) => onChange(e.target.value)}
+			>
+				<option value="">{all}</option>
+				{options.map((o) => (
+					<option key={o.value} value={o.value}>
+						{o.label}
+					</option>
+				))}
+			</select>
+		</div>
+	);
+}
+
+function SearchFilter({
+	id,
+	value,
+	onChange,
+}: {
+	id: string;
+	value: string;
+	onChange: (value: string) => void;
+}) {
+	return (
+		<div>
+			<label htmlFor={id} className="mb-1.5 block font-medium text-sm">
+				Search
+			</label>
+			<Input
+				id={id}
+				type="search"
+				className="h-9 bg-surface text-sm md:text-sm"
+				placeholder="Title, rule, file or URL"
+				value={value}
+				onChange={(e) => onChange(e.target.value)}
+			/>
+		</div>
+	);
+}
+
+function FindingRows({
+	filtered,
+	limit,
+}: {
+	filtered: ReadonlyArray<Finding>;
+	limit: number;
+}) {
+	return filtered.length === 0 ? (
+		<p className="border border-rule border-dashed px-4 py-6 text-ink-soft">
+			No findings match these filters. Clear the search or select more
+			severities.
+		</p>
+	) : (
+		<ul className="divide-y divide-rule border-rule border-y">
+			{filtered.slice(0, limit).map((f) => (
+				<FindingItem key={`${f.auditor}:${f.fingerprint}`} finding={f} />
+			))}
+		</ul>
+	);
+}
+
+/** The list's filter state; every filter change starts again from the first page. */
+function useFindingFilters(findings: ReadonlyArray<Finding>) {
 	const [severities, setSeverities] = useState<ReadonlySet<Severity>>(
 		() => new Set(SEVERITY_ORDER),
 	);
@@ -33,39 +185,22 @@ export function FindingsList({
 	const [query, setQuery] = useState("");
 	const [limit, setLimit] = useState(PAGE);
 
-	const categories = useMemo(
-		() => [...new Set(findings.map((f) => f.category))].sort(),
-		[findings],
-	);
-	const auditors = useMemo(
-		() => [...new Set(findings.map((f) => f.auditor))].sort(),
-		[findings],
-	);
-	const severityCounts = useMemo(() => {
-		const counts = new Map<Severity, number>();
-		for (const f of findings)
-			counts.set(f.severity, (counts.get(f.severity) ?? 0) + 1);
-		return counts;
-	}, [findings]);
-
 	const filtered = useMemo(() => {
-		const q = query.trim().toLowerCase();
-		return findings.filter(
-			(f) =>
-				severities.has(f.severity) &&
-				(!category || f.category === category) &&
-				(!auditor || f.auditor === auditor) &&
-				(!q ||
-					[
-						f.title,
-						f.message,
-						f.ruleId,
-						f.location?.file,
-						f.location?.url,
-						f.evidence,
-					].some((v) => v?.toLowerCase().includes(q))),
-		);
+		const filters = {
+			severities,
+			category,
+			auditor,
+			q: query.trim().toLowerCase(),
+		};
+		return findings.filter((f) => matches(f, filters));
 	}, [findings, severities, category, auditor, query]);
+
+	const refilter =
+		<T,>(set: (value: T) => void) =>
+		(value: T) => {
+			setLimit(PAGE);
+			set(value);
+		};
 
 	const toggleSeverity = (s: Severity) => {
 		setLimit(PAGE);
@@ -77,6 +212,91 @@ export function FindingsList({
 		});
 	};
 
+	return {
+		severities,
+		category,
+		auditor,
+		query,
+		limit,
+		filtered,
+		toggleSeverity,
+		setCategory: refilter(setCategory),
+		setAuditor: refilter(setAuditor),
+		setQuery: refilter(setQuery),
+		showMore: () => setLimit((l) => l + PAGE),
+	};
+}
+
+function FilterBar({
+	id,
+	headingId,
+	findings,
+	filters,
+}: {
+	id: string;
+	headingId: string | undefined;
+	findings: ReadonlyArray<Finding>;
+	filters: ReturnType<typeof useFindingFilters>;
+}) {
+	const categories = useMemo(
+		() => uniqueSorted(findings.map((f) => f.category)),
+		[findings],
+	);
+	const auditors = useMemo(
+		() => uniqueSorted(findings.map((f) => f.auditor)),
+		[findings],
+	);
+	const severityCounts = useMemo(() => countBySeverity(findings), [findings]);
+
+	return (
+		<search
+			aria-labelledby={headingId}
+			className="grid gap-4 border border-rule bg-surface p-4 md:grid-cols-[auto_1fr_1fr_1.4fr]"
+		>
+			<SeverityFilter
+				counts={severityCounts}
+				selected={filters.severities}
+				onToggle={filters.toggleSeverity}
+			/>
+			<SelectFilter
+				id={`${id}-cat`}
+				label="Category"
+				all="All categories"
+				value={filters.category}
+				options={categories.map((c) => ({
+					value: c,
+					label: CATEGORY_LABEL[c],
+				}))}
+				onChange={(v) => filters.setCategory(v as Category | "")}
+			/>
+			<SelectFilter
+				id={`${id}-aud`}
+				label="Auditor"
+				all="All auditors"
+				value={filters.auditor}
+				options={auditors.map((a) => ({ value: a, label: a }))}
+				onChange={filters.setAuditor}
+			/>
+			<SearchFilter
+				id={`${id}-q`}
+				value={filters.query}
+				onChange={filters.setQuery}
+			/>
+		</search>
+	);
+}
+
+export function FindingsList({
+	findings,
+	headingId,
+}: {
+	findings: ReadonlyArray<Finding>;
+	headingId?: string;
+}) {
+	const id = useId();
+	const filters = useFindingFilters(findings);
+	const { filtered, limit } = filters;
+
 	if (findings.length === 0)
 		return (
 			<p className="border border-rule border-dashed px-4 py-6 text-ink-soft">
@@ -86,100 +306,12 @@ export function FindingsList({
 
 	return (
 		<div>
-			<search
-				aria-labelledby={headingId}
-				className="grid gap-4 border border-rule bg-surface p-4 md:grid-cols-[auto_1fr_1fr_1.4fr]"
-			>
-				<fieldset>
-					<legend className="mb-1.5 font-medium text-sm">Severity</legend>
-					<div className="flex flex-wrap gap-x-3 gap-y-1">
-						{SEVERITY_ORDER.filter((s) => severityCounts.has(s)).map((s) => (
-							<label
-								key={s}
-								className="inline-flex cursor-pointer items-center gap-1.5 text-sm"
-							>
-								<input
-									type="checkbox"
-									className="size-4 accent-[var(--signal)]"
-									checked={severities.has(s)}
-									onChange={() => toggleSeverity(s)}
-								/>
-								{SEVERITY_LABEL[s]}
-								<span className="text-ink-soft tabular-nums">
-									({severityCounts.get(s)})
-								</span>
-							</label>
-						))}
-					</div>
-				</fieldset>
-				<div>
-					<label
-						htmlFor={`${id}-cat`}
-						className="mb-1.5 block font-medium text-sm"
-					>
-						Category
-					</label>
-					<select
-						id={`${id}-cat`}
-						className={selectClass}
-						value={category}
-						onChange={(e) => {
-							setLimit(PAGE);
-							setCategory(e.target.value as Category | "");
-						}}
-					>
-						<option value="">All categories</option>
-						{categories.map((c) => (
-							<option key={c} value={c}>
-								{CATEGORY_LABEL[c]}
-							</option>
-						))}
-					</select>
-				</div>
-				<div>
-					<label
-						htmlFor={`${id}-aud`}
-						className="mb-1.5 block font-medium text-sm"
-					>
-						Auditor
-					</label>
-					<select
-						id={`${id}-aud`}
-						className={selectClass}
-						value={auditor}
-						onChange={(e) => {
-							setLimit(PAGE);
-							setAuditor(e.target.value);
-						}}
-					>
-						<option value="">All auditors</option>
-						{auditors.map((a) => (
-							<option key={a} value={a}>
-								{a}
-							</option>
-						))}
-					</select>
-				</div>
-				<div>
-					<label
-						htmlFor={`${id}-q`}
-						className="mb-1.5 block font-medium text-sm"
-					>
-						Search
-					</label>
-					<Input
-						id={`${id}-q`}
-						type="search"
-						className="h-9 bg-surface text-sm md:text-sm"
-						placeholder="Title, rule, file or URL"
-						value={query}
-						onChange={(e) => {
-							setLimit(PAGE);
-							setQuery(e.target.value);
-						}}
-					/>
-				</div>
-			</search>
+			<FilterBar
+				id={id}
+				headingId={headingId}
+				findings={findings}
+				filters={filters}
+			/>
 
 			<p aria-live="polite" className="mt-4 mb-2 text-ink-soft text-sm">
 				Showing {Math.min(limit, filtered.length)} of {filtered.length}
@@ -187,24 +319,13 @@ export function FindingsList({
 				findings
 			</p>
 
-			{filtered.length === 0 ? (
-				<p className="border border-rule border-dashed px-4 py-6 text-ink-soft">
-					No findings match these filters. Clear the search or select more
-					severities.
-				</p>
-			) : (
-				<ul className="divide-y divide-rule border-rule border-y">
-					{filtered.slice(0, limit).map((f) => (
-						<FindingItem key={`${f.auditor}:${f.fingerprint}`} finding={f} />
-					))}
-				</ul>
-			)}
+			<FindingRows filtered={filtered} limit={limit} />
 
 			{filtered.length > limit && (
 				<Button
 					variant="outline"
 					className="mt-4 h-9 text-sm"
-					onClick={() => setLimit((l) => l + PAGE)}
+					onClick={filters.showMore}
 				>
 					Show {Math.min(PAGE, filtered.length - limit)} more
 				</Button>
@@ -213,11 +334,78 @@ export function FindingsList({
 	);
 }
 
+/** "file:line:column", or the URL for findings on a page. */
+const locationText = (loc: Finding["location"]) => {
+	if (!loc?.file) return loc?.url;
+	return `${loc.file}${loc.line ? `:${loc.line}` : ""}${loc.column ? `:${loc.column}` : ""}`;
+};
+
+function Reference({ reference: r }: { reference: string }) {
+	const href = safeHref(r);
+	return (
+		<li className="break-all">
+			{href ? (
+				<a
+					href={href}
+					target="_blank"
+					rel="noopener noreferrer"
+					className="text-signal underline underline-offset-2"
+				>
+					{r}
+					<span className="sr-only"> (opens in a new tab)</span>
+				</a>
+			) : (
+				r
+			)}
+		</li>
+	);
+}
+
+/** A term and its definition, shown only when there is a definition. */
+function OptionalFact({
+	term,
+	children,
+	className,
+}: {
+	term: string;
+	children: React.ReactNode;
+	className?: string;
+}) {
+	return (
+		<>
+			<dt>{term}</dt>
+			<dd className={className}>{children}</dd>
+		</>
+	);
+}
+
+function FindingFacts({ finding: f }: { finding: Finding }) {
+	const selector = f.location?.selector;
+	return (
+		<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-ink-soft text-xs">
+			<dt>Rule</dt>
+			<dd className="break-all font-mono">{f.ruleId}</dd>
+			<dt>Auditor</dt>
+			<dd className="font-mono">{f.auditor}</dd>
+			{selector && (
+				<OptionalFact term="Selector" className="break-all font-mono">
+					{selector}
+				</OptionalFact>
+			)}
+			{f.confidence && (
+				<OptionalFact term="Confidence">{f.confidence}</OptionalFact>
+			)}
+			{f.tags && f.tags.length > 0 && (
+				<OptionalFact term="Tags">{f.tags.join(", ")}</OptionalFact>
+			)}
+			<dt>Fingerprint</dt>
+			<dd className="font-mono">{f.fingerprint}</dd>
+		</dl>
+	);
+}
+
 function FindingItem({ finding: f }: { finding: Finding }) {
-	const loc = f.location;
-	const where = loc?.file
-		? `${loc.file}${loc.line ? `:${loc.line}` : ""}${loc.column ? `:${loc.column}` : ""}`
-		: loc?.url;
+	const where = locationText(f.location);
 
 	return (
 		<li>
@@ -253,54 +441,12 @@ function FindingItem({ finding: f }: { finding: Finding }) {
 					)}
 					{f.references && f.references.length > 0 && (
 						<ul className="space-y-0.5">
-							{f.references.map((r) => {
-								const href = safeHref(r);
-								return (
-									<li key={r} className="break-all">
-										{href ? (
-											<a
-												href={href}
-												target="_blank"
-												rel="noopener noreferrer"
-												className="text-signal underline underline-offset-2"
-											>
-												{r}
-												<span className="sr-only"> (opens in a new tab)</span>
-											</a>
-										) : (
-											r
-										)}
-									</li>
-								);
-							})}
+							{f.references.map((r) => (
+								<Reference key={r} reference={r} />
+							))}
 						</ul>
 					)}
-					<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-ink-soft text-xs">
-						<dt>Rule</dt>
-						<dd className="break-all font-mono">{f.ruleId}</dd>
-						<dt>Auditor</dt>
-						<dd className="font-mono">{f.auditor}</dd>
-						{loc?.selector && (
-							<>
-								<dt>Selector</dt>
-								<dd className="break-all font-mono">{loc.selector}</dd>
-							</>
-						)}
-						{f.confidence && (
-							<>
-								<dt>Confidence</dt>
-								<dd>{f.confidence}</dd>
-							</>
-						)}
-						{f.tags && f.tags.length > 0 && (
-							<>
-								<dt>Tags</dt>
-								<dd>{f.tags.join(", ")}</dd>
-							</>
-						)}
-						<dt>Fingerprint</dt>
-						<dd className="font-mono">{f.fingerprint}</dd>
-					</dl>
+					<FindingFacts finding={f} />
 				</div>
 			</details>
 		</li>

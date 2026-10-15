@@ -17,6 +17,35 @@ const STATUS_ORDER: Record<AuditorStatus, number> = {
 	skipped: 3,
 };
 
+function AuditorRow({ result: r }: { result: AuditorResult }) {
+	return (
+		<tr className="align-top">
+			<th scope="row" className="px-3 py-2 font-normal">
+				<span className="block font-medium">{r.title}</span>
+				<span className="block font-mono text-ink-soft text-xs">
+					{r.auditor}
+					<span className="font-sans"> ({ENGINE_LABEL[r.engine]})</span>
+				</span>
+			</th>
+			<td
+				className={cn(
+					"whitespace-nowrap px-3 py-2 font-semibold",
+					STATUS_CLASS[r.status],
+				)}
+			>
+				{STATUS_LABEL[r.status]}
+			</td>
+			<td className="px-3 py-2 text-right tabular-nums">{r.findings.length}</td>
+			<td className="whitespace-nowrap px-3 py-2 text-right text-ink-soft tabular-nums">
+				{formatDuration(r.durationMs)}
+			</td>
+			<td className="min-w-[16rem] px-3 py-2 text-ink-soft">
+				{r.message ?? ""}
+			</td>
+		</tr>
+	);
+}
+
 /** Every auditor that was selected, with why it was skipped or errored. */
 export function AuditorTable({
 	results,
@@ -62,32 +91,7 @@ export function AuditorTable({
 				</thead>
 				<tbody className="divide-y divide-rule">
 					{rows.map((r) => (
-						<tr key={r.auditor} className="align-top">
-							<th scope="row" className="px-3 py-2 font-normal">
-								<span className="block font-medium">{r.title}</span>
-								<span className="block font-mono text-ink-soft text-xs">
-									{r.auditor}
-									<span className="font-sans"> ({ENGINE_LABEL[r.engine]})</span>
-								</span>
-							</th>
-							<td
-								className={cn(
-									"whitespace-nowrap px-3 py-2 font-semibold",
-									STATUS_CLASS[r.status],
-								)}
-							>
-								{STATUS_LABEL[r.status]}
-							</td>
-							<td className="px-3 py-2 text-right tabular-nums">
-								{r.findings.length}
-							</td>
-							<td className="whitespace-nowrap px-3 py-2 text-right text-ink-soft tabular-nums">
-								{formatDuration(r.durationMs)}
-							</td>
-							<td className="min-w-[16rem] px-3 py-2 text-ink-soft">
-								{r.message ?? ""}
-							</td>
-						</tr>
+						<AuditorRow key={r.auditor} result={r} />
 					))}
 				</tbody>
 			</table>

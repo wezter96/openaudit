@@ -13,6 +13,13 @@ export type ValidationResult =
 	| { readonly ok: true; readonly report: Report }
 	| { readonly ok: false; readonly error: string };
 
+/** A JSON object that declares a schemaVersion other than "1". */
+const hasOtherVersion = (json: unknown): json is { schemaVersion: unknown } =>
+	typeof json === "object" &&
+	json !== null &&
+	"schemaVersion" in json &&
+	json.schemaVersion !== "1";
+
 export const validateReport = (text: string): ValidationResult => {
 	let json: unknown;
 	try {
@@ -23,12 +30,7 @@ export const validateReport = (text: string): ValidationResult => {
 			error: `This is not valid JSON: ${e instanceof Error ? e.message : String(e)}`,
 		};
 	}
-	if (
-		json &&
-		typeof json === "object" &&
-		"schemaVersion" in json &&
-		json.schemaVersion !== "1"
-	)
+	if (hasOtherVersion(json))
 		return {
 			ok: false,
 			error: `Unsupported schemaVersion ${JSON.stringify(json.schemaVersion)}. This viewer reads version "1"; update the site or re-export the report.`,

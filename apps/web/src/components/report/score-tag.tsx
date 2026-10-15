@@ -4,6 +4,66 @@ import { cn } from "@openaudit/ui/lib/utils";
 import { LocalDate } from "./local-date";
 import { CATEGORY_LABEL, GRADE_MEANING, targetName } from "./meta";
 
+type Summary = Report["summary"];
+
+/** The big letter grade with the score and what the grade means. */
+function GradeLine({ summary, graded }: { summary: Summary; graded: boolean }) {
+	return (
+		<div className="mt-4 flex items-end gap-4 border-tag-ink/25 border-b-2 border-dashed pb-4">
+			<span
+				aria-hidden="true"
+				className="font-black text-[6.5rem] leading-[0.8] tracking-tighter"
+			>
+				{graded ? summary.grade : "–"}
+			</span>
+			<span aria-hidden="true" className="pb-1">
+				{graded ? (
+					<>
+						<span className="block font-bold text-3xl tabular-nums leading-none">
+							{summary.score}
+							<span className="font-medium text-base opacity-70">/100</span>
+						</span>
+						<span className="mt-1 block text-sm">
+							{GRADE_MEANING[summary.grade]}
+						</span>
+					</>
+				) : (
+					<span className="block font-semibold">Not graded</span>
+				)}
+			</span>
+		</div>
+	);
+}
+
+function CategoryScores({ categories }: { categories: Summary["categories"] }) {
+	return categories.length > 0 ? (
+		<ul className="mt-4 space-y-1.5 text-sm">
+			{categories.map((c) => (
+				<li
+					key={c.category}
+					className="grid grid-cols-[7.5rem_1fr_2rem] items-center gap-3"
+				>
+					<span className="truncate">{CATEGORY_LABEL[c.category]}</span>
+					<span aria-hidden="true" className="h-1.5 bg-tag-ink/15">
+						<span
+							className="block h-full bg-tag-ink"
+							style={{ width: `${Math.max(2, c.score)}%` }}
+						/>
+					</span>
+					<span className="text-right font-semibold tabular-nums">
+						<span className="sr-only">{c.grade}, </span>
+						{c.score}
+					</span>
+				</li>
+			))}
+		</ul>
+	) : (
+		<p className="mt-4 text-sm">
+			No auditor examined this target, so there is nothing to grade.
+		</p>
+	);
+}
+
 /**
  * The inspection tag: overall grade and per-category scores, styled after the
  * manila tags inspectors hang on checked equipment.
@@ -49,56 +109,9 @@ export function ScoreTag({
 					{caption ?? <LocalDate iso={report.finishedAt} />}
 				</p>
 
-				<div className="mt-4 flex items-end gap-4 border-tag-ink/25 border-b-2 border-dashed pb-4">
-					<span
-						aria-hidden="true"
-						className="font-black text-[6.5rem] leading-[0.8] tracking-tighter"
-					>
-						{graded ? summary.grade : "–"}
-					</span>
-					<span aria-hidden="true" className="pb-1">
-						{graded ? (
-							<>
-								<span className="block font-bold text-3xl tabular-nums leading-none">
-									{summary.score}
-									<span className="font-medium text-base opacity-70">/100</span>
-								</span>
-								<span className="mt-1 block text-sm">
-									{GRADE_MEANING[summary.grade]}
-								</span>
-							</>
-						) : (
-							<span className="block font-semibold">Not graded</span>
-						)}
-					</span>
-				</div>
+				<GradeLine summary={summary} graded={graded} />
 
-				{summary.categories.length > 0 ? (
-					<ul className="mt-4 space-y-1.5 text-sm">
-						{summary.categories.map((c) => (
-							<li
-								key={c.category}
-								className="grid grid-cols-[7.5rem_1fr_2rem] items-center gap-3"
-							>
-								<span className="truncate">{CATEGORY_LABEL[c.category]}</span>
-								<span aria-hidden="true" className="h-1.5 bg-tag-ink/15">
-									<span
-										className="block h-full bg-tag-ink"
-										style={{ width: `${Math.max(2, c.score)}%` }}
-									/>
-								</span>
-								<span className="text-right font-semibold tabular-nums">
-									<span className="sr-only">{c.grade}, </span>
-									{c.score}
-								</span>
-							</li>
-						))}
-					</ul>
-				) : (
-					<p className="mt-4 text-sm">
-						No auditor examined this target, so there is nothing to grade.
-					</p>
-				)}
+				<CategoryScores categories={summary.categories} />
 			</section>
 		</div>
 	);

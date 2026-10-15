@@ -11,7 +11,7 @@ import {
 	ENGINE_LABEL,
 	TARGET_LABEL,
 } from "@/components/report/meta";
-import { orpc } from "@/utils/orpc";
+import { type client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/auditors")({
 	head: () => ({
@@ -69,24 +69,269 @@ function EngineBadge({
 	);
 }
 
+type AuditorInfo = Awaited<ReturnType<typeof client.auditors.list>>[number];
+type PlaybookInfo = Awaited<ReturnType<typeof client.playbooks.list>>[number];
+type EngineChoice = AuditorEngine | "all";
+
+const usePlaybooks = () => useQuery(orpc.playbooks.list.queryOptions());
+
+const searchText = (a: AuditorInfo) => [
+	a.id,
+	a.title,
+	a.description,
+	a.tool ?? "",
+	...a.categories,
+];
+
+const filterAuditors = (
+	auditors: ReadonlyArray<AuditorInfo>,
+	engine: EngineChoice,
+	query: string,
+) => {
+	const q = query.trim().toLowerCase();
+	return auditors.filter(
+		(a) =>
+			(engine === "all" || a.engine === engine) &&
+			(!q || searchText(a).some((v) => v.toLowerCase().includes(q))),
+	);
+};
+
+interface TargetGroup {
+	readonly target: TargetKind;
+	readonly items: ReadonlyArray<AuditorInfo>;
+}
+
+function CatalogError({ message }: { message: string }) {
+	return (
+		<div
+			role="alert"
+			className="mt-10 border-sev-critical border-l-4 bg-surface p-4"
+		>
+			<p className="font-semibold">The auditor catalog could not be loaded</p>
+			<p className="mt-1 text-ink-soft text-sm">
+				The API server did not respond ({message}). Run{" "}
+				<code className="font-mono">bunx @openaudit/cli list</code> to see the
+				same catalog locally.
+			</p>
+		</div>
+	);
+}
+
+function FilterBar({
+	id,
+	engine,
+	setEngine,
+	query,
+	setQuery,
+}: {
+	id: string;
+	engine: EngineChoice;
+	setEngine: (engine: EngineChoice) => void;
+	query: string;
+	setQuery: (query: string) => void;
+}) {
+	return (
+		<search
+			aria-label="Filter auditors"
+			className="mt-10 flex flex-col gap-4 border border-rule bg-surface p-4 md:flex-row md:items-end"
+		>
+			<fieldset>
+				<legend className="mb-1.5 font-medium text-sm">Engine</legend>
+				<div className="flex flex-wrap gap-x-4 gap-y-1">
+					{(["all", "builtin", "external", "agentic"] as const).map((e) => (
+						<label key={e} className="inline-flex items-center gap-1.5 text-sm">
+							<input
+								type="radio"
+								name={`${id}-engine`}
+								value={e}
+								checked={engine === e}
+								onChange={() => setEngine(e)}
+								className="size-4 accent-[var(--signal)]"
+							/>
+							{e === "all" ? "All" : ENGINE_LABEL[e]}
+						</label>
+					))}
+				</div>
+			</fieldset>
+			<div className="md:ml-auto md:w-80">
+				<label htmlFor={`${id}-q`} className="mb-1.5 block font-medium text-sm">
+					Search
+				</label>
+				<Input
+					id={`${id}-q`}
+					type="search"
+					value={query}
+					onChange={(e) => setQuery(e.target.value)}
+					placeholder="Name, tool or category"
+					className="h-9 bg-paper text-sm md:text-sm"
+				/>
+			</div>
+		</search>
+	);
+}
+
+function TargetNav({
+	groups,
+	playbookCount,
+}: {
+	groups: ReadonlyArray<TargetGroup>;
+	playbookCount: number;
+}) {
+	return (
+		<nav aria-label="Target types" className="mt-6">
+			<ul className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
+				{groups.map((g) => (
+					<li key={g.target}>
+						<a
+							href={`#${g.target}`}
+							className="text-signal underline underline-offset-2"
+						>
+							{TARGET_LABEL[g.target]}
+						</a>{" "}
+						<span className="text-ink-soft">({g.items.length})</span>
+					</li>
+				))}
+				<li>
+					<a
+						href="#playbooks"
+						className="text-signal underline underline-offset-2"
+					>
+						Playbooks
+					</a>{" "}
+					<span className="text-ink-soft">({playbookCount})</span>
+				</li>
+			</ul>
+		</nav>
+	);
+}
+
+function AuditorItem({ auditor: a }: { auditor: AuditorInfo }) {
+	return (
+		<li className="grid gap-x-8 gap-y-1 py-4 md:grid-cols-[18rem_1fr]">
+			<div>
+				<h3 className="font-semibold">{a.title}</h3>
+				<p className="font-mono text-ink-soft text-xs">{a.id}</p>
+			</div>
+			<div>
+				<p className="max-w-[72ch] text-sm">{a.description}</p>
+				<p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-ink-soft text-xs">
+					<EngineBadge engine={a.engine} tool={a.tool} />
+					<span>{a.categories.map((c) => CATEGORY_LABEL[c]).join(", ")}</span>
+					{!a.defaultEnabled && a.engine !== "agentic" && (
+						<span>Opt-in (use --only)</span>
+					)}
+					{a.network && <span>Uses network services</span>}
+				</p>
+			</div>
+		</li>
+	);
+}
+
+function TargetSection({ group }: { group: TargetGroup }) {
+	return (
+		<section
+			id={group.target}
+			aria-labelledby={`${group.target}-title`}
+			className="mt-14 scroll-mt-6"
+		>
+			<h2
+				id={`${group.target}-title`}
+				className="border-rule border-b pb-2 font-bold text-2xl tracking-tight"
+			>
+				{TARGET_LABEL[group.target]}
+			</h2>
+			{group.items.length === 0 ? (
+				<p className="mt-4 text-ink-soft">
+					No auditors match for this target type.
+				</p>
+			) : (
+				<ul className="divide-y divide-rule">
+					{group.items.map((a) => (
+						<AuditorItem key={a.id} auditor={a} />
+					))}
+				</ul>
+			)}
+		</section>
+	);
+}
+
+function PlaybookItem({ playbook: p }: { playbook: PlaybookInfo }) {
+	const areas = p.categories.map((c) => CATEGORY_LABEL[c]).join(", ");
+	return (
+		<li className="py-4">
+			<h3 className="font-semibold">{p.title}</h3>
+			<p className="font-mono text-ink-soft text-xs">{p.id}</p>
+			<p className="mt-1 max-w-[72ch] text-sm">{p.summary}</p>
+			<p className="mt-2 text-ink-soft text-xs">
+				{areas}. Needs {p.needs.join(", ") || "nothing extra"}.
+			</p>
+			{p.checklist.length > 0 && (
+				<details className="mt-2 text-sm">
+					<summary className="cursor-pointer text-signal">
+						Checklist ({p.checklist.length} items)
+					</summary>
+					<ul className="mt-2 max-w-[72ch] list-disc space-y-1 pl-5">
+						{p.checklist.map((item) => (
+							<li key={item}>{item}</li>
+						))}
+					</ul>
+				</details>
+			)}
+		</li>
+	);
+}
+
+function PlaybooksSection({
+	playbooks,
+}: {
+	playbooks: ReturnType<typeof usePlaybooks>;
+}) {
+	return (
+		<section
+			id="playbooks"
+			aria-labelledby="playbooks-title"
+			className="mt-16 scroll-mt-6"
+		>
+			<h2
+				id="playbooks-title"
+				className="border-rule border-b pb-2 font-bold text-2xl tracking-tight"
+			>
+				Playbooks
+			</h2>
+			<p className="mt-3 max-w-[64ch] text-ink-soft">
+				Procedures for checks that need judgment. Agents fetch them over MCP
+				with <code className="font-mono text-ink">get_playbook</code>, work
+				through the checklist and send results back with{" "}
+				<code className="font-mono text-ink">submit_findings</code>.
+			</p>
+			{playbooks.isError ? (
+				<p role="alert" className="mt-4 text-sev-critical">
+					Playbooks could not be loaded: {playbooks.error.message}
+				</p>
+			) : !playbooks.data?.length ? (
+				<p className="mt-4 text-ink-soft">No playbooks are published yet.</p>
+			) : (
+				<ul className="mt-2 divide-y divide-rule">
+					{playbooks.data.map((p) => (
+						<PlaybookItem key={p.id} playbook={p} />
+					))}
+				</ul>
+			)}
+		</section>
+	);
+}
+
 function AuditorsPage() {
 	const id = useId();
 	const auditors = useQuery(orpc.auditors.list.queryOptions());
-	const playbooks = useQuery(orpc.playbooks.list.queryOptions());
-	const [engine, setEngine] = useState<AuditorEngine | "all">("all");
+	const playbooks = usePlaybooks();
+	const [engine, setEngine] = useState<EngineChoice>("all");
 	const [query, setQuery] = useState("");
 
-	const filtered = useMemo(() => {
-		const q = query.trim().toLowerCase();
-		return (auditors.data ?? []).filter(
-			(a) =>
-				(engine === "all" || a.engine === engine) &&
-				(!q ||
-					[a.id, a.title, a.description, a.tool ?? "", ...a.categories].some(
-						(v) => v.toLowerCase().includes(q),
-					)),
-		);
-	}, [auditors.data, engine, query]);
+	const filtered = useMemo(
+		() => filterAuditors(auditors.data ?? [], engine, query),
+		[auditors.data, engine, query],
+	);
 
 	const groups = TARGET_ORDER.map((target) => ({
 		target,
@@ -109,201 +354,30 @@ function AuditorsPage() {
 			{auditors.isPending ? (
 				<Loader />
 			) : auditors.isError ? (
-				<div
-					role="alert"
-					className="mt-10 border-sev-critical border-l-4 bg-surface p-4"
-				>
-					<p className="font-semibold">
-						The auditor catalog could not be loaded
-					</p>
-					<p className="mt-1 text-ink-soft text-sm">
-						The API server did not respond ({auditors.error.message}). Run{" "}
-						<code className="font-mono">bunx @openaudit/cli list</code> to see
-						the same catalog locally.
-					</p>
-				</div>
+				<CatalogError message={auditors.error.message} />
 			) : (
 				<>
-					<search
-						aria-label="Filter auditors"
-						className="mt-10 flex flex-col gap-4 border border-rule bg-surface p-4 md:flex-row md:items-end"
-					>
-						<fieldset>
-							<legend className="mb-1.5 font-medium text-sm">Engine</legend>
-							<div className="flex flex-wrap gap-x-4 gap-y-1">
-								{(["all", "builtin", "external", "agentic"] as const).map(
-									(e) => (
-										<label
-											key={e}
-											className="inline-flex items-center gap-1.5 text-sm"
-										>
-											<input
-												type="radio"
-												name={`${id}-engine`}
-												value={e}
-												checked={engine === e}
-												onChange={() => setEngine(e)}
-												className="size-4 accent-[var(--signal)]"
-											/>
-											{e === "all" ? "All" : ENGINE_LABEL[e]}
-										</label>
-									),
-								)}
-							</div>
-						</fieldset>
-						<div className="md:ml-auto md:w-80">
-							<label
-								htmlFor={`${id}-q`}
-								className="mb-1.5 block font-medium text-sm"
-							>
-								Search
-							</label>
-							<Input
-								id={`${id}-q`}
-								type="search"
-								value={query}
-								onChange={(e) => setQuery(e.target.value)}
-								placeholder="Name, tool or category"
-								className="h-9 bg-paper text-sm md:text-sm"
-							/>
-						</div>
-					</search>
+					<FilterBar
+						id={id}
+						engine={engine}
+						setEngine={setEngine}
+						query={query}
+						setQuery={setQuery}
+					/>
 					<p aria-live="polite" className="mt-3 text-ink-soft text-sm">
 						{filtered.length} of {auditors.data.length} auditors
 					</p>
 
-					<nav aria-label="Target types" className="mt-6">
-						<ul className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
-							{groups.map((g) => (
-								<li key={g.target}>
-									<a
-										href={`#${g.target}`}
-										className="text-signal underline underline-offset-2"
-									>
-										{TARGET_LABEL[g.target]}
-									</a>{" "}
-									<span className="text-ink-soft">({g.items.length})</span>
-								</li>
-							))}
-							<li>
-								<a
-									href="#playbooks"
-									className="text-signal underline underline-offset-2"
-								>
-									Playbooks
-								</a>{" "}
-								<span className="text-ink-soft">
-									({playbooks.data?.length ?? 0})
-								</span>
-							</li>
-						</ul>
-					</nav>
+					<TargetNav
+						groups={groups}
+						playbookCount={playbooks.data?.length ?? 0}
+					/>
 
 					{groups.map((g) => (
-						<section
-							key={g.target}
-							id={g.target}
-							aria-labelledby={`${g.target}-title`}
-							className="mt-14 scroll-mt-6"
-						>
-							<h2
-								id={`${g.target}-title`}
-								className="border-rule border-b pb-2 font-bold text-2xl tracking-tight"
-							>
-								{TARGET_LABEL[g.target]}
-							</h2>
-							{g.items.length === 0 ? (
-								<p className="mt-4 text-ink-soft">
-									No auditors match for this target type.
-								</p>
-							) : (
-								<ul className="divide-y divide-rule">
-									{g.items.map((a) => (
-										<li
-											key={a.id}
-											className="grid gap-x-8 gap-y-1 py-4 md:grid-cols-[18rem_1fr]"
-										>
-											<div>
-												<h3 className="font-semibold">{a.title}</h3>
-												<p className="font-mono text-ink-soft text-xs">
-													{a.id}
-												</p>
-											</div>
-											<div>
-												<p className="max-w-[72ch] text-sm">{a.description}</p>
-												<p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-ink-soft text-xs">
-													<EngineBadge engine={a.engine} tool={a.tool} />
-													<span>
-														{a.categories
-															.map((c) => CATEGORY_LABEL[c])
-															.join(", ")}
-													</span>
-													{!a.defaultEnabled && a.engine !== "agentic" && (
-														<span>Opt-in (use --only)</span>
-													)}
-													{a.network && <span>Uses network services</span>}
-												</p>
-											</div>
-										</li>
-									))}
-								</ul>
-							)}
-						</section>
+						<TargetSection key={g.target} group={g} />
 					))}
 
-					<section
-						id="playbooks"
-						aria-labelledby="playbooks-title"
-						className="mt-16 scroll-mt-6"
-					>
-						<h2
-							id="playbooks-title"
-							className="border-rule border-b pb-2 font-bold text-2xl tracking-tight"
-						>
-							Playbooks
-						</h2>
-						<p className="mt-3 max-w-[64ch] text-ink-soft">
-							Procedures for checks that need judgment. Agents fetch them over
-							MCP with <code className="font-mono text-ink">get_playbook</code>,
-							work through the checklist and send results back with{" "}
-							<code className="font-mono text-ink">submit_findings</code>.
-						</p>
-						{playbooks.isError ? (
-							<p role="alert" className="mt-4 text-sev-critical">
-								Playbooks could not be loaded: {playbooks.error.message}
-							</p>
-						) : !playbooks.data?.length ? (
-							<p className="mt-4 text-ink-soft">
-								No playbooks are published yet.
-							</p>
-						) : (
-							<ul className="mt-2 divide-y divide-rule">
-								{playbooks.data.map((p) => (
-									<li key={p.id} className="py-4">
-										<h3 className="font-semibold">{p.title}</h3>
-										<p className="font-mono text-ink-soft text-xs">{p.id}</p>
-										<p className="mt-1 max-w-[72ch] text-sm">{p.summary}</p>
-										<p className="mt-2 text-ink-soft text-xs">
-											{p.categories.map((c) => CATEGORY_LABEL[c]).join(", ")}.
-											Needs {p.needs.join(", ") || "nothing extra"}.
-										</p>
-										{p.checklist.length > 0 && (
-											<details className="mt-2 text-sm">
-												<summary className="cursor-pointer text-signal">
-													Checklist ({p.checklist.length} items)
-												</summary>
-												<ul className="mt-2 max-w-[72ch] list-disc space-y-1 pl-5">
-													{p.checklist.map((item) => (
-														<li key={item}>{item}</li>
-													))}
-												</ul>
-											</details>
-										)}
-									</li>
-								))}
-							</ul>
-						)}
-					</section>
+					<PlaybooksSection playbooks={playbooks} />
 				</>
 			)}
 		</div>

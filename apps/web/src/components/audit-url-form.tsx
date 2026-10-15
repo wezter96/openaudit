@@ -13,6 +13,45 @@ const normalize = (value: string) => {
 	return /^[a-z][a-z0-9+.-]*:/i.test(v) ? v : `https://${v}`;
 };
 
+function RunLabel({ pending }: { pending: boolean }) {
+	return pending ? (
+		<>
+			<Loader2 aria-hidden="true" className="animate-spin" />
+			Auditing…
+		</>
+	) : (
+		"Run audit"
+	);
+}
+
+/** What the audit is doing, announced as it changes. */
+function AuditStatus({
+	id,
+	url,
+	pending,
+	error,
+}: {
+	id: string;
+	url: string;
+	pending: boolean;
+	error: Error | null;
+}) {
+	return (
+		<div aria-live="polite" className="text-sm">
+			{pending && (
+				<p className="mt-3 text-ink-soft">
+					Fetching {normalize(url)} and running the web auditors…
+				</p>
+			)}
+			{error && (
+				<p id={`${id}-error`} className="mt-3 font-medium text-sev-critical">
+					{error.message}
+				</p>
+			)}
+		</div>
+	);
+}
+
 export function AuditUrlForm({
 	onReport,
 }: {
@@ -70,28 +109,15 @@ export function AuditUrlForm({
 					disabled={audit.isPending}
 					className="h-11 px-5 font-semibold text-sm"
 				>
-					{audit.isPending ? (
-						<>
-							<Loader2 aria-hidden="true" className="animate-spin" />
-							Auditing…
-						</>
-					) : (
-						"Run audit"
-					)}
+					<RunLabel pending={audit.isPending} />
 				</Button>
 			</div>
-			<div aria-live="polite" className="text-sm">
-				{audit.isPending && (
-					<p className="mt-3 text-ink-soft">
-						Fetching {normalize(url)} and running the web auditors…
-					</p>
-				)}
-				{audit.isError && (
-					<p id={`${id}-error`} className="mt-3 font-medium text-sev-critical">
-						{audit.error.message}
-					</p>
-				)}
-			</div>
+			<AuditStatus
+				id={id}
+				url={url}
+				pending={audit.isPending}
+				error={audit.isError ? audit.error : null}
+			/>
 		</form>
 	);
 }
