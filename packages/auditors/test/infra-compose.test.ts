@@ -116,3 +116,13 @@ test("environment interpolation is not a plaintext secret, a literal default is"
 	])
 		expect(isPlaceholderValue(v)).toBe(false);
 });
+
+test("an interpolation whose alternative is a literal is a plaintext secret", async () => {
+	const { isPlaceholderValue } = await import("../src/infra/shared");
+	const dollar = "$";
+	for (const op of ["+", ":+", "-", ":-"])
+		expect(isPlaceholderValue(`${dollar}{API_TOKEN${op}s3cr3t-value}`)).toBe(
+			false,
+		);
+	expect(isPlaceholderValue(`${dollar}{API_TOKEN:+}`)).toBe(true);
+});

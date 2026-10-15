@@ -202,17 +202,19 @@ export const SECRET_NAME_RE =
 
 /** True when a value is empty, a variable reference or an obvious placeholder. */
 /**
- * `${VAR}`, `${VAR:?message}` or `${VAR+alt}`: the value comes from the
- * environment. `${VAR:-default}` counts only when the default is itself a
- * placeholder, since a literal default is a secret written in the file.
+ * `${VAR}` or `${VAR:?message}`: the value comes from the environment (the
+ * message is only an error text). `${VAR:-default}` and `${VAR:+alt}` count
+ * only when the default or alternative is itself a placeholder, since that
+ * text becomes the value and a literal there is a secret written in the file.
  */
 const COMPOSE_INTERPOLATION =
-	/^\$\{[A-Za-z_]\w*(?:(:?[?+])[^}]*|:?-([^}]*))?\}$/;
+	/^\$\{[A-Za-z_]\w*(?::?\?[^}]*|:?[-+]([^}]*))?\}$/;
+/^\$\{[A-Za-z_]\w*(?:(:?[?+])[^}]*|:?-([^}]*))?\}$/;
 
 const isInterpolation = (v: string): boolean => {
 	const m = COMPOSE_INTERPOLATION.exec(v);
 	if (!m) return false;
-	const fallback = m[2];
+	const fallback = m[1];
 	return fallback === undefined || isPlaceholderValue(fallback);
 };
 
