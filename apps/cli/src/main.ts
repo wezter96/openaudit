@@ -141,13 +141,15 @@ const auditParams = {
 	),
 };
 
-type ParsedAudit = {
-	readonly [K in keyof typeof auditParams]: (typeof auditParams)[K] extends
+/** The values effect/cli parses for a record of flags and arguments. */
+type Parsed<P> = {
+	readonly [K in keyof P]: P[K] extends
 		| Flag.Flag<infer A>
 		| Argument.Argument<infer A>
 		? A
 		: never;
 };
+type ParsedAudit = Parsed<typeof auditParams>;
 
 const toAuditFlags = (p: ParsedAudit): AuditFlags => ({
 	target: p.target,
@@ -203,22 +205,25 @@ const EXAMPLES = [
 	},
 ];
 
-/** Parses argv, runs the command and resolves to the process exit code. */
-export const main = async (argv: ReadonlyArray<string>): Promise<number> => {
-	let code: number = EXIT.ok;
-	const exit = (promise: Promise<number> | number) =>
-		Effect.promise(async () => {
-			code = await promise;
-		});
+/** Records a command's exit code for `main` to return. */
+type Exit = (promise: Promise<number> | number) => Effect.Effect<void>;
 
-	const audit = Command.make("audit", auditParams, (p) =>
+/** Exit code for a long-running command (the MCP server) that owns the process. */
+const KEEP_ALIVE = -1;
+
+const messageOf = (error: unknown): string =>
+	error instanceof Error ? error.message : String(error);
+
+const auditCmd = (exit: Exit) =>
+	Command.make("audit", auditParams, (p) =>
 		exit(auditCommand(toAuditFlags(p))),
 	).pipe(
 		Command.withDescription("Audit a target (the default command)"),
 		Command.withExamples(EXAMPLES.slice(0, 5)),
 	);
 
-	const listCmd = Command.make(
+const listCmd = (exit: Exit) =>
+	Command.make(
 		"list",
 		{
 			json: bool("json", "Machine-readable output"),
@@ -236,7 +241,8 @@ export const main = async (argv: ReadonlyArray<string>): Promise<number> => {
 			),
 	).pipe(Command.withDescription("List auditors and playbooks"));
 
-	const doctor = Command.make(
+const doctorCmd = (exit: Exit) =>
+	Command.make(
 		"doctor",
 		{ json: bool("json", "Machine-readable output") },
 		(p) => exit(doctorCommand({ json: p.json })),
@@ -246,7 +252,8 @@ export const main = async (argv: ReadonlyArray<string>): Promise<number> => {
 		),
 	);
 
-	const init = Command.make(
+const initCmd = (exit: Exit) =>
+	Command.make(
 		"init",
 		{
 			force: bool("force", "Overwrite an existing config"),
@@ -267,143 +274,164 @@ export const main = async (argv: ReadonlyArray<string>): Promise<number> => {
 		),
 	);
 
-	const mcp = Command.make(
-		"mcp",
-		{
-			http: bool(
-				"http",
-				"Serve MCP over Streamable HTTP instead of stdio (loopback by default)",
-			),
-			host: opt(Flag.String("host"), "HTTP bind address (default 127.0.0.1)"),
-			port: opt(Flag.Int("port"), "HTTP port (default 7337)"),
-			token: opt(
-				Flag.String("token"),
-				"HTTP bearer token (or OPENAUDIT_MCP_TOKEN); generated on loopback if omitted, required off loopback",
-			),
-			root: list(
-				"root",
-				"HTTP: directory that local targets must resolve inside (repeatable)",
-			),
-			allowOrigin: list(
-				"allow-origin",
-				"HTTP: browser Origin allowed to connect (repeatable)",
-			),
-			allowHost: list(
-				"allow-host",
-				"HTTP: extra Host header value accepted (repeatable)",
-			),
-			persistReports: bool(
-				"persist-reports",
-				"HTTP: save reports under <root>/.openaudit/reports (off by default over HTTP)",
-			),
-			allowCloud: bool(
-				"allow-cloud",
-				"HTTP: accept cloud:<provider> targets (uses the server's credentials)",
-			),
-			allowImages: bool(
-				"allow-images",
-				"HTTP: accept image:<ref> targets on non-loopback binds (registry host is still checked)",
-			),
-			allowAgentic: bool(
-				"allow-agentic",
-				"HTTP: let clients run agentic auditors (spends the server's ANTHROPIC_API_KEY)",
-			),
-			allowPrivateTargets: bool(
-				"allow-private-targets",
-				"HTTP: allow URL targets on private/loopback/metadata addresses (non-loopback binds only block them by default)",
-			),
-		},
-		(p) =>
-			Effect.promise(async () => {
-				const mcpModule = await import("@openaudit/mcp");
-				const httpOnly =
-					Option.isSome(p.host) ||
-					Option.isSome(p.port) ||
-					Option.isSome(p.token);
-				if (!p.http) {
-					if (
-						httpOnly ||
-						p.root.length ||
-						p.allowOrigin.length ||
-						p.allowHost.length ||
-						p.allowCloud ||
-						p.persistReports ||
-						p.allowImages ||
-						p.allowAgentic ||
-						p.allowPrivateTargets
-					) {
-						process.stderr.write(
-							"These options need --http (stdio has no network settings).\n",
-						);
-						code = EXIT.usage;
-						return;
-					}
-					await mcpModule.startStdioServer();
-					code = -1; // keep the process alive while the client is connected
-					return;
-				}
-				const port = Option.getOrUndefined(p.port);
-				if (port !== undefined && !(port >= 0 && port <= 65535)) {
-					process.stderr.write("--port must be between 0 and 65535.\n");
-					code = EXIT.usage;
-					return;
-				}
-				try {
-					const handle = await mcpModule.startHttpServer({
-						host: Option.getOrUndefined(p.host),
-						port,
-						token:
-							Option.getOrUndefined(p.token) ?? process.env.OPENAUDIT_MCP_TOKEN,
-						roots: p.root,
-						allowOrigins: p.allowOrigin,
-						allowHosts: p.allowHost,
-						allowCloud: p.allowCloud,
-						persistReports: p.persistReports,
-						allowImages: p.allowImages,
-						allowAgentic: p.allowAgentic,
-						allowPrivateTargets: p.allowPrivateTargets,
-					});
-					// Never print the token.
-					process.stderr.write(
-						`openaudit MCP listening on ${handle.url}\n${
-							handle.roots.length
-								? `Local targets allowed in: ${handle.roots.join(", ")}`
-								: "Local paths disabled (no --root); URL and image: targets only."
-						}\n`,
-					);
-					if (handle.generatedToken) {
-						// Shown once; the file lets clients read it later.
-						const token = handle.generatedToken;
-						let where: string;
-						try {
-							where = `Saved to ${await mcpModule.writeTokenFile(token)} (readable by you only).`;
-						} catch (error) {
-							where = `Could not save it to a file (${error instanceof Error ? error.message : String(error)}).`;
-						}
-						process.stderr.write(
-							`No token was given, so one was generated: ${token}\n${where}\nClaude Code: claude mcp add --transport http openaudit ${handle.url} --header "Authorization: Bearer ${token}"\nOther clients: send the header Authorization: Bearer <token>.\n`,
-						);
-					}
-					const shutdown = () => {
-						void handle.close().finally(() => process.exit(0));
-					};
-					process.once("SIGINT", shutdown);
-					process.once("SIGTERM", shutdown);
-					code = -1;
-				} catch (error) {
-					process.stderr.write(
-						`${error instanceof Error ? error.message : String(error)}\n`,
-					);
-					code = EXIT.usage;
-				}
-			}),
-	).pipe(
+const mcpParams = {
+	http: bool(
+		"http",
+		"Serve MCP over Streamable HTTP instead of stdio (loopback by default)",
+	),
+	host: opt(Flag.String("host"), "HTTP bind address (default 127.0.0.1)"),
+	port: opt(Flag.Int("port"), "HTTP port (default 7337)"),
+	token: opt(
+		Flag.String("token"),
+		"HTTP bearer token (or OPENAUDIT_MCP_TOKEN); generated on loopback if omitted, required off loopback",
+	),
+	root: list(
+		"root",
+		"HTTP: directory that local targets must resolve inside (repeatable)",
+	),
+	allowOrigin: list(
+		"allow-origin",
+		"HTTP: browser Origin allowed to connect (repeatable)",
+	),
+	allowHost: list(
+		"allow-host",
+		"HTTP: extra Host header value accepted (repeatable)",
+	),
+	persistReports: bool(
+		"persist-reports",
+		"HTTP: save reports under <root>/.openaudit/reports (off by default over HTTP)",
+	),
+	allowCloud: bool(
+		"allow-cloud",
+		"HTTP: accept cloud:<provider> targets (uses the server's credentials)",
+	),
+	allowImages: bool(
+		"allow-images",
+		"HTTP: accept image:<ref> targets on non-loopback binds (registry host is still checked)",
+	),
+	allowAgentic: bool(
+		"allow-agentic",
+		"HTTP: let clients run agentic auditors (spends the server's ANTHROPIC_API_KEY)",
+	),
+	allowPrivateTargets: bool(
+		"allow-private-targets",
+		"HTTP: allow URL targets on private/loopback/metadata addresses (non-loopback binds only block them by default)",
+	),
+};
+type ParsedMcp = Parsed<typeof mcpParams>;
+type McpModule = typeof import("@openaudit/mcp");
+type HttpHandle = Awaited<ReturnType<McpModule["startHttpServer"]>>;
+
+/** True when any option that only applies to `--http` is set. */
+const usesHttpOptions = (p: ParsedMcp): boolean =>
+	[
+		Option.isSome(p.host),
+		Option.isSome(p.port),
+		Option.isSome(p.token),
+		p.root.length > 0,
+		p.allowOrigin.length > 0,
+		p.allowHost.length > 0,
+		p.allowCloud,
+		p.persistReports,
+		p.allowImages,
+		p.allowAgentic,
+		p.allowPrivateTargets,
+	].some(Boolean);
+
+const isPort = (port: number): boolean => port >= 0 && port <= 65535;
+
+const serveStdio = async (
+	mcpModule: McpModule,
+	p: ParsedMcp,
+): Promise<number> => {
+	if (usesHttpOptions(p)) {
+		process.stderr.write(
+			"These options need --http (stdio has no network settings).\n",
+		);
+		return EXIT.usage;
+	}
+	await mcpModule.startStdioServer();
+	return KEEP_ALIVE; // keep the process alive while the client is connected
+};
+
+/** Shown once; the file lets clients read it later. */
+const announceToken = async (
+	mcpModule: McpModule,
+	handle: HttpHandle,
+	token: string,
+): Promise<void> => {
+	let where: string;
+	try {
+		where = `Saved to ${await mcpModule.writeTokenFile(token)} (readable by you only).`;
+	} catch (error) {
+		where = `Could not save it to a file (${messageOf(error)}).`;
+	}
+	process.stderr.write(
+		`No token was given, so one was generated: ${token}\n${where}\nClaude Code: claude mcp add --transport http openaudit ${handle.url} --header "Authorization: Bearer ${token}"\nOther clients: send the header Authorization: Bearer <token>.\n`,
+	);
+};
+
+const serveHttp = async (
+	mcpModule: McpModule,
+	p: ParsedMcp,
+	port: number | undefined,
+): Promise<number> => {
+	try {
+		const handle = await mcpModule.startHttpServer({
+			host: Option.getOrUndefined(p.host),
+			port,
+			token: Option.getOrUndefined(p.token) ?? process.env.OPENAUDIT_MCP_TOKEN,
+			roots: p.root,
+			allowOrigins: p.allowOrigin,
+			allowHosts: p.allowHost,
+			allowCloud: p.allowCloud,
+			persistReports: p.persistReports,
+			allowImages: p.allowImages,
+			allowAgentic: p.allowAgentic,
+			allowPrivateTargets: p.allowPrivateTargets,
+		});
+		// Never print the token.
+		process.stderr.write(
+			`openaudit MCP listening on ${handle.url}\n${
+				handle.roots.length
+					? `Local targets allowed in: ${handle.roots.join(", ")}`
+					: "Local paths disabled (no --root); URL and image: targets only."
+			}\n`,
+		);
+		if (handle.generatedToken)
+			await announceToken(mcpModule, handle, handle.generatedToken);
+		const shutdown = () => {
+			void handle.close().finally(() => process.exit(0));
+		};
+		process.once("SIGINT", shutdown);
+		process.once("SIGTERM", shutdown);
+		return KEEP_ALIVE;
+	} catch (error) {
+		process.stderr.write(`${messageOf(error)}\n`);
+		return EXIT.usage;
+	}
+};
+
+const runMcp = async (p: ParsedMcp): Promise<number> => {
+	const mcpModule = await import("@openaudit/mcp");
+	if (!p.http) return serveStdio(mcpModule, p);
+	const port = Option.getOrUndefined(p.port);
+	if (port !== undefined && !isPort(port)) {
+		process.stderr.write("--port must be between 0 and 65535.\n");
+		return EXIT.usage;
+	}
+	return serveHttp(mcpModule, p, port);
+};
+
+const mcpCmd = (exit: Exit) =>
+	Command.make("mcp", mcpParams, (p) => exit(runMcp(p))).pipe(
 		Command.withDescription(
 			"Start the MCP server: stdio by default (Claude Code, Cursor, Codex, ...), or --http for remote agents",
 		),
 	);
 
-	const schema = Command.make(
+const schemaCmd = (exit: Exit) =>
+	Command.make(
 		"schema",
 		{
 			name: Argument.Literals("name", ["report", "config"] as const).pipe(
@@ -418,19 +446,34 @@ export const main = async (argv: ReadonlyArray<string>): Promise<number> => {
 		),
 	);
 
-	const root = Command.make("openaudit", auditParams, (p) =>
+const rootCmd = (exit: Exit) =>
+	Command.make("openaudit", auditParams, (p) =>
 		exit(auditCommand(toAuditFlags(p))),
 	).pipe(
 		Command.withDescription(
 			"Audit codebases, URLs, web apps, containers, IaC and mobile builds for security, accessibility, performance, SEO, privacy and more. Exit codes: 0 ok, 1 findings at/above --fail-on, 2 usage or target error.",
 		),
 		Command.withExamples(EXAMPLES),
-		Command.withSubcommands([audit, listCmd, doctor, init, mcp, schema]),
+		Command.withSubcommands([
+			auditCmd(exit),
+			listCmd(exit),
+			doctorCmd(exit),
+			initCmd(exit),
+			mcpCmd(exit),
+			schemaCmd(exit),
+		]),
 	);
 
+/** Parses argv, runs the command and resolves to the process exit code. */
+export const main = async (argv: ReadonlyArray<string>): Promise<number> => {
+	let code: number = EXIT.ok;
+	const exit: Exit = (promise) =>
+		Effect.promise(async () => {
+			code = await promise;
+		});
 	const result = await Effect.runPromise(
 		Effect.result(
-			Command.runWith(root, { version: VERSION })(argv).pipe(
+			Command.runWith(rootCmd(exit), { version: VERSION })(argv).pipe(
 				Effect.provide(CliEnvironment),
 			),
 		),

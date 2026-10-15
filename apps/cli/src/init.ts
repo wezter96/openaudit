@@ -12,6 +12,28 @@ export interface ProjectFacts {
 
 const TEST_DIR = /^(test|tests|__tests__|spec|e2e)$/;
 
+const FIXTURES = "Test fixtures: deliberately broken or vulnerable inputs";
+const VENDORED = "Vendored third-party code, fixed upstream rather than here";
+
+/** Directory names that are noisy wherever they are, with the reason. */
+const NOISY_DIRS = new Map([
+	["__fixtures__", FIXTURES],
+	["testdata", FIXTURES],
+	["third_party", VENDORED],
+	["third-party", VENDORED],
+]);
+
+/** The `[glob, reason]` entry for directory `dir` inside `parent`, if noisy. */
+const noisyDir = (
+	dir: string,
+	parent: string,
+): readonly [string, string] | undefined => {
+	if (dir === "fixtures" && TEST_DIR.test(parent))
+		return [`**/${parent}/fixtures/**`, FIXTURES];
+	const reason = NOISY_DIRS.get(dir);
+	return reason ? [`**/${dir}/**`, reason] : undefined;
+};
+
 /**
  * Directories whose findings are noise by design, as `[glob, reason]`. Only
  * fixtures under a test directory count: elsewhere `fixtures/` can be seed
@@ -25,22 +47,8 @@ export const noisyPaths = (
 	for (const file of files) {
 		const parts = file.split("/").slice(0, -1);
 		for (const [i, dir] of parts.entries()) {
-			const parent = parts[i - 1] ?? "";
-			if (dir === "fixtures" && TEST_DIR.test(parent))
-				found.set(
-					`**/${parent}/fixtures/**`,
-					"Test fixtures: deliberately broken or vulnerable inputs",
-				);
-			else if (dir === "__fixtures__" || dir === "testdata")
-				found.set(
-					`**/${dir}/**`,
-					"Test fixtures: deliberately broken or vulnerable inputs",
-				);
-			else if (dir === "third_party" || dir === "third-party")
-				found.set(
-					`**/${dir}/**`,
-					"Vendored third-party code, fixed upstream rather than here",
-				);
+			const noisy = noisyDir(dir, parts[i - 1] ?? "");
+			if (noisy) found.set(...noisy);
 		}
 	}
 	return [...found].sort(([a], [b]) => a.localeCompare(b));

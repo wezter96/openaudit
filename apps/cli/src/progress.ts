@@ -1,9 +1,37 @@
-import { type AuditEvent, sanitizeText } from "@openaudit/core";
+import {
+	type AuditEvent,
+	type AuditorResult,
+	type AuditorStatus,
+	sanitizeText,
+} from "@openaudit/core";
 
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 const paint = (color: boolean, code: string, text: string) =>
 	color ? `\x1b[${code}m${text}\x1b[0m` : text;
+
+/** Colour code and mark per finished auditor's status. */
+const MARKS: Record<AuditorStatus, readonly [string, string]> = {
+	passed: ["32", "✓"],
+	failed: ["31", "✗"],
+	skipped: ["2", "–"],
+	error: ["31", "!"],
+};
+
+const markOf = (color: boolean, status: AuditorStatus) => {
+	const [code, text] = MARKS[status];
+	return paint(color, code, text);
+};
+
+/** Skip reasons and errors can quote target content: strip escapes. */
+const detailOf = (r: AuditorResult): string => {
+	const raw = sanitizeText(
+		r.status === "skipped" || r.status === "error"
+			? `${r.status}${r.message ? `: ${r.message}` : ""}`
+			: `${r.findings.length} finding${r.findings.length === 1 ? "" : "s"}`,
+	);
+	return raw.length > 100 ? `${raw.slice(0, 99)}…` : raw;
+};
 
 /**
  * Live progress on stderr: one permanent line per finished auditor plus a
@@ -45,21 +73,8 @@ export const createProgress = (options: {
 				const r = event.result;
 				running.delete(r.auditor);
 				done++;
-				const mark =
-					r.status === "passed"
-						? paint(c, "32", "✓")
-						: r.status === "failed"
-							? paint(c, "31", "✗")
-							: r.status === "skipped"
-								? paint(c, "2", "–")
-								: paint(c, "31", "!");
-				// Skip reasons and errors can quote target content: strip escapes.
-				const raw = sanitizeText(
-					r.status === "skipped" || r.status === "error"
-						? `${r.status}${r.message ? `: ${r.message}` : ""}`
-						: `${r.findings.length} finding${r.findings.length === 1 ? "" : "s"}`,
-				);
-				const detail = raw.length > 100 ? `${raw.slice(0, 99)}…` : raw;
+				const mark = markOf(c, r.status);
+				const detail = detailOf(r);
 				write(
 					`\r\x1b[K${mark} ${sanitizeText(r.auditor)} ${paint(c, "2", `${detail} · ${r.durationMs}ms`)}\n`,
 				);

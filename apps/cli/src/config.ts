@@ -64,6 +64,91 @@ const Entries = <K extends SuppressionEntry["kind"]>(
 		`${description} Each entry is a string, or an object with "${key}", "reason" and "until".`,
 	);
 
+/** Suppressions: `ignore` in the config. */
+const Ignore = describe(
+	Schema.Struct({
+		rules: Schema.optional(
+			Entries(
+				"rule",
+				"Rule id or pattern, e.g. `code.hygiene/ci-missing` or `web.seo/*`.",
+				"Suppress findings by rule.",
+			),
+		),
+		paths: Schema.optional(
+			Entries(
+				"path",
+				"File glob relative to the target, e.g. `test/fixtures/**`.",
+				"Suppress findings in matching files.",
+			),
+		),
+		fingerprints: Schema.optional(
+			Entries(
+				"fingerprint",
+				"A finding's `fingerprint` from a report.",
+				"Suppress single findings.",
+			),
+		),
+	}),
+	"Suppressions. Suppressed findings are left out of the report and the score, and every report says how many each source removed.",
+);
+
+/** Run options: `options` in the config. */
+const Options = describe(
+	Schema.Struct({
+		/*
+		 * Only `maxPages` is honoured from a config found in the target. The
+		 * rest sends data, spends money or widens access, so it is read only
+		 * from an explicit `--config <path>` (see `untrustedKeys`).
+		 */
+		offline: Schema.optional(
+			describe(
+				Schema.Boolean,
+				"Skip auditors that need the network (`--offline`).",
+			),
+		),
+		browser: Schema.optional(
+			describe(Schema.Boolean, "Audit URLs in a real browser (`--browser`)."),
+		),
+		// A described Number loses its description in the JSON Schema.
+		maxPages: describe(
+			Schema.optional(Schema.Number),
+			"Pages to crawl per URL (`--max-pages`).",
+		),
+		agentic: Schema.optional(
+			describe(
+				Schema.Boolean,
+				"Run the agentic auditors (`--agentic`). Costs tokens.",
+			),
+		),
+		ai: Schema.optional(
+			describe(Schema.Boolean, "Attach AI insights (`--ai`)."),
+		),
+		model: Schema.optional(
+			describe(Schema.String, "Claude model for `agentic` and `ai`."),
+		),
+		headers: Schema.optional(
+			describe(
+				Schema.Record(Schema.String, Schema.String),
+				"Extra headers sent to URL targets (`--header`).",
+			),
+		),
+		concurrency: describe(
+			Schema.optional(Schema.Number),
+			"Auditors run in parallel (`--concurrency`).",
+		),
+		settings: Schema.optional(
+			describe(
+				Schema.Record(
+					Schema.String,
+					Schema.Record(Schema.String, Schema.Unknown),
+				),
+				'Per-auditor settings keyed by auditor id, e.g. a licence policy under `"code.licenses"`.',
+			),
+		),
+	}),
+	'Run options. A config inside the audited target may set only `maxPages` and `settings["code.licenses"]`; the rest needs `--config <path>`.',
+);
+
 /** `openaudit.config.json`. Every key is optional; CLI flags override it. */
 export const Config = Schema.Struct({
 	$schema: Schema.optional(
@@ -84,94 +169,8 @@ export const Config = Schema.Struct({
 			'Exit with code 1 when a finding is at least this severe. `--fail-on` overrides it. A config inside the audited target cannot set "none".',
 		),
 	),
-	ignore: Schema.optional(
-		describe(
-			Schema.Struct({
-				rules: Schema.optional(
-					Entries(
-						"rule",
-						"Rule id or pattern, e.g. `code.hygiene/ci-missing` or `web.seo/*`.",
-						"Suppress findings by rule.",
-					),
-				),
-				paths: Schema.optional(
-					Entries(
-						"path",
-						"File glob relative to the target, e.g. `test/fixtures/**`.",
-						"Suppress findings in matching files.",
-					),
-				),
-				fingerprints: Schema.optional(
-					Entries(
-						"fingerprint",
-						"A finding's `fingerprint` from a report.",
-						"Suppress single findings.",
-					),
-				),
-			}),
-			"Suppressions. Suppressed findings are left out of the report and the score, and every report says how many each source removed.",
-		),
-	),
-	options: Schema.optional(
-		describe(
-			Schema.Struct({
-				/*
-				 * Only `maxPages` is honoured from a config found in the target. The
-				 * rest sends data, spends money or widens access, so it is read only
-				 * from an explicit `--config <path>` (see `untrustedKeys`).
-				 */
-				offline: Schema.optional(
-					describe(
-						Schema.Boolean,
-						"Skip auditors that need the network (`--offline`).",
-					),
-				),
-				browser: Schema.optional(
-					describe(
-						Schema.Boolean,
-						"Audit URLs in a real browser (`--browser`).",
-					),
-				),
-				// A described Number loses its description in the JSON Schema.
-				maxPages: describe(
-					Schema.optional(Schema.Number),
-					"Pages to crawl per URL (`--max-pages`).",
-				),
-				agentic: Schema.optional(
-					describe(
-						Schema.Boolean,
-						"Run the agentic auditors (`--agentic`). Costs tokens.",
-					),
-				),
-				ai: Schema.optional(
-					describe(Schema.Boolean, "Attach AI insights (`--ai`)."),
-				),
-				model: Schema.optional(
-					describe(Schema.String, "Claude model for `agentic` and `ai`."),
-				),
-				headers: Schema.optional(
-					describe(
-						Schema.Record(Schema.String, Schema.String),
-						"Extra headers sent to URL targets (`--header`).",
-					),
-				),
-				concurrency: describe(
-					Schema.optional(Schema.Number),
-					"Auditors run in parallel (`--concurrency`).",
-				),
-				settings: Schema.optional(
-					describe(
-						Schema.Record(
-							Schema.String,
-							Schema.Record(Schema.String, Schema.Unknown),
-						),
-						'Per-auditor settings keyed by auditor id, e.g. a licence policy under `"code.licenses"`.',
-					),
-				),
-			}),
-			'Run options. A config inside the audited target may set only `maxPages` and `settings["code.licenses"]`; the rest needs `--config <path>`.',
-		),
-	),
+	ignore: Schema.optional(Ignore),
+	options: Schema.optional(Options),
 });
 export type Config = typeof Config.Type;
 
@@ -194,30 +193,67 @@ const IGNORE_KEYS = [
 	["fingerprints", "fingerprint"],
 ] as const;
 
-/** Rejects a misspelt `until` or `reason`, which would silently never expire. */
-const checkEntries = (json: unknown): string | undefined => {
-	const ignore = (json as { ignore?: Record<string, unknown> } | null)?.ignore;
-	if (!ignore || typeof ignore !== "object") return undefined;
-	for (const [list, key] of IGNORE_KEYS) {
-		const entries = ignore[list];
-		if (!Array.isArray(entries)) continue;
-		for (const [i, entry] of entries.entries()) {
-			if (!entry || typeof entry !== "object") continue;
-			const allowed = [key, "reason", "until"];
-			const extra = Object.keys(entry).find((k) => !allowed.includes(k));
-			if (extra)
-				return `ignore.${list}[${i}] has an unknown key "${extra}" (use ${allowed.map((k) => `"${k}"`).join(", ")})`;
-			const until = (entry as { until?: unknown }).until;
-			if (
-				typeof until === "string" &&
-				/^\d{4}-\d{2}-\d{2}$/.test(until) &&
-				new Date(`${until}T00:00:00Z`).toISOString().slice(0, 10) !== until
-			)
-				return `ignore.${list}[${i}].until is not a real date: ${until}`;
-		}
+type IgnoreList = (typeof IGNORE_KEYS)[number];
+
+const isObject = (value: unknown): value is object =>
+	typeof value === "object" && value !== null;
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** A `YYYY-MM-DD` string that names no real day, such as `2025-02-30`. */
+const isUnrealDay = (until: unknown): until is string =>
+	typeof until === "string" &&
+	DAY.test(until) &&
+	new Date(`${until}T00:00:00Z`).toISOString().slice(0, 10) !== until;
+
+const entryProblem = (
+	[list, key]: IgnoreList,
+	entry: unknown,
+	i: number,
+): string | undefined => {
+	if (!isObject(entry)) return undefined;
+	const allowed = [key, "reason", "until"];
+	const extra = Object.keys(entry).find((k) => !allowed.includes(k));
+	if (extra)
+		return `ignore.${list}[${i}] has an unknown key "${extra}" (use ${allowed.map((k) => `"${k}"`).join(", ")})`;
+	const until = (entry as { until?: unknown }).until;
+	if (isUnrealDay(until))
+		return `ignore.${list}[${i}].until is not a real date: ${until}`;
+	return undefined;
+};
+
+/** The first problem `problemOf` reports, checking items in order. */
+const firstProblem = <T>(
+	items: Iterable<T>,
+	problemOf: (item: T) => string | undefined,
+): string | undefined => {
+	for (const item of items) {
+		const problem = problemOf(item);
+		if (problem) return problem;
 	}
 	return undefined;
 };
+
+const listProblem = (
+	ignore: Record<string, unknown>,
+	keys: IgnoreList,
+): string | undefined => {
+	const entries = ignore[keys[0]];
+	if (!Array.isArray(entries)) return undefined;
+	return firstProblem(entries.entries(), ([i, entry]) =>
+		entryProblem(keys, entry, i),
+	);
+};
+
+/** Rejects a misspelt `until` or `reason`, which would silently never expire. */
+const checkEntries = (json: unknown): string | undefined => {
+	const ignore = (json as { ignore?: Record<string, unknown> } | null)?.ignore;
+	if (!isObject(ignore)) return undefined;
+	return firstProblem(IGNORE_KEYS, (keys) => listProblem(ignore, keys));
+};
+
+const messageOf = (cause: unknown): string =>
+	cause instanceof Error ? cause.message : String(cause);
 
 /** Parses and validates config text. Comments and trailing commas are allowed. */
 export const parseConfig = (text: string, path: string): Config => {
@@ -226,7 +262,7 @@ export const parseConfig = (text: string, path: string): Config => {
 		json = JSON.parse(stripJsonc(text));
 	} catch (cause) {
 		throw new ConfigError({
-			message: `${path} is not valid JSON: ${cause instanceof Error ? cause.message : String(cause)}`,
+			message: `${path} is not valid JSON: ${messageOf(cause)}`,
 		});
 	}
 	const invalid = (detail: string) =>
@@ -235,7 +271,7 @@ export const parseConfig = (text: string, path: string): Config => {
 	try {
 		config = Schema.decodeUnknownSync(Config)(json);
 	} catch (cause) {
-		throw invalid(cause instanceof Error ? cause.message : String(cause));
+		throw invalid(messageOf(cause));
 	}
 	const entryProblem = checkEntries(json);
 	if (entryProblem) throw invalid(entryProblem);
@@ -247,6 +283,26 @@ export type IgnoreEntry = SuppressionEntry;
 
 /** Today's date in UTC as `YYYY-MM-DD`, the form `until` is compared in. */
 export const isoDay = (now: Date): string => now.toISOString().slice(0, 10);
+
+type RawIgnoreEntry = NonNullable<
+	NonNullable<Config["ignore"]>[IgnoreList[0]]
+>[number];
+
+const toIgnoreEntry = (
+	kind: IgnoreEntry["kind"],
+	raw: RawIgnoreEntry,
+): IgnoreEntry =>
+	typeof raw === "string"
+		? { kind, value: raw }
+		: {
+				kind,
+				value: (raw as Record<string, string>)[kind] ?? "",
+				...(raw.reason !== undefined ? { reason: raw.reason } : {}),
+				...(raw.until !== undefined ? { until: raw.until } : {}),
+			};
+
+const isExpired = (entry: IgnoreEntry, today: string): boolean =>
+	entry.until !== undefined && entry.until < today;
 
 /**
  * Normalises `ignore` and splits it into entries that apply on `today`
@@ -260,19 +316,8 @@ export const resolveIgnores = (
 	const expired: IgnoreEntry[] = [];
 	for (const [list, kind] of IGNORE_KEYS) {
 		for (const raw of ignore?.[list] ?? []) {
-			const entry: IgnoreEntry =
-				typeof raw === "string"
-					? { kind, value: raw }
-					: {
-							kind,
-							value: (raw as Record<string, string>)[kind] ?? "",
-							...(raw.reason !== undefined ? { reason: raw.reason } : {}),
-							...(raw.until !== undefined ? { until: raw.until } : {}),
-						};
-			(entry.until !== undefined && entry.until < today
-				? expired
-				: active
-			).push(entry);
+			const entry = toIgnoreEntry(kind, raw);
+			(isExpired(entry, today) ? expired : active).push(entry);
 		}
 	}
 	return { active, expired };
@@ -305,6 +350,39 @@ export interface LoadedConfig {
  */
 export const TARGET_SETTINGS: ReadonlyArray<string> = ["code.licenses"];
 
+/** Options a config inside the target may set. */
+const TARGET_OPTIONS: ReadonlyArray<string> = ["maxPages", "settings"];
+
+/** Splits `options.settings` into what the target may set and ignored keys. */
+const targetSettings = (raw: unknown) => {
+	const entries = isObject(raw) ? Object.entries(raw) : [];
+	const ignored = [
+		...(raw !== undefined && !entries.length ? ["options.settings"] : []),
+		...entries
+			.filter(([id]) => !TARGET_SETTINGS.includes(id))
+			.map(([id]) => `options.settings[${JSON.stringify(id)}]`),
+	];
+	const kept = Object.fromEntries(
+		entries.filter(([id]) => TARGET_SETTINGS.includes(id)),
+	);
+	return { kept, ignored };
+};
+
+/** The target may tighten the CI gate but never switch it off. */
+const keptFailOn = (failOn: FailOn | undefined): Pick<Config, "failOn"> =>
+	failOn !== undefined && failOn !== "none" ? { failOn } : {};
+
+const keptOptions = (
+	maxPages: number | undefined,
+	settings: Record<string, Record<string, unknown>>,
+): Pick<Config, "options"> => {
+	const kept = {
+		...(maxPages !== undefined ? { maxPages } : {}),
+		...(Object.keys(settings).length ? { settings } : {}),
+	};
+	return Object.keys(kept).length ? { options: kept } : {};
+};
+
 /**
  * A config inside the audited target is written by whoever controls the
  * target. It may narrow the audit and suppress findings (both disclosed in the
@@ -316,29 +394,19 @@ export const restrictUntrusted = (
 	config: Config,
 ): { config: Config; ignored: string[] } => {
 	const { options, $schema: _, failOn, ...rest } = config;
-	const ignored = Object.keys(options ?? {})
-		.filter((k) => k !== "maxPages" && k !== "settings")
-		.map((k) => `options.${k}`);
-	const raw: unknown = options?.settings;
-	const entries = raw && typeof raw === "object" ? Object.entries(raw) : [];
-	if (raw !== undefined && !entries.length) ignored.push("options.settings");
-	for (const [id] of entries)
-		if (!TARGET_SETTINGS.includes(id))
-			ignored.push(`options.settings[${JSON.stringify(id)}]`);
-	const settings = Object.fromEntries(
-		entries.filter(([id]) => TARGET_SETTINGS.includes(id)),
-	);
-	// The target may tighten the CI gate but never switch it off.
-	if (failOn === "none") ignored.push("failOn: none");
-	const kept = {
-		...(options?.maxPages !== undefined ? { maxPages: options.maxPages } : {}),
-		...(Object.keys(settings).length ? { settings } : {}),
-	};
+	const settings = targetSettings(options?.settings);
+	const ignored = [
+		...Object.keys(options ?? {})
+			.filter((k) => !TARGET_OPTIONS.includes(k))
+			.map((k) => `options.${k}`),
+		...settings.ignored,
+		...(failOn === "none" ? ["failOn: none"] : []),
+	];
 	return {
 		config: {
 			...rest,
-			...(failOn !== undefined && failOn !== "none" ? { failOn } : {}),
-			...(Object.keys(kept).length ? { options: kept } : {}),
+			...keptFailOn(failOn),
+			...keptOptions(options?.maxPages, settings.kept),
 		},
 		ignored,
 	};
@@ -361,6 +429,19 @@ export const findConfig = async (dir: string): Promise<string | undefined> => {
 	return found[0];
 };
 
+/** `--config <path>`: it must exist and is fully trusted. */
+const loadExplicit = async (path: string): Promise<LoadedConfig> => {
+	const file = Bun.file(path);
+	if (!(await file.exists()))
+		throw new ConfigError({ message: `Config file not found: ${path}` });
+	return {
+		config: parseConfig(await file.text(), path),
+		path,
+		trusted: true,
+		ignored: [],
+	};
+};
+
 /**
  * Loads `--config <path>` (must exist, fully trusted) or, unless `noConfig`,
  * `openaudit.config.json(c)` next to the target (optional, restricted).
@@ -371,18 +452,8 @@ export const loadConfig = async (options: {
 	readonly target: string;
 	readonly cwd: string;
 }): Promise<LoadedConfig> => {
-	if (options.explicit) {
-		const path = resolve(options.cwd, options.explicit);
-		const file = Bun.file(path);
-		if (!(await file.exists()))
-			throw new ConfigError({ message: `Config file not found: ${path}` });
-		return {
-			config: parseConfig(await file.text(), path),
-			path,
-			trusted: true,
-			ignored: [],
-		};
-	}
+	if (options.explicit)
+		return loadExplicit(resolve(options.cwd, options.explicit));
 	if (options.noConfig) return { config: {}, trusted: true, ignored: [] };
 	const path = await findConfig(
 		await configDirFor(options.target, options.cwd),

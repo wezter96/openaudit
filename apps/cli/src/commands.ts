@@ -35,64 +35,52 @@ const pad = (s: string, n: number) =>
 
 /* ---------------------------------- list ---------------------------------- */
 
-export const listCommand = (
-	flags: { readonly json: boolean; readonly targetKind?: string },
-	io: Io = processIo(),
-	auditors: ReadonlyArray<Auditor> = allAuditors(),
-): number => {
-	const kind = flags.targetKind;
-	if (kind && !(TARGET_KINDS as ReadonlyArray<string>).includes(kind)) {
-		io.stderr(
-			`openaudit: unknown target kind "${kind}". Use: ${TARGET_KINDS.join(", ")}.\n`,
-		);
-		return EXIT.usage;
-	}
-	const matches = (targets: ReadonlyArray<TargetKind>) =>
-		!kind || targets.includes(kind as TargetKind);
-	const list = auditors
-		.filter((a) => matches(a.targets))
-		.map((a) => ({
-			id: a.id,
-			title: a.title,
-			engine: a.engine,
-			categories: [...a.categories],
-			targets: [...a.targets],
-			...(a.tool ? { tool: a.tool } : {}),
-			network: a.network === true,
-			defaultEnabled:
-				a.engine === "agentic" ? false : a.defaultEnabled !== false,
-		}));
-	const playbooks = Agent.playbooks
-		.filter((p) => matches(p.targets))
-		.map((p) => ({
-			id: p.id,
-			title: p.title,
-			summary: p.summary,
-			categories: [...p.categories],
-			targets: [...p.targets],
-			needs: [...p.needs],
-		}));
+const isTargetKind = (kind: string): kind is TargetKind =>
+	(TARGET_KINDS as ReadonlyArray<string>).includes(kind);
 
-	if (flags.json) {
-		io.stdout(json({ auditors: list, playbooks }));
-		return EXIT.ok;
-	}
+const auditorEntry = (a: Auditor) => ({
+	id: a.id,
+	title: a.title,
+	engine: a.engine,
+	categories: [...a.categories],
+	targets: [...a.targets],
+	...(a.tool ? { tool: a.tool } : {}),
+	network: a.network === true,
+	defaultEnabled: a.engine === "agentic" ? false : a.defaultEnabled !== false,
+});
+type AuditorEntry = ReturnType<typeof auditorEntry>;
+
+const playbookEntry = (p: (typeof Agent.playbooks)[number]) => ({
+	id: p.id,
+	title: p.title,
+	summary: p.summary,
+	categories: [...p.categories],
+	targets: [...p.targets],
+	needs: [...p.needs],
+});
+type PlaybookEntry = ReturnType<typeof playbookEntry>;
+
+const auditorTags = (a: AuditorEntry): string =>
+	[
+		a.engine,
+		a.tool ? `needs ${a.tool}` : "",
+		a.network ? "network" : "",
+		a.defaultEnabled ? "" : "opt-in",
+	]
+		.filter(Boolean)
+		.join(", ");
+
+const listText = (
+	list: ReadonlyArray<AuditorEntry>,
+	playbooks: ReadonlyArray<PlaybookEntry>,
+): string => {
 	const width = Math.max(10, ...list.map((a) => a.id.length)) + 2;
 	const lines = [`Auditors (${list.length})`];
-	for (const a of list) {
-		const tags = [
-			a.engine,
-			a.tool ? `needs ${a.tool}` : "",
-			a.network ? "network" : "",
-			a.defaultEnabled ? "" : "opt-in",
-		]
-			.filter(Boolean)
-			.join(", ");
+	for (const a of list)
 		lines.push(
-			`  ${pad(a.id, width)}${a.title}  [${tags}]`,
+			`  ${pad(a.id, width)}${a.title}  [${auditorTags(a)}]`,
 			`  ${pad("", width)}targets: ${a.targets.join(", ")} · ${a.categories.join(", ")}`,
 		);
-	}
 	lines.push(
 		"",
 		`Playbooks (${playbooks.length}) for agent-in-the-loop audits via MCP`,
@@ -103,7 +91,33 @@ export const listCommand = (
 		"",
 		"Select with --only <id|prefix|prefix.*>, --exclude, --category. Agentic auditors need --agentic; opt-in auditors run only when selected with --only.",
 	);
-	io.stdout(`${lines.join("\n")}\n`);
+	return `${lines.join("\n")}\n`;
+};
+
+export const listCommand = (
+	flags: { readonly json: boolean; readonly targetKind?: string },
+	io: Io = processIo(),
+	auditors: ReadonlyArray<Auditor> = allAuditors(),
+): number => {
+	const kind = flags.targetKind;
+	if (kind && !isTargetKind(kind)) {
+		io.stderr(
+			`openaudit: unknown target kind "${kind}". Use: ${TARGET_KINDS.join(", ")}.\n`,
+		);
+		return EXIT.usage;
+	}
+	const matches = (targets: ReadonlyArray<TargetKind>) =>
+		!kind || targets.includes(kind as TargetKind);
+	const list = auditors.filter((a) => matches(a.targets)).map(auditorEntry);
+	const playbooks = Agent.playbooks
+		.filter((p) => matches(p.targets))
+		.map(playbookEntry);
+
+	io.stdout(
+		flags.json
+			? json({ auditors: list, playbooks })
+			: listText(list, playbooks),
+	);
 	return EXIT.ok;
 };
 
@@ -158,17 +172,15 @@ const systemChrome = (): string | undefined =>
 		existsSync(p),
 	);
 
-export const doctorReport = (
-	auditors: ReadonlyArray<Auditor> = allAuditors(),
-) => {
-	// Every binary an auditor wraps, plus docker (image pulls and saves).
+/** Every binary an auditor wraps, plus docker (image pulls and saves). */
+const toolStatus = (auditors: ReadonlyArray<Auditor>) => {
 	const names = [
 		...new Set([
 			...auditors.flatMap((a) => (a.tool ? [a.tool] : [])),
 			"docker",
 		]),
 	];
-	const tools = names.map((name) => {
+	return names.map((name) => {
 		const path = whichTool(name);
 		return {
 			name,
@@ -177,14 +189,29 @@ export const doctorReport = (
 			usedBy: auditors.filter((a) => a.tool === name).map((a) => a.id),
 		};
 	});
-	const auditorsDir = (() => {
-		const entry = resolveFrom("@openaudit/auditors", import.meta.dir);
-		return entry ? dirname(entry) : import.meta.dir;
-	})();
-	const playwright = resolveFrom("playwright-core", auditorsDir);
-	const axe = resolveFrom("axe-core", auditorsDir);
+};
+
+const auditorsDir = (): string => {
+	const entry = resolveFrom("@openaudit/auditors", import.meta.dir);
+	return entry ? dirname(entry) : import.meta.dir;
+};
+
+const browserStatus = () => {
+	const dir = auditorsDir();
+	const playwright = resolveFrom("playwright-core", dir);
+	const axe = resolveFrom("axe-core", dir);
 	const browsers = playwrightBrowsers();
 	const chrome = systemChrome();
+	return {
+		playwrightCore: Boolean(playwright),
+		axeCore: Boolean(axe),
+		playwrightBrowsers: browsers,
+		systemChrome: chrome,
+		ready: Boolean(playwright) && (browsers.length > 0 || Boolean(chrome)),
+	};
+};
+
+const agenticStatus = () => {
 	const claude = Bun.which("claude") ?? undefined;
 	const agentic = {
 		anthropicApiKey: Boolean(process.env.ANTHROPIC_API_KEY),
@@ -193,6 +220,21 @@ export const doctorReport = (
 		claudeConfigDir: existsSync(join(homedir(), ".claude")),
 	};
 	return {
+		...agentic,
+		ready:
+			agentic.anthropicApiKey ||
+			agentic.claudeCodeOAuthToken ||
+			(agentic.claudeCli && agentic.claudeConfigDir),
+	};
+};
+
+export const doctorReport = (
+	auditors: ReadonlyArray<Auditor> = allAuditors(),
+) => {
+	const tools = toolStatus(auditors);
+	const browser = browserStatus();
+	const agentic = agenticStatus();
+	return {
 		version: VERSION,
 		bun: {
 			version: Bun.version,
@@ -200,20 +242,8 @@ export const doctorReport = (
 		},
 		platform: `${process.platform}-${process.arch}`,
 		tools,
-		browser: {
-			playwrightCore: Boolean(playwright),
-			axeCore: Boolean(axe),
-			playwrightBrowsers: browsers,
-			systemChrome: chrome,
-			ready: Boolean(playwright) && (browsers.length > 0 || Boolean(chrome)),
-		},
-		agentic: {
-			...agentic,
-			ready:
-				agentic.anthropicApiKey ||
-				agentic.claudeCodeOAuthToken ||
-				(agentic.claudeCli && agentic.claudeConfigDir),
-		},
+		browser,
+		agentic,
 	};
 };
 
@@ -274,7 +304,8 @@ export const initCommand = async (
 		io.stderr(`openaudit: ${error.message}\n`);
 		return EXIT.usage;
 	}
-	if (existing && !flags.force && !flags.print) {
+	const proceed = flags.force || flags.print;
+	if (existing && !proceed) {
 		io.stderr(
 			`openaudit: ${existing} already exists (use --force to overwrite, or --print)\n`,
 		);

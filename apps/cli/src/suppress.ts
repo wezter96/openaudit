@@ -23,24 +23,90 @@ const COUNTER = {
 	fingerprint: "fingerprints",
 } as const;
 
-/** Index of the entry that suppresses `f`: fingerprints, then rules, then paths. */
-const matcher = (entries: ReadonlyArray<SuppressionEntry>) => {
+interface EntryIndex {
+	readonly fingerprints: ReadonlyMap<string, number>;
+	readonly rules: ReadonlyArray<readonly [number, string]>;
+	readonly globs: ReadonlyArray<readonly [number, Bun.Glob]>;
+}
+
+/** `[index, make(value)]` for every entry of one kind, in entry order. */
+const ofKind = <T>(
+	entries: ReadonlyArray<SuppressionEntry>,
+	kind: SuppressionEntry["kind"],
+	make: (value: string) => T,
+): Array<readonly [number, T]> =>
+	entries.flatMap((e, i) =>
+		e.kind === kind ? [[i, make(e.value)] as const] : [],
+	);
+
+const indexEntries = (entries: ReadonlyArray<SuppressionEntry>): EntryIndex => {
 	const fingerprints = new Map<string, number>();
-	const rules: [number, string][] = [];
-	const globs: [number, Bun.Glob][] = [];
-	for (const [i, e] of entries.entries()) {
-		if (e.kind === "fingerprint") {
-			if (!fingerprints.has(e.value)) fingerprints.set(e.value, i);
-		} else if (e.kind === "rule") rules.push([i, e.value]);
-		else globs.push([i, new Bun.Glob(e.value)]);
+	for (const [i, e] of entries.entries())
+		if (e.kind === "fingerprint" && !fingerprints.has(e.value))
+			fingerprints.set(e.value, i);
+	return {
+		fingerprints,
+		rules: ofKind(entries, "rule", (value) => value),
+		globs: ofKind(entries, "path", (value) => new Bun.Glob(value)),
+	};
+};
+
+/** Index of the entry that suppresses `f`: fingerprints, then rules, then paths. */
+const matchEntry = (index: EntryIndex, f: Finding): number | undefined => {
+	const byFingerprint = index.fingerprints.get(f.fingerprint);
+	if (byFingerprint !== undefined) return byFingerprint;
+	const rule = index.rules.find(([, p]) => matchesPattern(f.ruleId, p));
+	if (rule) return rule[0];
+	const file = f.location?.file;
+	return file ? index.globs.find(([, g]) => g.match(file))?.[0] : undefined;
+};
+
+const matcher = (entries: ReadonlyArray<SuppressionEntry>) => {
+	const index = indexEntries(entries);
+	return (f: Finding): number | undefined => matchEntry(index, f);
+};
+
+const isActive = (s: SuppressionSource) =>
+	s.entries.length || s.expired?.length;
+
+/** Entries with a reason or expiry are listed with their counts. */
+const isAnnotated = (e: SuppressionEntry) =>
+	e.reason !== undefined || e.until !== undefined;
+
+/** Keeps a finding unless a source suppresses it; the first match is counted. */
+const keepUnsuppressed =
+	(
+		matchers: ReadonlyArray<(f: Finding) => number | undefined>,
+		hits: ReadonlyArray<number[]>,
+	) =>
+	(f: Finding): boolean => {
+		for (const [i, match] of matchers.entries()) {
+			const hit = match(f);
+			const counts = hits[i];
+			if (hit !== undefined && counts) {
+				counts[hit] = (counts[hit] ?? 0) + 1;
+				return false;
+			}
+		}
+		return true;
+	};
+
+const summarize = (
+	s: SuppressionSource,
+	hits: ReadonlyArray<number> | undefined,
+): SuppressionSummary => {
+	const counts = { rules: 0, paths: 0, fingerprints: 0 };
+	const entries: (SuppressionEntry & { count: number })[] = [];
+	for (const [j, e] of s.entries.entries()) {
+		const count = hits?.[j] ?? 0;
+		counts[COUNTER[e.kind]] += count;
+		if (count && isAnnotated(e)) entries.push({ ...e, count });
 	}
-	return (f: Finding): number | undefined => {
-		const byFingerprint = fingerprints.get(f.fingerprint);
-		if (byFingerprint !== undefined) return byFingerprint;
-		const rule = rules.find(([, p]) => matchesPattern(f.ruleId, p));
-		if (rule) return rule[0];
-		const file = f.location?.file;
-		return file ? globs.find(([, g]) => g.match(file))?.[0] : undefined;
+	return {
+		source: s.source,
+		...counts,
+		...(entries.length ? { entries } : {}),
+		...(s.expired?.length ? { expired: [...s.expired] } : {}),
 	};
 };
 
@@ -55,37 +121,15 @@ export const applySuppressions = (
 	report: Report,
 	sources: ReadonlyArray<SuppressionSource>,
 ): { report: Report; suppressed: SuppressionSummary[] } => {
-	const active = sources.filter((s) => s.entries.length || s.expired?.length);
+	const active = sources.filter(isActive);
 	if (!active.length) return { report, suppressed: [] };
 	const matchers = active.map((s) => matcher(s.entries));
 	const hits = active.map((s) => s.entries.map(() => 0));
 
-	const { results, summary } = filterFindings(report.results, (f) => {
-		for (const [i, match] of matchers.entries()) {
-			const hit = match(f);
-			const counts = hits[i];
-			if (hit !== undefined && counts) {
-				counts[hit] = (counts[hit] ?? 0) + 1;
-				return false;
-			}
-		}
-		return true;
-	});
-	const suppressed = active.map((s, i): SuppressionSummary => {
-		const counts = { rules: 0, paths: 0, fingerprints: 0 };
-		const entries: (SuppressionEntry & { count: number })[] = [];
-		for (const [j, e] of s.entries.entries()) {
-			const count = hits[i]?.[j] ?? 0;
-			counts[COUNTER[e.kind]] += count;
-			if (count && (e.reason !== undefined || e.until !== undefined))
-				entries.push({ ...e, count });
-		}
-		return {
-			source: s.source,
-			...counts,
-			...(entries.length ? { entries } : {}),
-			...(s.expired?.length ? { expired: [...s.expired] } : {}),
-		};
-	});
+	const { results, summary } = filterFindings(
+		report.results,
+		keepUnsuppressed(matchers, hits),
+	);
+	const suppressed = active.map((s, i) => summarize(s, hits[i]));
 	return { report: { ...report, results, summary }, suppressed };
 };
