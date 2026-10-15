@@ -9,7 +9,7 @@ import {
 import { Effect } from "effect";
 import type { UnzipFileInfo } from "fflate";
 import { parse as parseYamlText } from "yaml";
-
+import { isRecord } from "../codebase/util";
 import {
 	ATS_DOCS,
 	checkEntitlements,
@@ -170,10 +170,8 @@ const expoJsonFindings = (
 	file: FilePath,
 	text: SourceText,
 ): FindingInput[] | undefined => {
-	const json = parseJsonText(text)?.value as
-		| Record<string, unknown>
-		| undefined;
-	if (json === undefined) return undefined;
+	const json = parseJsonText(text)?.value;
+	if (!isRecord(json)) return undefined;
 	const config = (json.expo ?? json) as Record<string, unknown>;
 	const ios = config.ios as Record<string, unknown> | undefined;
 	if (!ios) return undefined;

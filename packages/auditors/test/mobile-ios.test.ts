@@ -121,6 +121,15 @@ describe("mobile.ios", () => {
 		expect(ats?.location?.line).toBeGreaterThan(1);
 	});
 
+	test("an app.json that is not an object is not an Expo config", async () => {
+		const dir = await writeTree({
+			"app.json": "null",
+			"ios/Info.plist": xmlPlist({ CFBundleIdentifier: "com.example.demo" }),
+		});
+		const report = await runAuditor(ios, dir);
+		expect(report.results[0]?.status).toBe("passed");
+	});
+
 	test("skips Android artifacts", async () => {
 		const apk = await writeArchive("app.apk", { "AndroidManifest.xml": "x" });
 		const report = await runAuditor(ios, apk);
