@@ -417,7 +417,8 @@ describe("code.typecheck", () => {
 describe("oxlint", () => {
 	test("sanitizer drops everything that can load code or escape the temp cwd", () => {
 		const out = JSON.parse(
-			sanitizeOxlintConfig(`{
+			sanitizeOxlintConfig(
+				`{
 				// comment
 				"jsPlugins": ["./evil.js"],
 				"extends": ["./other.json"],
@@ -426,15 +427,87 @@ describe("oxlint", () => {
 				"plugins": ["typescript"],
 				"categories": { "suspicious": "warn" },
 				"rules": { "no-debugger": "error" },
-			}`) ?? "null",
+			}`,
+				"/repo",
+			) ?? "null",
 		);
 		expect(out).toEqual({
 			plugins: ["typescript"],
 			categories: { suspicious: "warn" },
 			rules: { "no-debugger": "error" },
+			overrides: [{ files: ["/repo/*.ts"] }],
 		});
-		expect(sanitizeOxlintConfig("not json")).toBeUndefined();
+		expect(sanitizeOxlintConfig("not json", "/repo")).toBeUndefined();
 	});
+
+	test("sanitizer anchors override globs at the target root", () => {
+		const config = `{ "overrides": [
+			{ "files": ["scripts/**", "./e2e/**", "**/*.test.ts"], "rules": { "no-console": "off" } },
+			{ "files": [], "rules": { "no-debugger": "off" } },
+		] }`;
+		expect(
+			JSON.parse(sanitizeOxlintConfig(config, "/repo/") ?? "null"),
+		).toEqual({
+			overrides: [
+				{
+					files: ["/repo/scripts/**", "/repo/e2e/**", "**/*.test.ts"],
+					rules: { "no-console": "off" },
+				},
+			],
+		});
+		// A root that is itself a glob would match the wrong files.
+		expect(
+			JSON.parse(sanitizeOxlintConfig(config, "/tmp/[x]") ?? "null"),
+		).toEqual({});
+	});
+
+	const realOxlint = Bun.which("oxlint");
+	test.skipIf(!realOxlint)(
+		"anchored overrides still apply when oxlint runs from a temp dir",
+		async () => {
+			await withProject(
+				{
+					"scripts/a.ts": 'console.log("x");\n',
+					"src/b.ts": 'console.log("x");\n',
+				},
+				async (dir) => {
+					const root = realpathSync(dir);
+					const config = sanitizeOxlintConfig(
+						`{ "rules": { "no-console": "error" },
+						   "overrides": [{ "files": ["scripts/**"], "rules": { "no-console": "off" } }] }`,
+						root,
+					);
+					// Its own temp dir, as in the auditor: never an ancestor of the root.
+					const cwd = realpathSync(
+						await mkdtemp(join(tmpdir(), "openaudit-oxlint-")),
+					);
+					try {
+						const configFile = join(cwd, "oxlintrc.json");
+						await writeFile(configFile, config ?? "");
+						const proc = Bun.spawnSync(
+							[
+								realOxlint ?? "",
+								"--format",
+								"json",
+								"--disable-nested-config",
+								"-c",
+								configFile,
+								root,
+							],
+							{ cwd },
+						);
+						const files = parseOxlintReport(
+							JSON.parse(proc.stdout.toString()),
+							root,
+						).map((f) => f.location?.file);
+						expect(files).toEqual(["src/b.ts"]);
+					} finally {
+						await rm(cwd, { recursive: true, force: true });
+					}
+				},
+			);
+		},
+	);
 
 	test("parser on a recorded oxlint 1.88.0 run", () => {
 		const findings = parseOxlintReport(recordedJson("oxlint.json"), "/repo");

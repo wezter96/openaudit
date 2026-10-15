@@ -429,9 +429,9 @@ const OXLINT_CONFIG_FILES = [
 	"oxlintrc.json",
 ];
 /**
- * Config keys that are plain data. `jsPlugins` (loads JS), `extends`,
- * `overrides` and `ignorePatterns` (paths relative to the config location) are
- * dropped.
+ * Config keys that are plain data. `jsPlugins` (loads JS), `extends` and
+ * `ignorePatterns` (paths relative to the config location) are dropped;
+ * `overrides` is kept through `anchoredOverrides`.
  */
 const OXLINT_SAFE_KEYS = [
 	"categories",
@@ -441,6 +441,10 @@ const OXLINT_SAFE_KEYS = [
 	"globals",
 	"settings",
 ];
+/** Override keys that are plain data; `jsPlugins` is dropped here too. */
+const OXLINT_SAFE_OVERRIDE_KEYS = ["rules", "plugins", "env", "globals"];
+/** Characters that would turn the root path itself into a glob. */
+const GLOB_SPECIAL = /[*?[\]{}!\\]/;
 
 /**
  * oxlint's default plugins (`eslint` is always on). A `plugins` list replaces
@@ -498,12 +502,51 @@ export const withFrameworkPlugins = (
 	return JSON.stringify(out);
 };
 
+/**
+ * oxlint matches `overrides[].files` relative to the config file, and the
+ * sanitized copy lives in a temp dir, so each glob is anchored at the target
+ * root (globs that start with `**` match anywhere already). Without overrides,
+ * the rules a project turns off for its tests or scripts come back as
+ * findings. A root that contains glob characters cannot be anchored; its
+ * overrides are dropped.
+ */
+const anchoredOverrides = (
+	overrides: unknown,
+	root: string,
+): Record<string, unknown>[] => {
+	if (GLOB_SPECIAL.test(root)) return [];
+	const base = root.replace(/\/+$/, "");
+	const out: Record<string, unknown>[] = [];
+	for (const o of arr(overrides)) {
+		if (!isRecord(o)) continue;
+		const files = arr(o.files).filter(
+			(f): f is string => typeof f === "string",
+		);
+		if (files.length === 0) continue;
+		const safe: Record<string, unknown> = {
+			files: files.map((f) => {
+				const glob = f.replace(/^\.?\//, "");
+				return glob.startsWith("**/") ? glob : `${base}/${glob}`;
+			}),
+		};
+		for (const key of OXLINT_SAFE_OVERRIDE_KEYS)
+			if (key in o) safe[key] = o[key];
+		out.push(safe);
+	}
+	return out;
+};
+
 /** A copy of an oxlint config that cannot load JavaScript. */
-export const sanitizeOxlintConfig = (text: string): string | undefined => {
+export const sanitizeOxlintConfig = (
+	text: string,
+	root: string,
+): string | undefined => {
 	const json = parseJsonc(text);
 	if (!isRecord(json)) return undefined;
 	const safe: Record<string, unknown> = {};
 	for (const key of OXLINT_SAFE_KEYS) if (key in json) safe[key] = json[key];
+	const overrides = anchoredOverrides(json.overrides, root);
+	if (overrides.length > 0) safe.overrides = overrides;
 	return JSON.stringify(safe);
 };
 
@@ -590,7 +633,7 @@ export const oxlint: Auditor = defineAuditor({
 				? yield* ws.readText(configPath).pipe(Effect.orElseSucceed(() => ""))
 				: "";
 			const sanitized = configText
-				? sanitizeOxlintConfig(configText)
+				? sanitizeOxlintConfig(configText, ws.root)
 				: undefined;
 			const packageJsons = yield* Effect.forEach(
 				all
