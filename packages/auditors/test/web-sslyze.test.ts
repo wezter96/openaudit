@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import {
 	type Auditor,
 	type AuditorResult,
+	type AuditorStatus,
 	correlate,
 	Exec,
 	type ExecOptions,
@@ -20,8 +21,9 @@ import { Effect, Layer } from "effect";
 
 import { webAuditors } from "../src/web";
 import { DEFAULT_COMMANDS, parseSslyzeReport, sslyze } from "../src/web/sslyze";
-import { certificateFindings } from "../src/web/tls";
+import { certificateFindings, type TlsInfo } from "../src/web/tls";
 import { fixture } from "./helpers";
+import { findingWith, firstResult, must } from "./must";
 
 // Recorded on 2026-10-14 with sslyze 6.3.1 (uv tool install on Debian's
 // python3 3.13), `--mozilla_config=disable --json_out=…`, then minified:
@@ -90,9 +92,187 @@ const runWithExec = (
 	);
 
 const ok = (): ExecResult => ({ code: 0, stdout: "", stderr: "" });
+
+interface SslyzeCall {
+	readonly cmd: ReadonlyArray<string>;
+	readonly cwd: string | undefined;
+}
+
+/** A fake sslyze that records each call and writes a recorded report. */
+const replaySslyze =
+	(name: string, calls: SslyzeCall[]) =>
+	async (cmd: ReadonlyArray<string>, opts?: ExecOptions) => {
+		calls.push({ cmd, cwd: opts?.cwd });
+		await writeFile(jsonOut(cmd), sampleText(name));
+		return ok();
+	};
+
+/** The report's single result has `status` and a message containing `part`. */
+const expectResult = (report: Report, status: AuditorStatus, part: string) => {
+	const result = firstResult(report);
+	expect(result.status).toBe(status);
+	expect(result.message).toContain(part);
+};
 const jsonOut = (cmd: ReadonlyArray<string>) =>
 	cmd.find((a) => a.startsWith("--json_out="))?.slice("--json_out=".length) ??
 	"";
+
+/* ------------------------- merging with web.tls ------------------------- */
+
+/** A TLS 1.0 handshake with a certificate that expired in 2015. */
+const EXPIRED_CERT: TlsInfo = {
+	protocol: "TLSv1",
+	authorized: false,
+	authorizationError: "CERT_HAS_EXPIRED",
+	hostnameError: undefined,
+	subject: "*.badssl.com",
+	issuer: "COMODO",
+	validFrom: new Date("2015-04-09T00:00:00Z"),
+	validTo: new Date("2015-04-12T23:59:59Z"),
+	selfSigned: false,
+};
+
+/** A TLS 1.0 handshake with a currently valid certificate. */
+const LEGACY_CERT: TlsInfo = {
+	protocol: "TLSv1",
+	authorized: true,
+	authorizationError: undefined,
+	hostnameError: undefined,
+	subject: "*.badssl.com",
+	issuer: "R3",
+	validFrom: new Date("2026-09-29T20:02:56Z"),
+	validTo: new Date("2026-12-28T20:02:55Z"),
+	selfSigned: false,
+};
+
+/** The expired-certificate recording, with an SSL 2.0 RC4 suite accepted. */
+const sslv2Report = () =>
+	withResult("cert-expired", "ssl_2_0_cipher_suites", {
+		tls_version_used: "SSL_2_0",
+		is_tls_version_supported: true,
+		accepted_cipher_suites: [
+			{
+				cipher_suite: {
+					name: "SSL_CK_RC4_128_WITH_MD5",
+					is_anonymous: false,
+					key_size: 128,
+				},
+				ephemeral_key: null,
+			},
+		],
+		rejected_cipher_suites: [],
+	});
+
+const asFinding = (auditor: string) => (f: FindingInput, i: number) =>
+	({ ...f, auditor, fingerprint: `${auditor}-${i}` }) as Finding;
+
+/** Correlates web.tls and web.sslyze findings as one run would. */
+const correlatePair = (
+	tls: ReadonlyArray<FindingInput>,
+	sslyzeFindings: ReadonlyArray<FindingInput>,
+) => {
+	const [tlsResult, sslyzeResult] = correlate([
+		{
+			auditor: "web.tls",
+			status: "failed",
+			findings: tls.map(asFinding("web.tls")),
+		},
+		{
+			auditor: "web.sslyze",
+			status: "failed",
+			findings: sslyzeFindings.map(asFinding("web.sslyze")),
+		},
+	] as unknown as AuditorResult[]);
+	return {
+		tls: must(tlsResult, "the web.tls result"),
+		sslyze: must(sslyzeResult, "the web.sslyze result"),
+	};
+};
+
+const duplicateOfRule = (findings: ReadonlyArray<Finding>, ruleId: string) =>
+	findings.find((f) => f.ruleId === ruleId)?.duplicateOf;
+
+/** Only the expiry finding may be marked a duplicate of a web.tls one. */
+const expectOnlyExpiryMerged = (findings: ReadonlyArray<Finding>) => {
+	for (const f of findings)
+		if (!f.ruleId.endsWith("certificate-expired"))
+			expect(f.duplicateOf).toBeUndefined();
+};
+
+/* ------------------------- known vulnerabilities ------------------------- */
+
+/** Scan command, its result, then the expected rule, severity and CVE tag. */
+type Vulnerability = [string, Record<string, unknown>, string, string, string];
+
+const VULNERABILITIES: Vulnerability[] = [
+	[
+		"heartbleed",
+		{ is_vulnerable_to_heartbleed: true },
+		"heartbleed",
+		"critical",
+		"cve-2014-0160",
+	],
+	[
+		"openssl_ccs_injection",
+		{ is_vulnerable_to_ccs_injection: true },
+		"ccs-injection",
+		"high",
+		"cve-2014-0224",
+	],
+	[
+		"session_renegotiation",
+		{
+			supports_secure_renegotiation: false,
+			is_vulnerable_to_client_renegotiation_dos: false,
+			client_renegotiations_success_count: 0,
+		},
+		"insecure-renegotiation",
+		"high",
+		"cve-2009-3555",
+	],
+	[
+		"tls_compression",
+		{ supports_compression: true },
+		"compression-enabled",
+		"medium",
+		"cve-2012-4929",
+	],
+	[
+		"robot",
+		{ robot_result: "VULNERABLE_STRONG_ORACLE" },
+		"robot",
+		"high",
+		"cve-2017-13099",
+	],
+];
+
+/** The vulnerability is reported with its severity, CVE tag and NVD link. */
+const expectVulnerability = ([
+	key,
+	result,
+	rule,
+	severity,
+	cve,
+]: Vulnerability) => {
+	const { findings } = parseSslyzeReport(
+		withResult("tls-v1-0", key, result),
+		URL_1010,
+	);
+	const f = findings.find((x) => x.ruleId === `web.sslyze/${rule}`);
+	expect(f?.severity).toBe(severity as never);
+	expect(f?.tags).toContain(cve);
+	expect(f?.references?.[0]).toBe(
+		`https://nvd.nist.gov/vuln/detail/${cve.toUpperCase()}`,
+	);
+};
+
+/** The severity of the ROBOT finding for a given oracle, if any. */
+const robotSeverity = (robot: string) =>
+	parseSslyzeReport(
+		withResult("tls-v1-0", "robot", { robot_result: robot }),
+		URL_1010,
+		NOW,
+	).findings.find((f) => f.ruleId === "web.sslyze/robot")?.severity;
 
 describe("web.sslyze parser", () => {
 	test("reports the protocol ceiling", () => {
@@ -103,27 +283,26 @@ describe("web.sslyze parser", () => {
 		expect(scan.findings.map((f) => f.ruleId)).toEqual([
 			"web.sslyze/tls-1-2-not-supported",
 		]);
-		const f = scan.findings[0];
-		expect(f?.severity).toBe("high");
-		expect(f?.category).toBe("security");
-		expect(f?.evidence).toBe("highest_tls_version_supported=TLS_1_0");
+		const f = must(scan.findings[0], "the protocol ceiling finding");
+		expect(f.severity).toBe("high");
+		expect(f.category).toBe("security");
+		expect(f.evidence).toBe("highest_tls_version_supported=TLS_1_0");
 		// Shared with web.tls/weak-protocol: bare URL, so they merge.
-		expect(f?.location).toEqual({ url: URL_1010 });
-		expect(f?.tags).toEqual(["tls", "cwe-327", "owasp-a02"]);
-		expect(f?.references).toContain(
+		expect(f.location).toEqual({ url: URL_1010 });
+		expect(f.tags).toEqual(["tls", "cwe-327", "owasp-a02"]);
+		expect(f.references).toContain(
 			"https://wiki.mozilla.org/Security/Server_Side_TLS",
 		);
-		expect(f?.references).toContain(
+		expect(f.references).toContain(
 			"https://cwe.mitre.org/data/definitions/327.html",
 		);
-		const tls13 = parseSslyzeReport(
-			sample("cert-expired"),
-			URL_1010,
-			NOW,
-		).findings.find((x) => x.ruleId === "web.sslyze/tls-1-3-not-supported");
-		expect(tls13?.severity).toBe("low");
+		const tls13 = findingWith(
+			parseSslyzeReport(sample("cert-expired"), URL_1010, NOW).findings,
+			"web.sslyze/tls-1-3-not-supported",
+		);
+		expect(tls13.severity).toBe("low");
 		// web.tls has no such check: located at the TLS endpoint.
-		expect(tls13?.location).toEqual({
+		expect(tls13.location).toEqual({
 			url: URL_1010,
 			selector: "tls:expired.badssl.com:443",
 		});
@@ -150,23 +329,29 @@ describe("web.sslyze parser", () => {
 			["web.sslyze/untrusted-chain", "high"],
 		]);
 
-		const [expired] = parseSslyzeReport(
-			sample("cert-expired"),
-			"https://expired.badssl.com/",
-			NOW,
-		).findings.filter((f) => f.ruleId.endsWith("certificate-expired"));
-		expect(expired?.location).toEqual({ url: "https://expired.badssl.com/" });
-		expect(expired?.tags).toEqual(["tls", "cwe-295", "owasp-a02"]);
-		expect(expired?.message).toContain("2015-04-12");
-		expect(expired?.evidence).toBe(
+		const expired = must(
+			parseSslyzeReport(
+				sample("cert-expired"),
+				"https://expired.badssl.com/",
+				NOW,
+			).findings.filter((f) => f.ruleId.endsWith("certificate-expired"))[0],
+			"the expired finding",
+		);
+		expect(expired.location).toEqual({ url: "https://expired.badssl.com/" });
+		expect(expired.tags).toEqual(["tls", "cwe-295", "owasp-a02"]);
+		expect(expired.message).toContain("2015-04-12");
+		expect(expired.evidence).toBe(
 			"CN=*.badssl.com,OU=PositiveSSL Wildcard,OU=Domain Control Validated; not_valid_after=2015-04-12",
 		);
-		const wrong = parseSslyzeReport(
-			sample("cert-wrong-host"),
-			"https://wrong.host.badssl.com/",
-			NOW,
-		).findings.find((f) => f.ruleId.endsWith("hostname-mismatch"));
-		expect(wrong?.evidence).toBe(
+		const wrong = must(
+			parseSslyzeReport(
+				sample("cert-wrong-host"),
+				"https://wrong.host.badssl.com/",
+				NOW,
+			).findings.find((f) => f.ruleId.endsWith("hostname-mismatch")),
+			"the hostname mismatch finding",
+		);
+		expect(wrong.evidence).toBe(
 			"CN=*.badssl.com; validation failed: leaf certificate has no matching subjectAltName",
 		);
 	});
@@ -178,12 +363,12 @@ describe("web.sslyze parser", () => {
 				(f) => f.ruleId === "web.sslyze/certificate-expiring-soon",
 			);
 		expect(expiring(NOW)).toBeUndefined();
-		expect(expiring(Date.parse("2026-12-10T00:00:00Z"))?.severity).toBe(
-			"medium",
-		);
-		const soon = expiring(Date.parse("2026-12-25T00:00:00Z"));
-		expect(soon?.severity).toBe("high");
-		expect(soon?.message).toBe(
+		const expiringIn = (date: string) =>
+			must(expiring(Date.parse(date)), `an expiry warning on ${date}`);
+		expect(expiringIn("2026-12-10T00:00:00Z").severity).toBe("medium");
+		const soon = expiringIn("2026-12-25T00:00:00Z");
+		expect(soon.severity).toBe("high");
+		expect(soon.message).toBe(
 			"The certificate expires in 3 day(s), on 2026-12-28.",
 		);
 		expect(
@@ -207,13 +392,13 @@ describe("web.sslyze parser", () => {
 			"web.sslyze/sha1-signature",
 			"web.sslyze/tls-1-3-not-supported",
 		]);
-		const sha1 = by["web.sslyze/sha1-signature"];
-		expect(sha1?.severity).toBe("medium");
+		const sha1 = must(by["web.sslyze/sha1-signature"], "the SHA-1 finding");
+		expect(sha1.severity).toBe("medium");
 		// The leaf is signed with SHA-256.
-		expect(sha1?.evidence).toBe(
+		expect(sha1.evidence).toBe(
 			"CN=COMODO SSL CA,O=COMODO CA Limited,L=Salford,ST=Greater Manchester,C=GB (sha1)",
 		);
-		expect(sha1?.tags).toEqual(["tls", "cwe-328", "owasp-a02"]);
+		expect(sha1.tags).toEqual(["tls", "cwe-328", "owasp-a02"]);
 		for (const f of findings) expect(f.remediation).toBeTruthy();
 	});
 
@@ -224,15 +409,19 @@ describe("web.sslyze parser", () => {
 			NOW,
 		);
 		const by = Object.fromEntries(nul.findings.map((f) => [f.ruleId, f]));
-		const insecure = by["web.sslyze/insecure-cipher-suites"];
-		expect(insecure?.severity).toBe("high");
-		expect(insecure?.evidence).toStartWith("TLS 1.0: TLS_RSA_WITH_NULL_SHA");
-		expect(insecure?.evidence).toContain("TLS_DH_anon_WITH_AES_128_CBC_SHA");
+		const insecure = must(
+			by["web.sslyze/insecure-cipher-suites"],
+			"the insecure suites finding",
+		);
+		expect(insecure.severity).toBe("high");
+		expect(insecure.evidence).toStartWith("TLS 1.0: TLS_RSA_WITH_NULL_SHA");
+		expect(insecure.evidence).toContain("TLS_DH_anon_WITH_AES_128_CBC_SHA");
 		// NULL/anon suites are not repeated as missing forward secrecy.
 		expect(by["web.sslyze/no-forward-secrecy"]).toBeUndefined();
 		// TLS 1.0 support is shared with web.tls: bare URL, so they merge.
-		expect(by["web.sslyze/tls-1-0-enabled"]?.severity).toBe("medium");
-		expect(by["web.sslyze/tls-1-0-enabled"]?.location).toEqual({
+		const tls10 = must(by["web.sslyze/tls-1-0-enabled"], "the TLS 1.0 finding");
+		expect(tls10.severity).toBe("medium");
+		expect(tls10.location).toEqual({
 			url: "https://null.badssl.com/",
 		});
 		// The TLS 1.2 enumeration timed out on the recording: logged, not fatal.
@@ -247,8 +436,7 @@ describe("web.sslyze parser", () => {
 			NOW,
 		);
 		expect(
-			rc4.findings.find((f) => f.ruleId === "web.sslyze/insecure-cipher-suites")
-				?.evidence,
+			findingWith(rc4.findings, "web.sslyze/insecure-cipher-suites").evidence,
 		).toBe("TLS 1.0: TLS_RSA_WITH_RC4_128_SHA, TLS_ECDHE_RSA_WITH_RC4_128_SHA");
 
 		const example = parseSslyzeReport(
@@ -303,62 +491,24 @@ describe("web.sslyze parser", () => {
 		const sslBy = Object.fromEntries(
 			parseSslyzeReport(ssl, URL_1010, NOW).findings.map((f) => [f.ruleId, f]),
 		);
-		expect(sslBy["web.sslyze/sslv2-enabled"]?.severity).toBe("critical");
+		expect(must(sslBy["web.sslyze/sslv2-enabled"], "sslv2").severity).toBe(
+			"critical",
+		);
 		// SSL 2.0 suites are covered by sslv2-enabled, not the cipher rules.
 		expect(sslBy["web.sslyze/insecure-cipher-suites"]).toBeUndefined();
 	});
 
 	test("merges shared checks with web.tls and keeps the rest apart", () => {
 		const url = "https://expired.badssl.com/";
-		const asFinding = (auditor: string) => (f: FindingInput, i: number) =>
-			({ ...f, auditor, fingerprint: `${auditor}-${i}` }) as Finding;
-		const tlsFindings = certificateFindings(
-			url,
-			{
-				protocol: "TLSv1",
-				authorized: false,
-				authorizationError: "CERT_HAS_EXPIRED",
-				hostnameError: undefined,
-				subject: "*.badssl.com",
-				issuer: "COMODO",
-				validFrom: new Date("2015-04-09T00:00:00Z"),
-				validTo: new Date("2015-04-12T23:59:59Z"),
-				selfSigned: false,
-			},
-			NOW,
+		const sslyzeFindings = parseSslyzeReport(sslv2Report(), url, NOW).findings;
+		const merged = correlatePair(
+			certificateFindings(url, EXPIRED_CERT, NOW),
+			sslyzeFindings,
 		);
-		const ssl = withResult("cert-expired", "ssl_2_0_cipher_suites", {
-			tls_version_used: "SSL_2_0",
-			is_tls_version_supported: true,
-			accepted_cipher_suites: [
-				{
-					cipher_suite: {
-						name: "SSL_CK_RC4_128_WITH_MD5",
-						is_anonymous: false,
-						key_size: 128,
-					},
-					ephemeral_key: null,
-				},
-			],
-			rejected_cipher_suites: [],
-		});
-		const sslyzeFindings = parseSslyzeReport(ssl, url, NOW).findings;
-		const [tlsResult, sslyzeResult] = correlate([
-			{
-				auditor: "web.tls",
-				status: "failed",
-				findings: tlsFindings.map(asFinding("web.tls")),
-			},
-			{
-				auditor: "web.sslyze",
-				status: "failed",
-				findings: sslyzeFindings.map(asFinding("web.sslyze")),
-			},
-		] as unknown as AuditorResult[]);
-		const tlsExpired = tlsResult?.findings.find(
+		const tlsExpired = merged.tls.findings.find(
 			(f) => f.ruleId === "web.tls/certificate-expired",
 		);
-		const sslyzeExpired = sslyzeResult?.findings.find(
+		const sslyzeExpired = merged.sslyze.findings.find(
 			(f) => f.ruleId === "web.sslyze/certificate-expired",
 		);
 		// Same issue, one kept and one marked duplicate.
@@ -366,115 +516,34 @@ describe("web.sslyze parser", () => {
 			[tlsExpired?.duplicateOf, sslyzeExpired?.duplicateOf].filter(Boolean),
 		).toHaveLength(1);
 		// Endpoint-scoped findings never merge with page-level ones.
-		for (const f of sslyzeResult?.findings ?? [])
-			if (!f.ruleId.endsWith("certificate-expired"))
-				expect(f.duplicateOf).toBeUndefined();
+		expectOnlyExpiryMerged(merged.sslyze.findings);
 		// A legacy protocol is not a certificate problem (cwe-327, not cwe-295).
 		expect(
-			tlsResult?.findings.find((f) => f.ruleId === "web.tls/weak-protocol")
-				?.duplicateOf,
+			duplicateOfRule(merged.tls.findings, "web.tls/weak-protocol"),
 		).toBeUndefined();
 
 		// ...but it is the same issue as sslyze's protocol ceiling.
 		const legacyUrl = "https://tls-v1-0.badssl.com:1010/";
-		const [legacyTls, legacySslyze] = correlate([
-			{
-				auditor: "web.tls",
-				status: "failed",
-				findings: certificateFindings(
-					legacyUrl,
-					{
-						protocol: "TLSv1",
-						authorized: true,
-						authorizationError: undefined,
-						hostnameError: undefined,
-						subject: "*.badssl.com",
-						issuer: "R3",
-						validFrom: new Date("2026-09-29T20:02:56Z"),
-						validTo: new Date("2026-12-28T20:02:55Z"),
-						selfSigned: false,
-					},
-					NOW,
-				).map(asFinding("web.tls")),
-			},
-			{
-				auditor: "web.sslyze",
-				status: "failed",
-				findings: parseSslyzeReport(
-					sample("tls-v1-0"),
-					legacyUrl,
-					NOW,
-				).findings.map(asFinding("web.sslyze")),
-			},
-		] as unknown as AuditorResult[]);
-		expect(legacyTls?.findings.map((f) => f.ruleId)).toEqual([
+		const legacy = correlatePair(
+			certificateFindings(legacyUrl, LEGACY_CERT, NOW),
+			parseSslyzeReport(sample("tls-v1-0"), legacyUrl, NOW).findings,
+		);
+		expect(legacy.tls.findings.map((f) => f.ruleId)).toEqual([
 			"web.tls/weak-protocol",
 		]);
-		expect(legacySslyze?.findings[0]?.ruleId).toBe(
-			"web.sslyze/tls-1-2-not-supported",
-		);
+		const legacySslyze = must(legacy.sslyze.findings[0], "the sslyze finding");
+		expect(legacySslyze.ruleId).toBe("web.sslyze/tls-1-2-not-supported");
 		expect(
 			[
-				legacyTls?.findings[0]?.duplicateOf,
-				legacySslyze?.findings[0]?.duplicateOf,
+				must(legacy.tls.findings[0], "the web.tls finding").duplicateOf,
+				legacySslyze.duplicateOf,
 			].filter(Boolean),
 		).toHaveLength(1);
 	});
 
 	test("maps known vulnerabilities with CVE tags that merge with testssl.sh", () => {
-		const cases: [string, Record<string, unknown>, string, string, string][] = [
-			[
-				"heartbleed",
-				{ is_vulnerable_to_heartbleed: true },
-				"heartbleed",
-				"critical",
-				"cve-2014-0160",
-			],
-			[
-				"openssl_ccs_injection",
-				{ is_vulnerable_to_ccs_injection: true },
-				"ccs-injection",
-				"high",
-				"cve-2014-0224",
-			],
-			[
-				"session_renegotiation",
-				{
-					supports_secure_renegotiation: false,
-					is_vulnerable_to_client_renegotiation_dos: false,
-					client_renegotiations_success_count: 0,
-				},
-				"insecure-renegotiation",
-				"high",
-				"cve-2009-3555",
-			],
-			[
-				"tls_compression",
-				{ supports_compression: true },
-				"compression-enabled",
-				"medium",
-				"cve-2012-4929",
-			],
-			[
-				"robot",
-				{ robot_result: "VULNERABLE_STRONG_ORACLE" },
-				"robot",
-				"high",
-				"cve-2017-13099",
-			],
-		];
-		for (const [key, result, rule, severity, cve] of cases) {
-			const { findings } = parseSslyzeReport(
-				withResult("tls-v1-0", key, result),
-				URL_1010,
-			);
-			const f = findings.find((x) => x.ruleId === `web.sslyze/${rule}`);
-			expect(f?.severity).toBe(severity as never);
-			expect(f?.tags).toContain(cve);
-			expect(f?.references?.[0]).toBe(
-				`https://nvd.nist.gov/vuln/detail/${cve.toUpperCase()}`,
-			);
-		}
+		for (const vulnerability of VULNERABILITIES)
+			expectVulnerability(vulnerability);
 
 		const rest = parseSslyzeReport(
 			withResult("tls-v1-0", "tls_fallback_scsv", {
@@ -484,26 +553,23 @@ describe("web.sslyze parser", () => {
 			NOW,
 		).findings.map((f) => `${f.ruleId}:${f.severity}`);
 		expect(rest).toContain("web.sslyze/no-fallback-scsv:low");
-		const reneg = parseSslyzeReport(
-			withResult("tls-v1-0", "session_renegotiation", {
-				supports_secure_renegotiation: true,
-				is_vulnerable_to_client_renegotiation_dos: true,
-				client_renegotiations_success_count: 10,
-			}),
-			URL_1010,
-			NOW,
-		).findings.find((f) => f.ruleId === "web.sslyze/client-renegotiation");
-		expect(reneg?.severity).toBe("medium");
-		expect(reneg?.evidence).toBe("client_renegotiations_success_count=10");
-		// A weak ROBOT oracle is medium; no oracle is not a finding.
-		const weak = (robot: string) =>
+		const reneg = findingWith(
 			parseSslyzeReport(
-				withResult("tls-v1-0", "robot", { robot_result: robot }),
+				withResult("tls-v1-0", "session_renegotiation", {
+					supports_secure_renegotiation: true,
+					is_vulnerable_to_client_renegotiation_dos: true,
+					client_renegotiations_success_count: 10,
+				}),
 				URL_1010,
 				NOW,
-			).findings.find((f) => f.ruleId === "web.sslyze/robot")?.severity;
-		expect(weak("VULNERABLE_WEAK_ORACLE")).toBe("medium");
-		expect(weak("NOT_VULNERABLE_NO_ORACLE")).toBeUndefined();
+			).findings,
+			"web.sslyze/client-renegotiation",
+		);
+		expect(reneg.severity).toBe("medium");
+		expect(reneg.evidence).toBe("client_renegotiations_success_count=10");
+		// A weak ROBOT oracle is medium; no oracle is not a finding.
+		expect(robotSeverity("VULNERABLE_WEAK_ORACLE")).toBe("medium");
+		expect(robotSeverity("NOT_VULNERABLE_NO_ORACLE")).toBeUndefined();
 	});
 
 	test("reports trust-store disagreement only when Mozilla trusts the chain", () => {
@@ -531,19 +597,22 @@ describe("web.sslyze parser", () => {
 		expect(stores.map((s) => s.trust_store.name)).toContain("Mozilla");
 		// The recorded chain validates everywhere.
 		expect(stores.every((s) => s.was_validation_successful)).toBe(true);
-		const apple = stores.find((s) => s.trust_store.name === "Apple");
-		if (apple) {
-			apple.was_validation_successful = false;
-			apple.validation_error = "validation failed: untrusted root";
-		}
-		const f = parseSslyzeReport(json, URL_1010, NOW).findings.find(
-			(x) => x.ruleId === "web.sslyze/untrusted-in-some-stores",
+		const store = (name: string) =>
+			must(
+				stores.find((s) => s.trust_store.name === name),
+				`the ${name} trust store`,
+			);
+		const apple = store("Apple");
+		apple.was_validation_successful = false;
+		apple.validation_error = "validation failed: untrusted root";
+		const f = findingWith(
+			parseSslyzeReport(json, URL_1010, NOW).findings,
+			"web.sslyze/untrusted-in-some-stores",
 		);
-		expect(f?.severity).toBe("medium");
-		expect(f?.evidence).toBe("Apple: validation failed: untrusted root");
+		expect(f.severity).toBe("medium");
+		expect(f.evidence).toBe("Apple: validation failed: untrusted root");
 
-		const mozilla = stores.find((s) => s.trust_store.name === "Mozilla");
-		if (mozilla) mozilla.was_validation_successful = false;
+		store("Mozilla").was_validation_successful = false;
 		expect(
 			parseSslyzeReport(json, URL_1010, NOW).findings.map((x) => x.ruleId),
 		).not.toContain("web.sslyze/untrusted-in-some-stores");
@@ -563,19 +632,14 @@ describe("web.sslyze parser", () => {
 
 describe("web.sslyze auditor", () => {
 	test("runs by default on the target's host:port from a temp dir", async () => {
-		let cmd: ReadonlyArray<string> = [];
-		let cwd: string | undefined;
+		const calls: SslyzeCall[] = [];
 		const report = await runWithExec(
 			sslyze,
 			"https://expired.badssl.com:1010/some/page?q=1",
 			(bin) => (bin === "sslyze" ? "/opt/uv/bin/sslyze" : undefined),
-			async (c, opts) => {
-				cmd = c;
-				cwd = opts?.cwd;
-				await writeFile(jsonOut(c), sampleText("cert-expired"));
-				return ok();
-			},
+			replaySslyze("cert-expired", calls),
 		);
+		const { cmd, cwd } = must(calls.at(-1), "an sslyze call");
 		expect(cmd[0]).toBe("/opt/uv/bin/sslyze");
 		expect(cmd.at(-1)).toBe("expired.badssl.com:1010");
 		expect(cmd).toContain("--mozilla_config=disable");
@@ -590,14 +654,15 @@ describe("web.sslyze auditor", () => {
 		expect(await stat(cwd ?? "").catch(() => null)).toBeNull(); // cleaned up
 		expect(await readFile(jsonOut(cmd)).catch(() => null)).toBeNull();
 
-		const result = report.results[0];
-		expect(result?.status).toBe("failed"); // has findings
-		expect(result?.findings.map((f) => f.ruleId).sort()).toEqual([
+		const result = firstResult(report);
+		expect(result.status).toBe("failed"); // has findings
+		expect(result.findings.map((f) => f.ruleId).sort()).toEqual([
 			"web.sslyze/certificate-expired",
 			"web.sslyze/tls-1-3-not-supported",
 		]);
 		// The finding points at the target as given, not at sslyze's view of it.
-		expect(result?.findings[0]?.location?.url).toBe(
+		const first = must(result.findings[0], "a finding");
+		expect(must(first.location, "its location").url).toBe(
 			"https://expired.badssl.com:1010/some/page?q=1",
 		);
 		expect(sslyze.defaultEnabled).not.toBe(false);
@@ -641,10 +706,7 @@ describe("web.sslyze auditor", () => {
 				return ok();
 			},
 		);
-		expect(refused.results[0]?.status).toBe("error");
-		expect(refused.results[0]?.message).toContain(
-			"could not connect to 127.0.0.1:1",
-		);
+		expectResult(refused, "error", "could not connect to 127.0.0.1:1");
 
 		const broken = await runWithExec(
 			sslyze,
@@ -652,8 +714,7 @@ describe("web.sslyze auditor", () => {
 			() => "/usr/bin/sslyze",
 			async () => ({ code: 2, stdout: "", stderr: "usage: sslyze" }),
 		);
-		expect(broken.results[0]?.status).toBe("error");
-		expect(broken.results[0]?.message).toContain("code 2");
+		expectResult(broken, "error", "code 2");
 	});
 
 	test("skips http targets and a missing sslyze", async () => {
@@ -663,8 +724,7 @@ describe("web.sslyze auditor", () => {
 			(bin) => `/usr/bin/${bin}`,
 			() => Promise.reject(new Error("unreachable")),
 		);
-		expect(plain.results[0]?.status).toBe("skipped");
-		expect(plain.results[0]?.message).toContain("https");
+		expectResult(plain, "skipped", "https");
 
 		const missing = await runWithExec(
 			sslyze,
@@ -672,7 +732,6 @@ describe("web.sslyze auditor", () => {
 			() => undefined,
 			() => Promise.reject(new Error("unreachable")),
 		);
-		expect(missing.results[0]?.status).toBe("skipped");
-		expect(missing.results[0]?.message).toContain("uv tool install sslyze");
+		expectResult(missing, "skipped", "uv tool install sslyze");
 	});
 });

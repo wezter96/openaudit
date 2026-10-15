@@ -12,6 +12,7 @@ import {
 	type LayoutEl,
 } from "./mobile-layout-encoder";
 import { encodeBplist, writeArchive, writeTree } from "./mobile-plist-encoder";
+import { firstResult, must } from "./must";
 
 const dp = (dim: number) => ({ dim, unit: "dp" as const });
 const sp = (dim: number) => ({ dim, unit: "sp" as const });
@@ -91,6 +92,24 @@ const clean: LayoutEl = {
 const findings = (report: Awaited<ReturnType<typeof runAuditor>>) =>
 	report.results.flatMap((r) => r.findings);
 
+type AccessibilityFinding = ReturnType<typeof findings>[number];
+
+const ending = (all: ReadonlyArray<AccessibilityFinding>, suffix: string) =>
+	must(
+		all.find((f) => f.ruleId.endsWith(suffix)),
+		`a ${suffix} finding`,
+	);
+
+/** Every accessibility finding explains itself and how to fix it. */
+const expectExplained = (f: AccessibilityFinding) => {
+	expect(f.remediation).toBeTruthy();
+	expect(f.evidence).toBeTruthy();
+	expect(f.category).toBe("accessibility");
+};
+
+const inLibraryLayout = (f: AccessibilityFinding) =>
+	(f.location?.file ?? "").includes("abc_screen");
+
 describe("axml dimensions", () => {
 	test("decodes complex units", () => {
 		expect(decodeDimension(complexDimension(48, "dp"))).toBe("48dp");
@@ -130,7 +149,7 @@ describe("mobile.accessibility", () => {
 			"res/layout/abc_screen_toolbar.xml": encodeLayout(layout),
 		});
 		const report = await runAuditor(mobileAccessibility, apk);
-		expect(report.results[0]?.status).toBe("failed");
+		expect(firstResult(report).status).toBe("failed");
 		expect(ruleIds(report)).toEqual([
 			"mobile.accessibility/edittext-missing-label",
 			"mobile.accessibility/image-missing-content-description",
@@ -138,36 +157,26 @@ describe("mobile.accessibility", () => {
 			"mobile.accessibility/touch-target-too-small",
 		]);
 		const all = findings(report);
-		const image = all.find((f) =>
-			f.ruleId.endsWith("/image-missing-content-description"),
-		);
-		expect(image?.severity).toBe("medium");
-		expect(image?.tags).toContain("wcag-1.1.1");
-		expect(image?.message).toContain("2 image views");
-		expect(image?.location?.file).toBe(
+		const image = ending(all, "/image-missing-content-description");
+		expect(image.severity).toBe("medium");
+		expect(image.tags).toContain("wcag-1.1.1");
+		expect(image.message).toContain("2 image views");
+		expect(must(image.location, "its location").file).toBe(
 			`${apk}!/res/layout/activity_main.xml`.replace(apk, "app.apk"),
 		);
-		const target = all.find((f) =>
-			f.ruleId.endsWith("/touch-target-too-small"),
-		);
-		expect(target?.severity).toBe("low");
-		expect(target?.confidence).toBe("low");
-		expect(target?.tags).toContain("wcag-2.5.8");
-		expect(target?.message).toContain("2 clickable views");
-		const text = all.find((f) => f.ruleId.endsWith("/text-size-not-sp"));
-		expect(text?.message).toContain("2 views");
-		expect(text?.tags).toContain("wcag-1.4.4");
-		const edit = all.find((f) => f.ruleId.endsWith("/edittext-missing-label"));
-		expect(edit?.message).toContain("1 input field");
-		expect(edit?.tags).toEqual(["android", "wcag-1.3.1", "wcag-3.3.2"]);
-		for (const f of all) {
-			expect(f.remediation).toBeTruthy();
-			expect(f.evidence).toBeTruthy();
-			expect(f.category).toBe("accessibility");
-		}
-		expect(all.every((f) => !f.location?.file?.includes("abc_screen"))).toBe(
-			true,
-		);
+		const target = ending(all, "/touch-target-too-small");
+		expect(target.severity).toBe("low");
+		expect(target.confidence).toBe("low");
+		expect(target.tags).toContain("wcag-2.5.8");
+		expect(target.message).toContain("2 clickable views");
+		const text = ending(all, "/text-size-not-sp");
+		expect(text.message).toContain("2 views");
+		expect(text.tags).toContain("wcag-1.4.4");
+		const edit = ending(all, "/edittext-missing-label");
+		expect(edit.message).toContain("1 input field");
+		expect(edit.tags).toEqual(["android", "wcag-1.3.1", "wcag-3.3.2"]);
+		for (const f of all) expectExplained(f);
+		expect(all.every((f) => !inLibraryLayout(f))).toBe(true);
 	});
 
 	test("passes a clean layout", async () => {

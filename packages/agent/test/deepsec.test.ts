@@ -42,6 +42,48 @@ const outcome = (
 const settings = (over: Record<string, unknown> = {}) =>
 	DeepsecSettings.parse(over);
 
+/** Writes deepsec's per-file record for `path` under its data root. */
+const writeRecord = (dataRoot: string, path: string, rec: object) => {
+	const p = join(dataRoot, "openaudit/files", `${path}.json`);
+	mkdirSync(dirname(p), { recursive: true });
+	writeFileSync(p, JSON.stringify(rec));
+};
+
+/** What `deepsec scan` leaves: twelve files with two candidates each. */
+const scanTwelveFiles = (dataRoot: string) => {
+	for (let i = 0; i < 12; i++)
+		writeRecord(dataRoot, `src/f${i}.ts`, {
+			filePath: `src/f${i}.ts`,
+			candidates: [{}, {}],
+			analysisHistory: [],
+		});
+};
+
+/** What one `deepsec process` chunk leaves: an analysed file costing $0.70. */
+const processOneFile = (dataRoot: string, n: number) =>
+	writeRecord(dataRoot, `src/f${n}.ts`, {
+		filePath: `src/f${n}.ts`,
+		candidates: [{}],
+		analysisHistory: [{ costUsd: 0.7 }],
+	});
+
+/** A fake deepsec CLI that records each call and writes what it would. */
+const fakeDeepsecRun =
+	(calls: string[][]) =>
+	(cmd: ReadonlyArray<string>, o?: { env?: Record<string, string> }) => {
+		calls.push([...cmd]);
+		const dataRoot = o?.env?.DEEPSEC_DATA_ROOT as string;
+		if (cmd[1] === "scan") scanTwelveFiles(dataRoot);
+		if (cmd[1] === "process") processOneFile(dataRoot, calls.length);
+		if (cmd[1] === "export")
+			writeFileSync(cmd[cmd.indexOf("--out") + 1] as string, exported);
+		return Effect.succeed({
+			code: cmd[1] === "process" ? 1 : 0,
+			stdout: "",
+			stderr: "",
+		});
+	};
+
 describe("parseDeepsecExport", () => {
 	const findings = parseDeepsecExport(exported);
 
@@ -242,42 +284,11 @@ describe("agent.deepsec auditor", () => {
 		const base = codebaseContext(fixtureProject(), {
 			settings: { "agent.deepsec": { maxCostUsd: 1, maxFiles: 12 } },
 		});
-		const record = (dataRoot: string, path: string, rec: object) => {
-			const p = join(dataRoot, "openaudit/files", `${path}.json`);
-			mkdirSync(dirname(p), { recursive: true });
-			writeFileSync(p, JSON.stringify(rec));
-		};
 		const ctx = {
 			...base,
 			exec: {
 				which: () => Effect.succeed("/bin/deepsec"),
-				run: (
-					cmd: ReadonlyArray<string>,
-					o?: { env?: Record<string, string> },
-				) => {
-					calls.push([...cmd]);
-					const dataRoot = o?.env?.DEEPSEC_DATA_ROOT as string;
-					if (cmd[1] === "scan")
-						for (let i = 0; i < 12; i++)
-							record(dataRoot, `src/f${i}.ts`, {
-								filePath: `src/f${i}.ts`,
-								candidates: [{}, {}],
-								analysisHistory: [],
-							});
-					if (cmd[1] === "process")
-						record(dataRoot, `src/f${calls.length}.ts`, {
-							filePath: `src/f${calls.length}.ts`,
-							candidates: [{}],
-							analysisHistory: [{ costUsd: 0.7 }],
-						});
-					if (cmd[1] === "export")
-						writeFileSync(cmd[cmd.indexOf("--out") + 1] as string, exported);
-					return Effect.succeed({
-						code: cmd[1] === "process" ? 1 : 0,
-						stdout: "",
-						stderr: "",
-					});
-				},
+				run: fakeDeepsecRun(calls),
 			},
 		};
 		const r = await outcome(makeDeepsecAuditor(withKey), ctx);
@@ -296,11 +307,7 @@ describe("agent.deepsec auditor", () => {
 describe("data dir helpers", () => {
 	test("candidateFiles and recordedCostUsd", () => {
 		const dir = fixtureProject();
-		const put = (p: string, rec: object) => {
-			const f = join(dir, "openaudit/files", `${p}.json`);
-			mkdirSync(dirname(f), { recursive: true });
-			writeFileSync(f, JSON.stringify(rec));
-		};
+		const put = (p: string, rec: object) => writeRecord(dir, p, rec);
 		put("a.ts", { filePath: "a.ts", candidates: [{}] });
 		put("b.ts", { filePath: "b.ts", candidates: [{}, {}] });
 		put("c,d.ts", { filePath: "c,d.ts", candidates: [{}, {}, {}] });

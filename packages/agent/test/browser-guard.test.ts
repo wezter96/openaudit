@@ -27,6 +27,9 @@ const loadChromium = async () => {
 	}
 };
 
+const html = (body: string) =>
+	new Response(body, { headers: { "content-type": "text/html" } });
+
 describe("browser origin guard", async () => {
 	const elsewhereHits: string[] = [];
 	let flips = 0;
@@ -40,38 +43,44 @@ describe("browser origin guard", async () => {
 			});
 		},
 	});
-	const target = Bun.serve({
-		port: 0,
-		fetch: (req) => {
-			const path = new URL(req.url).pathname;
-			if (path === "/hop.png" || path === "/nav")
-				return Response.redirect(`${elsewhere.url}leak${path}`, 302);
-			if (path === "/same") return Response.redirect("/page", 302);
-			// Stateful: first request redirects on-origin, later ones off-origin.
-			if (path === "/flip") {
+	const leak = (path: string) =>
+		Response.redirect(`${elsewhere.url}leak${path}`, 302);
+	const routes = new Map<string, () => Response>([
+		["/hop.png", () => leak("/hop.png")],
+		["/nav", () => leak("/nav")],
+		["/same", () => Response.redirect("/page", 302)],
+		// Stateful: first request redirects on-origin, later ones off-origin.
+		[
+			"/flip",
+			() => {
 				flips++;
 				return flips === 1
 					? Response.redirect("/flip-final", 302)
-					: Response.redirect(`${elsewhere.url}leak/flip`, 302);
-			}
-			if (path === "/flip-final") {
+					: leak("/flip");
+			},
+		],
+		[
+			"/flip-final",
+			() => {
 				finalHits++;
-				return finalHits === 1
-					? new Response("<h1>final</h1>", {
-							headers: { "content-type": "text/html" },
-						})
-					: Response.redirect(`${elsewhere.url}leak/final`, 302);
-			}
-			if (path === "/ws-page")
-				return new Response(
+				return finalHits === 1 ? html("<h1>final</h1>") : leak("/final");
+			},
+		],
+		[
+			"/ws-page",
+			() =>
+				html(
 					`<html><body><script>new WebSocket("${elsewhere.url.toString().replace("http", "ws")}sock")</script></body></html>`,
-					{ headers: { "content-type": "text/html" } },
-				);
-			return new Response(
-				`<html><body><h1>page</h1><img src="/hop.png"><img src="${elsewhere.url}direct.png"><script src="${elsewhere.url}x.js"></script></body></html>`,
-				{ headers: { "content-type": "text/html" } },
-			);
-		},
+				),
+		],
+	]);
+	const page = () =>
+		html(
+			`<html><body><h1>page</h1><img src="/hop.png"><img src="${elsewhere.url}direct.png"><script src="${elsewhere.url}x.js"></script></body></html>`,
+		);
+	const target = Bun.serve({
+		port: 0,
+		fetch: (req) => (routes.get(new URL(req.url).pathname) ?? page)(),
 	});
 	const browser = await loadChromium();
 	afterAll(async () => {

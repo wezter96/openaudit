@@ -20,6 +20,7 @@ import {
 } from "../src/mobile/dependencies";
 import { fixture, runAuditor } from "./helpers";
 import { encodeBplist, writeArchive, writeTree } from "./mobile-plist-encoder";
+import { findingsOf, findingWith, firstResult, must } from "./must";
 
 // OSV responses recorded from api.osv.dev (querybatch and /vulns/<id>) for
 // gson 2.8.0, okhttp 3.8.0 and androidx.core 1.12.0. The APK around them is
@@ -218,13 +219,13 @@ describe("mobile.dependencies", () => {
 		const apk = await writeArchive("app.apk", apkEntries);
 		const calls: Array<{ url: string; init?: HttpRequest }> = [];
 		const report = await runWithOsv(apk, calls);
-		expect(report.results[0]?.status).toBe("failed");
+		expect(firstResult(report).status).toBe("failed");
 		expect(mobileDependencies.network).toBe(true);
 		expect(
 			calls.filter((c) => c.url === "https://api.osv.dev/v1/querybatch"),
 		).toHaveLength(1);
 
-		const findings = report.results[0]?.findings ?? [];
+		const findings = findingsOf(report);
 		const vulns = findings.filter(
 			(f) => f.ruleId === "mobile.dependencies/vulnerable-dependency",
 		);
@@ -232,29 +233,34 @@ describe("mobile.dependencies", () => {
 			"com.google.code.gson:gson@2.8.0 GHSA-4jrv-ppp4-jm57",
 			"com.squareup.okhttp3:okhttp@3.8.0 GHSA-3cqm-mf7h-prrj",
 		]);
-		const gson = vulns.find((f) => f.evidence?.includes("gson"));
-		expect(gson?.severity).toBe("high");
-		expect(gson?.category).toBe("supply-chain");
-		expect(gson?.tags).toContain("cve-2022-25647");
-		expect(gson?.tags).toContain("ghsa-4jrv-ppp4-jm57");
-		expect(gson?.tags).toContain("cwe-502");
-		expect(gson?.remediation).toContain("2.8.9");
-		expect(gson?.location?.file).toContain(
+		const vulnFor = (library: string) =>
+			must(
+				vulns.find((f) => f.evidence?.includes(library)),
+				`a ${library} advisory`,
+			);
+		const gson = vulnFor("gson");
+		expect(gson.severity).toBe("high");
+		expect(gson.category).toBe("supply-chain");
+		expect(gson.tags).toContain("cve-2022-25647");
+		expect(gson.tags).toContain("ghsa-4jrv-ppp4-jm57");
+		expect(gson.tags).toContain("cwe-502");
+		expect(gson.remediation).toContain("2.8.9");
+		expect(must(gson.location, "its location").file).toContain(
 			"!/META-INF/maven/com.google.code.gson/gson/pom.properties",
 		);
-		const okhttp = vulns.find((f) => f.evidence?.includes("okhttp"));
-		expect(okhttp?.severity).toBe("high"); // CVSS 7.5
+		expect(vulnFor("okhttp").severity).toBe("high"); // CVSS 7.5
 
-		const inventory = findings.find(
-			(f) => f.ruleId === "mobile.dependencies/sdk-inventory",
+		const inventory = findingWith(
+			findings,
+			"mobile.dependencies/sdk-inventory",
 		);
-		expect(inventory?.severity).toBe("info");
-		expect(inventory?.tags).toContain("sbom");
-		expect(inventory?.evidence).toContain("androidx.core:core@1.12.0");
-		expect(inventory?.evidence).toContain(
+		expect(inventory.severity).toBe("info");
+		expect(inventory.tags).toContain("sbom");
+		expect(inventory.evidence).toContain("androidx.core:core@1.12.0");
+		expect(inventory.evidence).toContain(
 			"com.google.firebase:firebase-common@20.3.2",
 		);
-		expect(inventory?.title).toBe("4 bundled libraries identified");
+		expect(inventory.title).toBe("4 bundled libraries identified");
 	});
 
 	test("is skipped offline by the engine", async () => {

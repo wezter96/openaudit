@@ -12,6 +12,7 @@ import {
 } from "../src/mobile/performance";
 import { ruleIds, runAuditor } from "./helpers";
 import { encodeBplist, writeTree } from "./mobile-plist-encoder";
+import { findingWith, firstResult } from "./must";
 
 const MiB = 1024 * 1024;
 
@@ -136,6 +137,13 @@ const stored = (data: Uint8Array): [Uint8Array, { level: 0 }] => [
 const findings = (report: Awaited<ReturnType<typeof runAuditor>>) =>
 	report.results.flatMap((r) => r.findings);
 
+/** A performance finding about the APK, with a remediation. */
+const expectApkPerformance = (f: ReturnType<typeof findings>[number]) => {
+	expect(f.category).toBe("performance");
+	expect(f.remediation).toBeTruthy();
+	expect(f.location?.file).toContain("app.apk");
+};
+
 describe("size thresholds", () => {
 	test("APK: > 100 MB high, > 50 MB medium", () => {
 		expect(sizeFinding("a.apk", "apk", 101 * MiB)?.severity).toBe("high");
@@ -200,7 +208,7 @@ describe("mobile.performance", () => {
 			"resources.arsc": stored(new Uint8Array(2 * MiB)),
 		});
 		const report = await runAuditor(mobilePerformance, apk);
-		expect(report.results[0]?.status).toBe("failed");
+		expect(firstResult(report).status).toBe("failed");
 		expect(ruleIds(report)).toEqual([
 			"mobile.performance/dex-not-minified",
 			"mobile.performance/large-assets",
@@ -209,26 +217,21 @@ describe("mobile.performance", () => {
 			"mobile.performance/unstripped-native-libs",
 		]);
 		const all = findings(report);
-		const by = (id: string) =>
-			all.find((f) => f.ruleId === `mobile.performance/${id}`);
-		expect(by("dex-not-minified")?.confidence).toBe("low");
-		expect(by("dex-not-minified")?.evidence).toContain("Lcom/example/app/ui/");
-		expect(by("multi-abi-native-libs")?.severity).toBe("low");
-		expect(by("multi-abi-native-libs")?.message).toContain("3 ABIs");
-		expect(by("unstripped-native-libs")?.severity).toBe("medium");
-		expect(by("unstripped-native-libs")?.evidence).toContain(
+		const by = (id: string) => findingWith(all, `mobile.performance/${id}`);
+		expect(by("dex-not-minified").confidence).toBe("low");
+		expect(by("dex-not-minified").evidence).toContain("Lcom/example/app/ui/");
+		expect(by("multi-abi-native-libs").severity).toBe("low");
+		expect(by("multi-abi-native-libs").message).toContain("3 ABIs");
+		expect(by("unstripped-native-libs").severity).toBe("medium");
+		expect(by("unstripped-native-libs").evidence).toContain(
 			"lib/arm64-v8a/libnative.so",
 		);
-		expect(by("unstripped-native-libs")?.evidence).not.toContain("libclean");
-		expect(by("large-assets")?.evidence).toContain("assets/model.bin: 6.0 MB");
-		expect(by("large-assets")?.evidence).not.toContain("resources.arsc");
-		expect(by("uncompressed-assets")?.evidence).toContain("assets/data.json");
-		expect(by("uncompressed-assets")?.evidence).not.toContain("small.json");
-		for (const f of all) {
-			expect(f.category).toBe("performance");
-			expect(f.remediation).toBeTruthy();
-			expect(f.location?.file).toContain("app.apk");
-		}
+		expect(by("unstripped-native-libs").evidence).not.toContain("libclean");
+		expect(by("large-assets").evidence).toContain("assets/model.bin: 6.0 MB");
+		expect(by("large-assets").evidence).not.toContain("resources.arsc");
+		expect(by("uncompressed-assets").evidence).toContain("assets/data.json");
+		expect(by("uncompressed-assets").evidence).not.toContain("small.json");
+		for (const f of all) expectApkPerformance(f);
 	});
 
 	test("passes a lean, minified APK", async () => {

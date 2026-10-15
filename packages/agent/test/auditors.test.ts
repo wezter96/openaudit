@@ -25,6 +25,7 @@ import {
 	result,
 	urlContext,
 } from "./helpers";
+import { must } from "./must";
 
 const playbook = (id: string): Playbook => {
 	const p = getPlaybook(id);
@@ -67,72 +68,109 @@ const findingsOf = (out: Awaited<ReturnType<typeof run>>) => {
 	return out.findings;
 };
 
+interface Reply {
+	readonly isError?: boolean;
+	readonly text?: string;
+}
+
+/** Reports `args` through the report_finding tool and returns its reply. */
+const reportVia = async (
+	input: ClaudeRunInput,
+	args: Record<string, unknown>,
+): Promise<Reply> => {
+	const r = await input.tools.report_finding?.(args);
+	return { isError: r?.isError, text: r?.content[0]?.text };
+};
+
+/** A runner that reports each of `reports`, collecting replies, then finishes. */
+const reportingRunner = (
+	reports: ReadonlyArray<Record<string, unknown>>,
+	replies: Reply[],
+	onInput: (input: ClaudeRunInput) => void,
+): ClaudeRunner =>
+	async function* (input) {
+		onInput(input);
+		yield assistant();
+		for (const args of reports) replies.push(await reportVia(input, args));
+		await input.tools.finish?.({
+			summary: "Reviewed routes",
+			coverage: "all",
+		});
+		yield result();
+	};
+
+/** The fixture finding, then a missing file, a bad severity and an absolute path. */
+const reportedFindings = (root: string) => [
+	finding,
+	{ ...finding, location: { file: "src/missing.ts" } },
+	{ ...finding, severity: "catastrophic" },
+	{ ...finding, location: { file: join(root, "src/app.ts"), line: 1 } },
+];
+
+type Findings = ReturnType<typeof findingsOf>;
+
+/** Only valid reports were kept, redacted, tagged and with relative paths. */
+const expectCollectedFindings = (findings: Findings) => {
+	expect(findings).toHaveLength(2);
+	const first = must(findings[0], "the first finding");
+	expect(first.ruleId).toBe("agent.authz/idor-order-read");
+	expect(must(first.location, "its location").file).toBe("src/app.ts");
+	expect(first.evidence).not.toContain("sk_live_abcdefghijklmnop");
+	expect(first.tags).toContain("agentic");
+	// Absolute paths inside the root are normalised to relative ones.
+	const second = must(findings[1], "the second finding");
+	expect(must(second.location, "its location").file).toBe("src/app.ts");
+};
+
+/** The session can only read the project, with our tools and prompt. */
+const expectReadOnlySession = (seen: ClaudeRunInput, root: string) => {
+	const { options } = seen;
+	expect(options.model).toBe("claude-test");
+	expect(options.cwd).toBe(root);
+	expect(options.tools).toEqual(["Read", "Grep", "Glob"]);
+	expect(options.disallowedTools).toEqual(
+		expect.arrayContaining(["Write", "Edit", "Bash", "WebFetch", "WebSearch"]),
+	);
+	expect(options.maxTurns).toBe(40);
+	expect(options.settingSources).toEqual([]);
+	expect(options.hooks?.PreToolUse).toHaveLength(1);
+	expect(Object.keys(options.mcpServers ?? {})).toEqual(["openaudit"]);
+	expect(options.systemPrompt).toContain("Authentication & authorization");
+	expect(options.systemPrompt).toContain("## Checklist");
+	expect(options.systemPrompt).toContain(root);
+	expect(seen.tools.http_get).toBeUndefined();
+};
+
+/** The text of an http_get tool reply for `url`, or "". */
+const httpGetText = async (input: ClaudeRunInput, url: string) =>
+	(await input.tools.http_get?.({ url }))?.content[0]?.text ?? "";
+
 describe("agentic auditor (codebase)", () => {
 	test("configures a read-only session and collects reported findings", async () => {
 		const root = fixtureProject();
 		let seen: ClaudeRunInput | undefined;
-		const replies: Array<{ isError?: boolean; text?: string }> = [];
-		const runner: ClaudeRunner = async function* (input) {
+		const replies: Reply[] = [];
+		const runner = reportingRunner(reportedFindings(root), replies, (input) => {
 			seen = input;
-			yield assistant();
-			for (const args of [
-				finding,
-				{ ...finding, location: { file: "src/missing.ts" } },
-				{ ...finding, severity: "catastrophic" },
-				{ ...finding, location: { file: join(root, "src/app.ts"), line: 1 } },
-			]) {
-				const r = await input.tools.report_finding?.(args);
-				replies.push({ isError: r?.isError, text: r?.content[0]?.text });
-			}
-			await input.tools.finish?.({
-				summary: "Reviewed routes",
-				coverage: "all",
-			});
-			yield result();
-		};
+		});
 		const auditor = makeAgenticAuditor(playbook("agent.authz"), { runner });
 		const out = await run(
 			auditor,
 			codebaseContext(root, { model: "claude-test" }),
 		);
 
-		const findings = findingsOf(out);
-		expect(findings).toHaveLength(2);
-		expect(findings[0]?.ruleId).toBe("agent.authz/idor-order-read");
-		expect(findings[0]?.location?.file).toBe("src/app.ts");
-		expect(findings[0]?.evidence).not.toContain("sk_live_abcdefghijklmnop");
-		expect(findings[0]?.tags).toContain("agentic");
-		// Absolute paths inside the root are normalised to relative ones.
-		expect(findings[1]?.location?.file).toBe("src/app.ts");
+		expectCollectedFindings(findingsOf(out));
 		expect(replies.map((r) => r.isError ?? false)).toEqual([
 			false,
 			true,
 			true,
 			false,
 		]);
-		expect(replies[1]?.text).toContain("does not exist");
-
-		const options = seen?.options;
-		expect(options?.model).toBe("claude-test");
-		expect(options?.cwd).toBe(root);
-		expect(options?.tools).toEqual(["Read", "Grep", "Glob"]);
-		expect(options?.disallowedTools).toEqual(
-			expect.arrayContaining([
-				"Write",
-				"Edit",
-				"Bash",
-				"WebFetch",
-				"WebSearch",
-			]),
+		expect(must(replies[1], "the second reply").text).toContain(
+			"does not exist",
 		);
-		expect(options?.maxTurns).toBe(40);
-		expect(options?.settingSources).toEqual([]);
-		expect(options?.hooks?.PreToolUse).toHaveLength(1);
-		expect(Object.keys(options?.mcpServers ?? {})).toEqual(["openaudit"]);
-		expect(options?.systemPrompt).toContain("Authentication & authorization");
-		expect(options?.systemPrompt).toContain("## Checklist");
-		expect(options?.systemPrompt).toContain(root);
-		expect(seen?.tools.http_get).toBeUndefined();
+
+		expectReadOnlySession(must(seen, "the runner input"), root);
 	});
 
 	test("per-auditor settings override defaults", async () => {
@@ -278,7 +316,7 @@ describe("agentic auditor (web)", () => {
 			input = i;
 			yield assistant();
 			for (const url of ["/login", "https://evil.example.net/"])
-				texts.push((await i.tools.http_get?.({ url }))?.content[0]?.text ?? "");
+				texts.push(await httpGetText(i, url));
 			yield result();
 		};
 		const out = await run(
@@ -289,10 +327,11 @@ describe("agentic auditor (web)", () => {
 		expect(findings.map((f) => f.ruleId)).toEqual([
 			"agent.a11y-journeys/reduced-coverage",
 		]);
-		expect(input?.options.tools).toEqual([]);
-		expect(input?.options.disallowedTools).toContain("WebFetch");
-		expect(input?.options.cwd).toBeUndefined();
-		expect(Object.keys(input?.options.mcpServers ?? {})).toEqual(["openaudit"]);
+		const { options } = must(input, "the runner input");
+		expect(options.tools).toEqual([]);
+		expect(options.disallowedTools).toContain("WebFetch");
+		expect(options.cwd).toBeUndefined();
+		expect(Object.keys(options.mcpServers ?? {})).toEqual(["openaudit"]);
 		expect(ctx.requests).toEqual(["https://app.example.com/login"]);
 		expect(texts[0]).toContain("set-cookie: sid=<redacted>; Path=/; HttpOnly");
 		expect(texts[0]).not.toContain("supersecretvalue");

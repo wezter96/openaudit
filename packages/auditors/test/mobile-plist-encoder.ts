@@ -3,74 +3,86 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { zipSync } from "fflate";
 
+const header = (type: number, len: number): number[] =>
+	len < 15
+		? [(type << 4) | len]
+		: [(type << 4) | 0xf, 0x11, (len >> 8) & 0xff, len & 0xff];
+
+const float64 = (marker: number, n: number) => {
+	const b = new Uint8Array(9);
+	b[0] = marker;
+	new DataView(b.buffer).setFloat64(1, n);
+	return [...b];
+};
+
+const int64 = (v: number) => {
+	const b = new Uint8Array(9);
+	b[0] = 0x13;
+	new DataView(b.buffer).setBigInt64(1, BigInt(v));
+	return [...b];
+};
+
+const encodeInteger = (v: number): number[] => {
+	if (v < 0 || v >= 2 ** 32) return int64(v);
+	if (v < 0x100) return [0x10, v];
+	if (v < 0x10000) return [0x11, v >> 8, v & 0xff];
+	return [0x12, (v >>> 24) & 0xff, (v >> 16) & 0xff, (v >> 8) & 0xff, v & 0xff];
+};
+
+const encodeNumber = (v: number): number[] =>
+	Number.isInteger(v) ? encodeInteger(v) : float64(0x23, v);
+
+const encodeText = (v: string): number[] => {
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: ASCII range check
+	if (/^[\x00-\x7f]*$/.test(v))
+		return [...header(0x5, v.length), ...[...v].map((c) => c.charCodeAt(0))];
+	const out = header(0x6, v.length);
+	for (let i = 0; i < v.length; i++) {
+		const c = v.charCodeAt(i);
+		out.push(c >> 8, c & 0xff);
+	}
+	return out;
+};
+
+/** Adds an object to the plist and returns its reference. */
+type AddObject = (v: unknown) => number;
+
+const encodeDict = (v: Record<string, unknown>, add: AddObject): number[] => {
+	const entries = Object.entries(v);
+	const keys = entries.map(([k]) => add(k));
+	const values = entries.map(([, val]) => add(val));
+	return [...header(0xd, entries.length), ...keys, ...values];
+};
+
+/** Dates, data, arrays and dictionaries. */
+const encodeObject = (v: object, add: AddObject): number[] => {
+	if (v instanceof Date)
+		return float64(0x33, (v.getTime() - Date.UTC(2001, 0, 1)) / 1000);
+	if (v instanceof Uint8Array) return [...header(0x4, v.length), ...v];
+	if (Array.isArray(v)) {
+		const refs = v.map(add);
+		return [...header(0xa, refs.length), ...refs];
+	}
+	return encodeDict(v as Record<string, unknown>, add);
+};
+
+const encodeValue = (v: unknown, add: AddObject): number[] => {
+	if (v === null || v === undefined) return [0x00];
+	if (v === false) return [0x08];
+	if (v === true) return [0x09];
+	if (typeof v === "number") return encodeNumber(v);
+	if (typeof v === "string") return encodeText(v);
+	return encodeObject(v as object, add);
+};
+
 /** Tiny bplist00 encoder for tests (≤ 255 objects, 1-byte refs, 2-byte offsets). */
 export const encodeBplist = (root: unknown): Uint8Array => {
 	const objects: Uint8Array[] = [];
 
-	const header = (type: number, len: number): number[] =>
-		len < 15
-			? [(type << 4) | len]
-			: [(type << 4) | 0xf, 0x11, (len >> 8) & 0xff, len & 0xff];
-
-	const float64 = (marker: number, n: number) => {
-		const b = new Uint8Array(9);
-		b[0] = marker;
-		new DataView(b.buffer).setFloat64(1, n);
-		return [...b];
-	};
-
-	const encode = (v: unknown): number[] => {
-		if (v === null || v === undefined) return [0x00];
-		if (v === false) return [0x08];
-		if (v === true) return [0x09];
-		if (typeof v === "number") {
-			if (!Number.isInteger(v)) return float64(0x23, v);
-			if (v >= 0 && v < 0x100) return [0x10, v];
-			if (v >= 0 && v < 0x10000) return [0x11, v >> 8, v & 0xff];
-			if (v >= 0 && v < 2 ** 32)
-				return [
-					0x12,
-					(v >>> 24) & 0xff,
-					(v >> 16) & 0xff,
-					(v >> 8) & 0xff,
-					v & 0xff,
-				];
-			const b = new Uint8Array(9);
-			b[0] = 0x13;
-			new DataView(b.buffer).setBigInt64(1, BigInt(v));
-			return [...b];
-		}
-		if (v instanceof Date)
-			return float64(0x33, (v.getTime() - Date.UTC(2001, 0, 1)) / 1000);
-		if (v instanceof Uint8Array) return [...header(0x4, v.length), ...v];
-		if (typeof v === "string") {
-			// biome-ignore lint/suspicious/noControlCharactersInRegex: ASCII range check
-			if (/^[\x00-\x7f]*$/.test(v))
-				return [
-					...header(0x5, v.length),
-					...[...v].map((c) => c.charCodeAt(0)),
-				];
-			const out = header(0x6, v.length);
-			for (let i = 0; i < v.length; i++) {
-				const c = v.charCodeAt(i);
-				out.push(c >> 8, c & 0xff);
-			}
-			return out;
-		}
-		if (Array.isArray(v)) {
-			const refs = v.map(add);
-			return [...header(0xa, refs.length), ...refs];
-		}
-		const entries = Object.entries(v as Record<string, unknown>);
-		const keys = entries.map(([k]) => add(k));
-		const values = entries.map(([, val]) => add(val));
-		return [...header(0xd, entries.length), ...keys, ...values];
-	};
-
 	function add(v: unknown): number {
 		const ref = objects.length;
 		objects.push(new Uint8Array());
-		objects[ref] = Uint8Array.from(encode(v));
+		objects[ref] = Uint8Array.from(encodeValue(v, add));
 		if (objects.length > 255)
 			throw new Error("too many objects for test encoder");
 		return ref;

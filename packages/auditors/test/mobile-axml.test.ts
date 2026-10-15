@@ -7,6 +7,7 @@ import {
 	parseXmlText,
 } from "../src/mobile/axml";
 import { type El, encodeAxml, encodeProtoXml } from "./mobile-encoders";
+import { must } from "./must";
 
 const manifest: El = {
 	name: "manifest",
@@ -23,36 +24,49 @@ const manifest: El = {
 	],
 };
 
+type XmlNode = NonNullable<ReturnType<typeof decodeAxml>>;
+
+/** The node at `path` (child indexes) below `root`, failing the test if absent. */
+const nodeAt = (root: XmlNode | undefined, ...path: number[]): XmlNode =>
+	path.reduce(
+		(node, i) => must(node.children[i], `child ${i} of <${node.name}>`),
+		must(root, "a root element"),
+	);
+
+/** The manifest round-trips through AXML with either string pool encoding. */
+const expectDecodedManifest = (utf8: boolean) => {
+	const root = nodeAt(decodeAxml(encodeAxml(manifest, { utf8 })));
+	expect(root.name).toBe("manifest");
+	expect(root.attrs.package).toBe("com.example.app");
+	expect(nodeAt(root, 0).attrs).toEqual({
+		minSdkVersion: "21",
+		targetSdkVersion: "33",
+	});
+	const app = nodeAt(root, 1);
+	expect(app.attrs).toEqual({
+		debuggable: "true",
+		allowBackup: "false",
+		label: "Ünïcode ✓",
+	});
+	expect(nodeAt(app, 0).attrs).toEqual({
+		name: ".Main",
+		exported: "true",
+	});
+	expect(app.line).toBe(3);
+};
+
 describe("mobile axml", () => {
 	for (const utf8 of [false, true]) {
-		test(`decodes AXML with a ${utf8 ? "UTF-8" : "UTF-16"} string pool`, () => {
-			const root = decodeAxml(encodeAxml(manifest, { utf8 }));
-			expect(root?.name).toBe("manifest");
-			expect(root?.attrs.package).toBe("com.example.app");
-			const [usesSdk, app] = root?.children ?? [];
-			expect(usesSdk?.attrs).toEqual({
-				minSdkVersion: "21",
-				targetSdkVersion: "33",
-			});
-			expect(app?.attrs).toEqual({
-				debuggable: "true",
-				allowBackup: "false",
-				label: "Ünïcode ✓",
-			});
-			expect(app?.children[0]?.attrs).toEqual({
-				name: ".Main",
-				exported: "true",
-			});
-			expect(app?.line).toBe(3);
-		});
+		test(`decodes AXML with a ${utf8 ? "UTF-8" : "UTF-16"} string pool`, () =>
+			expectDecodedManifest(utf8));
 	}
 
 	test("falls back to the resource map for stripped attribute names", () => {
 		const root = decodeAxml(encodeAxml(manifest, { stripAttrNames: true }));
-		const app = root?.children[1];
-		expect(app?.attrs.debuggable).toBe("true");
-		expect(app?.children[0]?.attrs.exported).toBe("true");
-		expect(root?.children[0]?.attrs.targetSdkVersion).toBe("33");
+		const app = nodeAt(root, 1);
+		expect(app.attrs.debuggable).toBe("true");
+		expect(nodeAt(app, 0).attrs.exported).toBe("true");
+		expect(nodeAt(root, 0).attrs.targetSdkVersion).toBe("33");
 	});
 
 	test("decodes element text (CDATA chunks)", () => {
@@ -67,7 +81,7 @@ describe("mobile axml", () => {
 				],
 			}),
 		);
-		expect(root?.children[0]?.children[0]?.text).toBe("example.com");
+		expect(nodeAt(root, 0, 0).text).toBe("example.com");
 	});
 
 	test("rejects malformed input without throwing", () => {
@@ -89,12 +103,12 @@ describe("mobile axml", () => {
 				],
 			}),
 		);
-		expect(root?.name).toBe("manifest");
-		expect(root?.children[0]?.attrs.minSdkVersion).toBe("21");
-		expect(root?.children[1]?.attrs.debuggable).toBe("true");
-		expect(root?.children[1]?.attrs.allowBackup).toBe("false");
-		expect(root?.children[1]?.children[0]?.attrs.name).toBe(".Main");
-		expect(root?.children[2]?.text).toBe("example.org");
+		expect(nodeAt(root).name).toBe("manifest");
+		expect(nodeAt(root, 0).attrs.minSdkVersion).toBe("21");
+		expect(nodeAt(root, 1).attrs.debuggable).toBe("true");
+		expect(nodeAt(root, 1).attrs.allowBackup).toBe("false");
+		expect(nodeAt(root, 1, 0).attrs.name).toBe(".Main");
+		expect(nodeAt(root, 2).text).toBe("example.org");
 		expect(decodeProtoXml(new Uint8Array([0x0a, 0xff]))).toBe(undefined);
 	});
 
@@ -109,22 +123,22 @@ describe("mobile axml", () => {
 				"</manifest>",
 			].join("\n"),
 		);
-		const app = root?.children[0];
-		expect(app?.attrs).toEqual({
+		const app = nodeAt(root, 0);
+		expect(app.attrs).toEqual({
 			allowBackup: "true",
 			"tools:replace": "label",
 		});
-		expect(app?.line).toBe(3);
-		expect(app?.children[0]?.line).toBe(4);
-		expect(app?.children[0]?.attrs.exported).toBe("true");
+		expect(app.line).toBe(3);
+		expect(nodeAt(app, 0).line).toBe(4);
+		expect(nodeAt(app, 0).attrs.exported).toBe("true");
 	});
 
 	test("parseAndroidXml detects the encoding", () => {
-		expect(parseAndroidXml(encodeAxml(manifest))?.name).toBe("manifest");
-		expect(parseAndroidXml(encodeProtoXml(manifest))?.name).toBe("manifest");
-		expect(
-			parseAndroidXml(new TextEncoder().encode("  <manifest package='x'/>"))
-				?.attrs.package,
-		).toBe("x");
+		expect(nodeAt(parseAndroidXml(encodeAxml(manifest))).name).toBe("manifest");
+		expect(nodeAt(parseAndroidXml(encodeProtoXml(manifest))).name).toBe(
+			"manifest",
+		);
+		const text = new TextEncoder().encode("  <manifest package='x'/>");
+		expect(nodeAt(parseAndroidXml(text)).attrs.package).toBe("x");
 	});
 });
