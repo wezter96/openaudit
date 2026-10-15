@@ -1,4 +1,4 @@
-import type { Grade, Report, Severity } from "../model";
+import type { AuditorResult, Finding, Grade, Report, Severity } from "../model";
 import {
 	formatDuration,
 	formatLocation,
@@ -68,24 +68,38 @@ export const colorEnabled = (): boolean => {
 	return !env?.NO_COLOR;
 };
 
+type Paint = (style: Style, text: string) => string;
+
+const painter =
+	(color: boolean): Paint =>
+	(style, text) =>
+		color ? `${CODES[style]}${text}${CODES.reset}` : text;
+
+// Every string from the report may come from a hostile repo or site.
+const t = (value: unknown) => sanitizeText(value);
+const block = (value: unknown) =>
+	sanitizeText(value, { multiline: true }).replace(/\n/g, "\n     ");
+
 export const toTerminal = (
 	report: Report,
 	options: TerminalOptions = {},
 ): string => {
-	const color = options.color ?? colorEnabled();
-	const paint = (style: Style, text: string) =>
-		color ? `${CODES[style]}${text}${CODES.reset}` : text;
-	// Every string from the report may come from a hostile repo or site.
-	const t = (value: unknown) => sanitizeText(value);
-	const block = (value: unknown) =>
-		sanitizeText(value, { multiline: true }).replace(/\n/g, "\n     ");
-	const { summary } = report;
-	const out: string[] = [];
+	const paint = painter(options.color ?? colorEnabled());
+	const out = [
+		...headerLines(report, paint),
+		...findingsLines(report, options, paint),
+		...problemLines(report, options, paint),
+		...suppressedLines(options.suppressed ?? [], paint),
+		"",
+		footerLine(report, paint),
+	];
+	return `${out.join("\n")}\n`;
+};
 
-	out.push(
+const headerLines = (report: Report, paint: Paint): string[] => {
+	const { summary } = report;
+	const lines = [
 		`${paint("bold", "openaudit")} ${paint("dim", t(report.tool.version))}  ${t(targetLabel(report))} ${paint("dim", `(${t(report.target.kinds.join(", "))})`)}`,
-	);
-	out.push(
 		`${paint("bold", "Score")} ${paint(GRADE_STYLE[summary.grade], `${summary.score}/100 ${summary.grade}`)}   ` +
 			(["critical", "high", "medium", "low", "info"] as const)
 				.map((s) =>
@@ -94,9 +108,9 @@ export const toTerminal = (
 						: paint("dim", `0 ${s}`),
 				)
 				.join(paint("dim", " · ")),
-	);
+	];
 	if (summary.categories.length) {
-		out.push(
+		lines.push(
 			summary.categories
 				.map(
 					(c) =>
@@ -105,70 +119,97 @@ export const toTerminal = (
 				.join(paint("dim", "  ")),
 		);
 	}
+	return lines;
+};
 
+const findingsLines = (
+	report: Report,
+	options: TerminalOptions,
+	paint: Paint,
+): string[] => {
 	const findings = sortedFindings(report);
 	const listed = options.verbose
 		? findings
 		: findings.filter((f) => f.severity !== "info").slice(0, options.top ?? 10);
-
-	if (listed.length) {
-		out.push("");
-		for (const f of listed) {
-			const loc = t(formatLocation(f.location));
-			out.push(
-				`${paint(SEVERITY_STYLE[f.severity], SEVERITY_TAG[f.severity])} ${paint("bold", t(f.title))} ${paint("dim", t(f.ruleId))}`,
-			);
-			if (loc) out.push(`     ${paint("cyan", loc)}`);
-			if (options.verbose) {
-				out.push(`     ${block(f.message)}`);
-				if (f.evidence) out.push(`     ${paint("dim", block(f.evidence))}`);
-				if (f.remediation)
-					out.push(`     ${paint("green", "fix:")} ${block(f.remediation)}`);
-				if (f.alsoReportedBy?.length)
-					out.push(
-						`     ${paint("dim", `also reported by ${t(f.alsoReportedBy.join(", "))}`)}`,
-					);
-				out.push(`     ${paint("dim", `fingerprint ${t(f.fingerprint)}`)}`);
-			}
-		}
-		const hidden = findings.length - listed.length;
-		if (hidden > 0) {
-			out.push(
-				paint(
-					"dim",
-					`… ${plural(hidden, "more finding")} (use --verbose, or --format html/markdown/json)`,
-				),
-			);
-		}
-	} else if (!findings.length) {
-		out.push("", paint("green", "No findings."));
-	}
-
-	const problems = report.results.filter(
-		(r) => r.status === "error" || (options.verbose && r.status === "skipped"),
-	);
-	if (problems.length) {
-		out.push("");
-		for (const r of problems) {
-			out.push(
-				`${paint(r.status === "error" ? "red" : "gray", r.status === "error" ? "error" : "skip ")} ${t(r.auditor)}${r.message ? paint("dim", `: ${t(r.message)}`) : ""}`,
-			);
-		}
-	}
-
-	for (const s of options.suppressed ?? []) {
-		if (!hasSuppressionNotice(s)) continue;
-		out.push("", paint("yellow", t(suppressionLine(s))));
-		for (const d of suppressionDetails(s)) out.push(paint("dim", `  ${t(d)}`));
-	}
-
-	const a = summary.auditors;
-	out.push(
+	if (!listed.length)
+		return findings.length ? [] : ["", paint("green", "No findings.")];
+	const hidden = findings.length - listed.length;
+	return [
 		"",
-		paint(
-			"dim",
-			`${plural(report.results.length, "auditor")}: ${a.passed} passed, ${a.failed} failed, ${a.skipped} skipped, ${a.error} errored in ${formatDuration(report.durationMs)}`,
-		),
+		...listed.flatMap((f) => findingEntry(f, options, paint)),
+		...(hidden > 0
+			? [
+					paint(
+						"dim",
+						`… ${plural(hidden, "more finding")} (use --verbose, or --format html/markdown/json)`,
+					),
+				]
+			: []),
+	];
+};
+
+const findingEntry = (
+	f: Finding,
+	options: TerminalOptions,
+	paint: Paint,
+): string[] => {
+	const loc = t(formatLocation(f.location));
+	return [
+		`${paint(SEVERITY_STYLE[f.severity], SEVERITY_TAG[f.severity])} ${paint("bold", t(f.title))} ${paint("dim", t(f.ruleId))}`,
+		...(loc ? [`     ${paint("cyan", loc)}`] : []),
+		...(options.verbose ? findingDetail(f, paint) : []),
+	];
+};
+
+const findingDetail = (f: Finding, paint: Paint): string[] => {
+	const lines = [`     ${block(f.message)}`];
+	if (f.evidence) lines.push(`     ${paint("dim", block(f.evidence))}`);
+	if (f.remediation)
+		lines.push(`     ${paint("green", "fix:")} ${block(f.remediation)}`);
+	if (f.alsoReportedBy?.length)
+		lines.push(
+			`     ${paint("dim", `also reported by ${t(f.alsoReportedBy.join(", "))}`)}`,
+		);
+	lines.push(`     ${paint("dim", `fingerprint ${t(f.fingerprint)}`)}`);
+	return lines;
+};
+
+/** Errored auditors, plus skipped ones when verbose. */
+const isProblem = (r: AuditorResult, options: TerminalOptions): boolean =>
+	r.status === "error" || (r.status === "skipped" && options.verbose === true);
+
+const problemLines = (
+	report: Report,
+	options: TerminalOptions,
+	paint: Paint,
+): string[] => {
+	const problems = report.results.filter((r) => isProblem(r, options));
+	if (!problems.length) return [];
+	return [
+		"",
+		...problems.map((r) => {
+			const error = r.status === "error";
+			return `${paint(error ? "red" : "gray", error ? "error" : "skip ")} ${t(r.auditor)}${r.message ? paint("dim", `: ${t(r.message)}`) : ""}`;
+		}),
+	];
+};
+
+const suppressedLines = (
+	suppressed: ReadonlyArray<SuppressionSummary>,
+	paint: Paint,
+): string[] =>
+	suppressed
+		.filter(hasSuppressionNotice)
+		.flatMap((s) => [
+			"",
+			paint("yellow", t(suppressionLine(s))),
+			...suppressionDetails(s).map((d) => paint("dim", `  ${t(d)}`)),
+		]);
+
+const footerLine = (report: Report, paint: Paint): string => {
+	const a = report.summary.auditors;
+	return paint(
+		"dim",
+		`${plural(report.results.length, "auditor")}: ${a.passed} passed, ${a.failed} failed, ${a.skipped} skipped, ${a.error} errored in ${formatDuration(report.durationMs)}`,
 	);
-	return `${out.join("\n")}\n`;
 };
