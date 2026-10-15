@@ -126,7 +126,7 @@ export const dial = (
 		})
 		.join("");
 	return `<div class="dial" data-dial role="img" aria-label="${e(label)}">
-<svg viewBox="0 0 240 240" aria-hidden="true" focusable="false">
+<svg viewBox="0 0 240 240" aria-hidden="true">
 <g class="seg-labels">${labels}</g>
 <circle class="dial-plate" cx="${c}" cy="${c}" r="97"/>
 <g class="segs">${segs}</g>
@@ -142,7 +142,7 @@ ${capAt(c, 80, clamp(score), grade)}
 /** A small single-ring dial for category panels. */
 export const miniDial = (score: Score, grade: Grade, label: string) =>
 	`<div class="dial" data-dial role="img" aria-label="${e(label)}">
-<svg viewBox="0 0 120 120" aria-hidden="true" focusable="false">
+<svg viewBox="0 0 120 120" aria-hidden="true">
 <circle class="ring-track" cx="60" cy="60" r="50"/>
 <circle class="ring a-${grade}" cx="60" cy="60" r="50" pathLength="100" stroke-dasharray="${clamp(score)} 100" transform="rotate(-90 60 60)" data-v="${clamp(score)}"/>
 </svg>
@@ -151,7 +151,7 @@ export const miniDial = (score: Score, grade: Grade, label: string) =>
 
 /** The tiny ring in the sticky bar. */
 export const tinyRing = (score: Score, grade: Grade) =>
-	`<svg viewBox="0 0 28 28" aria-hidden="true" focusable="false"><circle class="ring-track" cx="14" cy="14" r="11" stroke-width="4"/><circle class="ring a-${grade}" cx="14" cy="14" r="11" stroke-width="4" pathLength="100" stroke-dasharray="${clamp(score)} 100"/></svg>`;
+	`<svg viewBox="0 0 28 28" aria-hidden="true"><circle class="ring-track" cx="14" cy="14" r="11" stroke-width="4"/><circle class="ring a-${grade}" cx="14" cy="14" r="11" stroke-width="4" pathLength="100" stroke-dasharray="${clamp(score)} 100"/></svg>`;
 
 const total = (c: SeverityCounts): number =>
 	SEVERITIES.reduce((n, s) => n + c[s], 0);
@@ -175,17 +175,15 @@ export const spectrum = (
 		? present
 				.map((s) => {
 					const w = Math.max(0.8, (c[s] / n) * usable);
-					const r = `<rect class="f-${s}" x="${f(x)}" y="0" width="${f(w)}" height="${h}"/>`;
+					const r = `<rect class="f-${s}" x="${f(x)}" width="${f(w)}" height="${h}"/>`;
 					x += w + gap;
 					return r;
 				})
 				.join("")
-		: `<rect class="f-none" x="0" y="0" width="100" height="${h}"/>`;
+		: `<rect class="f-none" width="100" height="${h}"/>`;
 	const track =
-		n && width < 100
-			? `<rect class="f-none" x="0" y="0" width="100" height="${h}"/>`
-			: "";
-	return `<svg class="spectrum" viewBox="0 0 100 ${h}" preserveAspectRatio="none" aria-hidden="true" focusable="false">${track}${rects}</svg>`;
+		n && width < 100 ? `<rect class="f-none" width="100" height="${h}"/>` : "";
+	return `<svg class="spectrum" viewBox="0 0 100 ${h}" preserveAspectRatio="none" aria-hidden="true">${track}${rects}</svg>`;
 };
 
 /**
@@ -206,7 +204,7 @@ export const runtimeStrip = (results: ReadonlyArray<AuditorResult>): string => {
 	const sum = weights.reduce((a, b) => a + b, 0) || 1;
 	let x = 0;
 	const rect = (r: AuditorResult, w: number) => {
-		const out = `<rect class="f-${r.status}" x="${f(x)}" y="0" width="${f(w)}" height="16" rx="1.5"><title>${e(r.auditor)}: ${e(r.status)}${r.status === "skipped" ? "" : `, ${Math.round(r.durationMs)} ms`}</title></rect>`;
+		const out = `<rect class="f-${r.status}" x="${f(x)}" width="${f(w)}" height="16" rx="1.5"><title>${e(r.auditor)}: ${e(r.status)}${r.status === "skipped" ? "" : `, ${Math.round(r.durationMs)} ms`}</title></rect>`;
 		x += w + gap;
 		return out;
 	};
@@ -216,5 +214,5 @@ export const runtimeStrip = (results: ReadonlyArray<AuditorResult>): string => {
 		),
 		...skipped.map((r) => rect(r, tick)),
 	].join("");
-	return `<svg class="strip" viewBox="0 0 100 16" preserveAspectRatio="none" aria-hidden="true" focusable="false">${bars}</svg>`;
+	return `<svg class="strip" viewBox="0 0 100 16" preserveAspectRatio="none" aria-hidden="true">${bars}</svg>`;
 };

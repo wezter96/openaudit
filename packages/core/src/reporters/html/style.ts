@@ -145,9 +145,9 @@ ul,ol{margin:0;padding:0;list-style:none}
 .dl .btn[aria-expanded=true] .chev{transform:rotate(-90deg)}
 .dl-menu{position:absolute;right:0;top:calc(100% + .45rem);z-index:50;width:min(24rem,calc(100vw - 2.5rem));padding:.35rem;background:var(--paper-2);border:1px solid var(--hair);border-radius:8px;box-shadow:var(--lift);transform-origin:top right}
 .dl-menu li+li{border-top:1px solid var(--hair-soft)}
-.dl-menu button{all:unset;box-sizing:border-box;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.1rem 1rem;width:100%;padding:.6rem .7rem;border-radius:5px;cursor:pointer;transition:background-color .15s}
-.dl-menu button:hover,.dl-menu button:focus-visible{background:var(--accent-soft);outline:none}
-.dl-menu button:focus-visible{box-shadow:inset 0 0 0 2px var(--focus)}
+.dl-menu [role=menuitem]{all:unset;box-sizing:border-box;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.1rem 1rem;width:100%;padding:.6rem .7rem;border-radius:5px;cursor:pointer;transition:background-color .15s}
+.dl-menu [role=menuitem]:hover,.dl-menu [role=menuitem]:focus-visible{background:var(--accent-soft);outline:none}
+.dl-menu [role=menuitem]:focus-visible{box-shadow:inset 0 0 0 2px var(--focus)}
 .dl-l{font-weight:650;font-size:.875rem}
 .dl-h{grid-column:1;font-size:.75rem;color:var(--graphite)}
 .dl-f{grid-column:2;grid-row:1/3;align-self:center;font-family:var(--mono);font-size:.7rem;color:var(--graphite)}
@@ -526,7 +526,8 @@ dl.facts{border-top:1px solid var(--hair);padding-top:.9rem}
 .table-wrap tbody th,.table-wrap td.cats,.table-wrap td.note{flex:1 1 100%}
 .table-wrap td.eng,.table-wrap td.note:empty{display:none}
 .table-wrap td.n{text-align:left}
-.table-wrap td[data-label]::before{content:attr(data-label) " ";color:var(--graphite);font-family:var(--sans)}
+.table-wrap td.n::before{content:"Findings ";color:var(--graphite);font-family:var(--sans)}
+.table-wrap td.n+td.n::before{content:"Took "}
 .table-wrap td.n .rid{display:inline;margin-left:.3rem}
 }
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:0s!important;animation-duration:0s!important;scroll-behavior:auto!important}}

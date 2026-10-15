@@ -87,7 +87,7 @@ const ran = (r: AuditorResult) =>
 /* ---------- small components ---------- */
 
 const svg = (body: string, cls = "") =>
-	`<svg${cls ? ` class="${cls}"` : ""} viewBox="0 0 24 24" aria-hidden="true" focusable="false">${body}</svg>`;
+	`<svg${cls ? ` class="${cls}"` : ""} viewBox="0 0 24 24" aria-hidden="true">${body}</svg>`;
 
 export const ICON = {
 	download: svg('<path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/>'),
@@ -126,7 +126,7 @@ const countsText = (c: SeverityCounts): string => {
 };
 
 const statusMark = (status: AuditorResult["status"]): string =>
-	`<span class="status"><span class="dot dot-${status}" aria-hidden="true"></span>${e(status)}</span>`;
+	`<span class="status"><span class="dot dot-${status}"></span>${e(status)}</span>`;
 
 const callout = (html: string, icon: string, cls = ""): string =>
 	`<div class="callout${cls ? ` ${cls}` : ""}">${icon}<div>${html}</div></div>`;
@@ -134,8 +134,8 @@ const callout = (html: string, icon: string, cls = ""): string =>
 const empty = (title: string, body: string, clean = true): string =>
 	`<div class="empty">${
 		clean
-			? '<svg viewBox="0 0 64 64" aria-hidden="true" focusable="false"><circle class="er2" cx="32" cy="32" r="30"/><circle class="er" cx="32" cy="32" r="22"/><path class="ec" d="m23 32.5 6.5 6.5L42 26" pathLength="1" stroke-dasharray="1"/></svg>'
-			: '<svg viewBox="0 0 64 64" aria-hidden="true" focusable="false"><circle class="eq" cx="28" cy="28" r="14"/><path class="eq" d="m38.5 38.5 11 11"/></svg>'
+			? '<svg viewBox="0 0 64 64" aria-hidden="true"><circle class="er2" cx="32" cy="32" r="30"/><circle class="er" cx="32" cy="32" r="22"/><path class="ec" d="m23 32.5 6.5 6.5L42 26" pathLength="1" stroke-dasharray="1"/></svg>'
+			: '<svg viewBox="0 0 64 64" aria-hidden="true"><circle class="eq" cx="28" cy="28" r="14"/><path class="eq" d="m38.5 38.5 11 11"/></svg>'
 	}<strong>${title}</strong><p>${body}</p></div>`;
 
 /* ---------- findings ---------- */
@@ -317,7 +317,7 @@ const auditorsKey = (a: Report["summary"]["auditors"]): string =>
 	(["passed", "failed", "error", "skipped"] as const)
 		.map(
 			(s) =>
-				`<span><i class="key k-${s}" aria-hidden="true"></i><b>${a[s]}</b> ${s === "error" ? "errored" : s}</span>`,
+				`<span><i class="key k-${s}"></i><b>${a[s]}</b> ${s === "error" ? "errored" : s}</span>`,
 		)
 		.join("");
 
@@ -365,14 +365,14 @@ const sevCounts = (c: SeverityCounts): string => {
 		? present
 				.map(
 					(s) =>
-						`<span><i class="glyph g-${s}" aria-hidden="true"></i>${c[s]}<span class="sr-only"> ${s}</span></span>`,
+						`<span><i class="glyph g-${s}"></i>${c[s]}<span class="sr-only"> ${s}</span></span>`,
 				)
 				.join("")
 		: `<span class="ch-clean">${ICON.check}Clean</span>`;
 };
 
 const scoreMeter = (score: number, grade: Grade): string =>
-	`<svg viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect class="f-none" width="100" height="4"/><rect class="af-${grade}" width="${Math.max(0, Math.min(100, score))}" height="4"/></svg>`;
+	`<svg viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden="true"><rect class="f-none" width="100" height="4"/><rect class="af-${grade}" width="${Math.max(0, Math.min(100, score))}" height="4"/></svg>`;
 
 const rackRow = (c: CategoryView): string => {
 	const s = c.summary;
@@ -533,7 +533,7 @@ export const categoryPanel = (c: CategoryView, view: View): string => {
 	const aside = `<div class="cat-score">${miniDial(s.score, s.grade, `${label} score ${s.score} out of 100, grade ${s.grade}`)}<p><b>${s.score}<small> /100</small></b>${countsText(s.counts)}</p></div>`;
 
 	const contributors = c.auditors.length
-		? `<ul class="contrib" aria-label="Auditors for ${e(label)}">${c.auditors.map((r) => `<li${ran(r) ? "" : ' class="off"'}><span class="dot dot-${r.status}" aria-hidden="true"></span><code>${t(r.auditor)}</code><span class="sr-only"> ${e(r.status)}</span></li>`).join("")}</ul>`
+		? `<ul class="contrib" aria-label="Auditors for ${e(label)}">${c.auditors.map((r) => `<li${ran(r) ? "" : ' class="off"'}><span class="dot dot-${r.status}"></span><code>${t(r.auditor)}</code><span class="sr-only"> ${e(r.status)}</span></li>`).join("")}</ul>`
 		: "";
 
 	const body = c.findings.length
@@ -670,8 +670,8 @@ export const auditorsPanel = (view: View): string => {
 <td class="eng">${e(r.engine)}</td>
 <td class="cats">${r.categories.map((c) => e(categoryLabel(c))).join(", ")}</td>
 <td class="st">${statusMark(r.status)}</td>
-<td class="n" data-label="Findings">${counted}${dups ? `<span class="rid">+${dups} duplicate${dups === 1 ? "" : "s"}</span>` : ""}</td>
-<td class="n" data-label="Took">${e(formatDuration(r.durationMs))}</td>
+<td class="n">${counted}${dups ? `<span class="rid">+${dups} duplicate${dups === 1 ? "" : "s"}</span>` : ""}</td>
+<td class="n">${e(formatDuration(r.durationMs))}</td>
 <td class="note">${r.message ? `<p class="msg">${tm(r.message)}</p>` : ""}</td>
 </tr>`;
 		})

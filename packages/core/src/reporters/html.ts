@@ -36,29 +36,53 @@ export interface HtmlOptions {
 	readonly suppressed?: ReadonlyArray<SuppressionSummary>;
 }
 
+/**
+ * `inline` (the default) is one self-contained page. `linked` is the page a
+ * host serves next to the other files of `toHostedHtml`: its stylesheet,
+ * script, downloads and AI prompt are those files instead of inline copies.
+ */
+type Assets = "inline" | "linked";
+
+/** The files a linked page loads or links to, next to it. */
+const HOSTED = {
+	style: "openaudit-report.css",
+	script: "openaudit-report.js",
+	prompt: "openaudit-ai-prompt.txt",
+} as const;
+
 /*
  * A single self-contained page: no external requests (enforced by a CSP that
  * only allows the hashed inline style and script), every report string
  * escaped, and built to pass the accessibility checks openaudit itself runs.
+ * `toHostedHtml` renders the same page for a web host, with its style,
+ * script and downloads as files next to it, so the page itself stays small.
  *
  * Everything is rendered server-side; without JavaScript the panels show
- * stacked. The script turns them into tabs, adds filters and the JSON download.
+ * stacked. The script turns them into tabs, adds filters and the downloads.
  */
 
 const sha256 = (text: string): string =>
 	new Bun.CryptoHasher("sha256").update(text).digest("base64");
 
-const CSP = [
-	"default-src 'none'",
-	`style-src 'sha256-${sha256(STYLE)}'`,
-	`script-src 'sha256-${sha256(SCRIPT)}'`,
-	"img-src data:",
-	// Same-origin fetches only: lets crawlers and audits (Lighthouse's robots.txt
-	// check) work on a hosted copy; the report itself makes no requests.
-	"connect-src 'self'",
-	"base-uri 'none'",
-	"form-action 'none'",
-].join("; ");
+const cspWith = (style: string, script: string): string =>
+	[
+		"default-src 'none'",
+		`style-src ${style}`,
+		`script-src ${script}`,
+		"img-src data:",
+		// Same-origin fetches only: lets crawlers and audits (Lighthouse's
+		// robots.txt check) work on a hosted copy. Only a linked page fetches
+		// anything itself: its AI prompt.
+		"connect-src 'self'",
+		"base-uri 'none'",
+		"form-action 'none'",
+	].join("; ");
+
+const CSP: Record<Assets, string> = {
+	inline: cspWith(`'sha256-${sha256(STYLE)}'`, `'sha256-${sha256(SCRIPT)}'`),
+	// The host's own files: the stylesheet and script next to the page.
+	linked: cspWith("'self'", "'self'"),
+};
 
 /** The shield as an inline favicon, so browsers don't ask the host for one. */
 const FAVICON =
@@ -93,13 +117,13 @@ interface Tab {
 
 const RAIL_ICON = {
 	standards:
-		'<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3 4.5 6v5.5c0 4.6 3.1 8.3 7.5 9.5 4.4-1.2 7.5-4.9 7.5-9.5V6z"/><path d="M8.5 12h7M8.5 15h4.5M8.5 9h7"/></svg>',
+		'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.6 3.1 8.3 7.5 9.5 4.4-1.2 7.5-4.9 7.5-9.5V6z"/><path d="M8.5 12h7M8.5 15h4.5M8.5 9h7"/></svg>',
 	auditors:
-		'<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 6h16M4 12h16M4 18h10"/></svg>',
+		'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>',
 };
 
 const scoreBar = (score: number, grade: string): string =>
-	`<svg class="tbar" viewBox="0 0 100 2" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect class="tr" width="100" height="2"/><rect class="af-${grade}" width="${Math.max(0, Math.min(100, score))}" height="2"/></svg>`;
+	`<svg class="tbar" viewBox="0 0 100 2" preserveAspectRatio="none" aria-hidden="true"><rect class="tr" width="100" height="2"/><rect class="af-${grade}" width="${Math.max(0, Math.min(100, score))}" height="2"/></svg>`;
 
 const categoryTab = (c: CategoryView, i: number): Tab => {
 	const n = c.findings.length;
@@ -158,8 +182,9 @@ interface Download {
 
 /**
  * Every format is rendered here by the core reporters, from the shareable
- * report, and embedded for the browser to save; the HTML is this page. SARIF gets no `root` at all,
- * so it carries no `originalUriBaseIds` and its paths stay relative.
+ * report, and embedded for the browser to save (or written next to a hosted
+ * page); the HTML is this page. SARIF gets no `root` at all, so it carries no
+ * `originalUriBaseIds` and its paths stay relative.
  */
 const downloads = (
 	report: Report,
@@ -216,14 +241,27 @@ const downloads = (
 	];
 };
 
-const downloadMenu = (items: ReadonlyArray<Download>): string =>
+/**
+ * Inline, each item saves an embedded copy (or the page itself). Linked, each
+ * is a plain link to the file next to the page; the HTML one is the
+ * self-contained page.
+ */
+const downloadItem = (d: Download, assets: Assets): string => {
+	const text = `<span class="dl-l">${d.label}</span> <span class="dl-h">${d.hint}</span> <span class="dl-f">${e(d.file)}</span>`;
+	if (assets === "linked")
+		return `<a role="menuitem" tabindex="-1" data-action="download" href="${e(d.file)}" download>${text}</a>`;
+	const source =
+		d.format === "page"
+			? `data-page="${e(d.file)}"`
+			: `data-src="data-${d.id}"`;
+	return `<button type="button" role="menuitem" tabindex="-1" data-action="download" ${source}>${text}</button>`;
+};
+
+const downloadMenu = (items: ReadonlyArray<Download>, assets: Assets): string =>
 	`<div class="dl" data-js hidden>
 <button class="btn" type="button" id="dl-button" aria-haspopup="menu" aria-expanded="false" aria-controls="dl-menu" data-action="menu">${ICON.download}Download${ICON.chevron}</button>
 <ul class="dl-menu" id="dl-menu" role="menu" aria-labelledby="dl-button" hidden>${items
-		.map(
-			(d) =>
-				`<li role="none"><button type="button" role="menuitem" tabindex="-1" data-action="download" ${d.format === "page" ? `data-page="${e(d.file)}"` : `data-src="data-${d.id}"`}><span class="dl-l">${d.label}</span> <span class="dl-h">${d.hint}</span> <span class="dl-f">${e(d.file)}</span></button></li>`,
-		)
+		.map((d) => `<li role="none">${downloadItem(d, assets)}</li>`)
 		.join("")}</ul>
 </div>`;
 
@@ -290,31 +328,37 @@ const metaOf = (report: Report): Array<[string, string]> => {
 	return meta;
 };
 
-const pageHead = (report: Report, title: string, label: string): string =>
+const pageHead = (
+	report: Report,
+	title: string,
+	label: string,
+	assets: Assets,
+): string =>
 	`<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="${CSP}">
+<meta http-equiv="Content-Security-Policy" content="${CSP[assets]}">
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="light dark">
 <meta name="generator" content="${t(report.tool.name)} ${t(report.tool.version)}">
 <title>${t(title)}</title>
 <meta name="description" content="${t(`openaudit report for ${label}: score ${report.summary.score}/100, grade ${report.summary.grade}, ${report.results.length} auditors.`)}">
 <link rel="icon" href="${FAVICON}">
-<style>${STYLE}</style>
+${assets === "linked" ? `<link rel="stylesheet" href="${HOSTED.style}">` : `<style>${STYLE}</style>`}
 </head>`;
 
 const masthead = (
 	report: Report,
 	label: string,
 	files: ReadonlyArray<Download>,
+	assets: Assets,
 ): string =>
 	`<header class="mast"><div class="wrap">
 <div class="slug">
 <p class="brand">${ICON.logo}<span>${t(report.tool.name)}</span><span class="ver">${t(report.tool.version)}</span></p>
 <div class="actions" data-js hidden>
-<button class="btn" type="button" data-action="copy-ai" title="Copy the report with a prompt, to paste into ChatGPT, Claude or your coding agent">${ICON.copy}<span class="bl">Copy for AI</span></button>
-${downloadMenu(files)}
+<button class="btn" type="button" data-action="copy-ai"${assets === "linked" ? ` data-href="${HOSTED.prompt}"` : ""} title="Copy the report with a prompt, to paste into ChatGPT, Claude or your coding agent">${ICON.copy}<span class="bl">Copy for AI</span></button>
+${downloadMenu(files, assets)}
 <button class="btn" type="button" data-action="print">${ICON.print}Print</button>
 </div>
 </div>
@@ -336,7 +380,11 @@ const sectionNav = (report: Report, tabs: ReadonlyArray<Tab>): string => {
 const pageFooter = (report: Report): string =>
 	`<footer><div class="wrap"><span>Generated by ${t(report.tool.name)} ${t(report.tool.version)}</span><span>Report schema v${t(report.schemaVersion)}</span><span>Started ${t(formatTime(report.startedAt))}</span><span>Finished ${t(formatTime(report.finishedAt))}</span></div></footer>`;
 
-export const toHtml = (report: Report, options: HtmlOptions = {}): string => {
+const render = (
+	report: Report,
+	options: HtmlOptions,
+	assets: Assets,
+): string => {
 	const label = targetLabel(report);
 	const title = options.title ?? `openaudit report: ${label}`;
 	const suppressed = options.suppressed ?? report.suppressed;
@@ -357,13 +405,19 @@ export const toHtml = (report: Report, options: HtmlOptions = {}): string => {
 		categories,
 		suppressed: suppressed ?? [],
 	};
+	const data =
+		assets === "linked"
+			? ""
+			: `${dataBlocks(files)}
+<script type="application/json" id="data-ai">${scriptSafeJson(toAiPrompt(shareable(report), { suppressed }))}</script>
+`;
 
 	return `<!doctype html>
 <html lang="en">
-${pageHead(report, title, label)}
+${pageHead(report, title, label, assets)}
 <body>
 <a class="skip" href="#main">Skip to report</a>
-${masthead(report, label, files)}
+${masthead(report, label, files, assets)}
 <div class="frame">
 ${sectionNav(report, tabsOf(report, categories))}
 <main id="main" tabindex="-1">
@@ -374,11 +428,49 @@ ${auditorsPanel(view)}
 </main>
 </div>
 ${pageFooter(report)}
-${dataBlocks(files)}
-<script type="application/json" id="data-ai">${scriptSafeJson(toAiPrompt(shareable(report), { suppressed }))}</script>
-<p class="sr-only" role="status" id="copy-status"></p>
-<script>${SCRIPT}</script>
+${data}<p class="sr-only" role="status" id="copy-status"></p>
+${assets === "linked" ? `<script src="${HOSTED.script}"></script>` : `<script>${SCRIPT}</script>`}
 </body>
 </html>
 `;
+};
+
+export const toHtml = (report: Report, options: HtmlOptions = {}): string =>
+	render(report, options, "inline");
+
+/** One file of a hosted report: its name next to the page, and its text. */
+export interface HostedFile {
+	readonly name: string;
+	readonly content: string;
+}
+
+/**
+ * The report for a web host: `index.html`, a small page that loads its
+ * stylesheet and script as files and links its downloads, with those files
+ * next to it. The HTML download is the self-contained page `toHtml` renders,
+ * so a saved copy still works offline.
+ */
+export const toHostedHtml = (
+	report: Report,
+	options: HtmlOptions = {},
+): HostedFile[] => {
+	const suppressed = options.suppressed ?? report.suppressed;
+	const saved = (d: Download): string => {
+		if (d.format === "page") return toHtml(report, options);
+		if (d.format === "json") return `${JSON.stringify(d.data, null, 2)}\n`;
+		return String(d.data);
+	};
+	return [
+		{ name: "index.html", content: render(report, options, "linked") },
+		{ name: HOSTED.style, content: STYLE },
+		{ name: HOSTED.script, content: SCRIPT },
+		{
+			name: HOSTED.prompt,
+			content: toAiPrompt(shareable(report), { suppressed }),
+		},
+		...downloads(report, suppressed).map((d) => ({
+			name: d.file,
+			content: saved(d),
+		})),
+	];
 };

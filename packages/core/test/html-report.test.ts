@@ -12,6 +12,7 @@ import {
 	owaspMatchesOf,
 	type Report,
 	summarize,
+	toHostedHtml,
 	toHtml,
 } from "../src";
 import { CSV_COLUMNS, csvCell, toCsv } from "../src/reporters/csv";
@@ -338,9 +339,7 @@ describe("content", () => {
 		expect(markup.match(/<li id="f-\d+"/g)).toHaveLength(4);
 		expect(markup).toContain("Confirmed by code.gitleaks");
 		// The gitleaks auditor row shows 0 findings plus the duplicate.
-		expect(markup).toMatch(
-			/<td class="n" data-label="Findings">0<span class="rid">\+1 duplicate</,
-		);
+		expect(markup).toMatch(/<td class="n">0<span class="rid">\+1 duplicate</);
 		// Gitleaks can filter the finding it confirmed.
 		expect(markup).toContain('data-auditors=" code.secrets code.gitleaks "');
 	});
@@ -595,6 +594,84 @@ describe("copy for AI", () => {
 		expect(prompt).toContain("## openaudit: my repo");
 		expect(prompt).toContain("AWS access key committed");
 		expect(prompt).not.toContain("/home/me");
+	});
+});
+
+describe("hosted page", () => {
+	const local: Report = {
+		...report,
+		target: {
+			...report.target,
+			input: "/home/me/work/my repo",
+			root: "/home/me/work/my repo",
+		},
+	};
+	const files = toHostedHtml(local);
+	const file = (name: string) =>
+		files.find((f) => f.name === name)?.content ?? "";
+	const page = file("index.html");
+	const inline = toHtml(local);
+	const block = (id: string) =>
+		inline.match(
+			new RegExp(`id="data-${id}"[^>]*>([\\s\\S]*?)</script>`),
+		)?.[1] ?? "";
+
+	test("is a small page that loads its style and script as files", () => {
+		expect(page.startsWith("<!doctype html>")).toBe(true);
+		expect(page.length).toBeLessThan(inline.length / 2);
+		expect(page).not.toMatch(/<style\b/);
+		expect(page).not.toMatch(/<script(?![^>]*\ssrc=)[^>]*>/);
+		expect(page).toContain(
+			'<link rel="stylesheet" href="openaudit-report.css">',
+		);
+		expect(page).toContain('<script src="openaudit-report.js"></script>');
+		expect(file("openaudit-report.css")).toBe(
+			inline.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "-",
+		);
+		expect(file("openaudit-report.js")).toBe(
+			inline.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "-",
+		);
+		const csp = page.match(/content="(default-src[^"]+)"/)?.[1] ?? "";
+		expect(csp).toContain("style-src 'self'");
+		expect(csp).toContain("script-src 'self'");
+		expect(csp).not.toContain("unsafe-inline");
+		expect(page).not.toContain("/home/me");
+	});
+
+	test("every file the page references is one of its files", () => {
+		const names = files.map((f) => f.name);
+		expect(new Set(names).size).toBe(names.length);
+		const refs = [
+			...page.matchAll(/\s(?:href|src|data-href)="([a-z0-9][\w.-]*)"/gi),
+		].map((m) => m[1] ?? "");
+		expect(refs.length).toBe(8);
+		for (const ref of refs) expect(names).toContain(ref);
+	});
+
+	test("downloads are links to the same files the page would embed", () => {
+		const items = page.match(/<a role="menuitem"[^>]*>/g) ?? [];
+		expect(items).toHaveLength(5);
+		for (const item of items) expect(item).toMatch(/ download>$/);
+		expect(page).toContain('href="openaudit-report.html" download');
+		// The HTML download is the self-contained page.
+		expect(file("openaudit-report.html")).toBe(inline);
+		expect(file("openaudit-report.json")).toBe(
+			`${JSON.stringify(JSON.parse(block("json")), null, 2)}\n`,
+		);
+		expect(JSON.parse(file("openaudit-report.sarif"))).toEqual(
+			JSON.parse(block("sarif")),
+		);
+		expect(file("openaudit-report.md")).toBe(JSON.parse(block("markdown")));
+		expect(file("openaudit-findings.csv")).toBe(JSON.parse(block("csv")));
+		for (const f of files) expect(f.content).not.toContain("/home/me");
+	});
+
+	test("copy for AI fetches the same prompt from a file", () => {
+		expect(page).not.toContain('id="data-ai"');
+		expect(page).toContain(
+			'data-action="copy-ai" data-href="openaudit-ai-prompt.txt"',
+		);
+		expect(file("openaudit-ai-prompt.txt")).toBe(JSON.parse(block("ai")));
 	});
 });
 

@@ -4,9 +4,12 @@
  *
  * - src/generated/*.json: the auditor registry, playbooks, CLI help, config
  *   schema and GitHub Action inputs, read from the real sources.
- * - public/report/: openaudit's audit of this repository, as written by the
- *   CLI (unmodified). Reuses an existing report, e.g. one CI just wrote, or
- *   runs the audit when there is none. `--fresh` always re-runs it.
+ * - public/report/: openaudit's audit of this repository. Reuses an existing
+ *   report, e.g. one CI just wrote, or runs the audit when there is none.
+ *   `--fresh` always re-runs it. The page and its files are rendered from the
+ *   report's JSON by core's toHostedHtml: a small index.html that loads its
+ *   style and script as files and links the downloads next to it (the HTML
+ *   download is the self-contained page `--format html` writes).
  * - public/schema/: the config and report JSON Schemas, as printed by
  *   `openaudit schema`. `openaudit init` points configs at
  *   https://openaudit.se/schema/config.json, so this path is a public contract.
@@ -20,7 +23,8 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import * as Agent from "../../../packages/agent/src/index";
 import { openApiDocument } from "../../../packages/api/src/openapi";
-import type { Finding } from "../../../packages/core/src/model";
+import type { Finding, Report } from "../../../packages/core/src/model";
+import { toHostedHtml } from "../../../packages/core/src/reporters/html";
 import { gradeFor, scoreFor } from "../../../packages/core/src/scoring";
 import { allAuditors } from "../../cli/src/audit";
 import {
@@ -257,10 +261,9 @@ if (!args.has("--data-only")) {
 		if ((await proc.exited) !== 0) throw new Error("self-audit failed");
 	}
 	// Served at /report/ as well as under its own name, byte for byte.
-	await copyFile(
-		join(reportDir, "openaudit-report.html"),
-		join(reportDir, "index.html"),
-	);
+	const report = (await Bun.file(reportJson).json()) as Report;
+	for (const file of toHostedHtml(report))
+		await Bun.write(join(reportDir, file.name), file.content);
 
 	// Published at stable URLs for editors: keep these paths.
 	const schemas = join(site, "public", "schema");

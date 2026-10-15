@@ -4,8 +4,8 @@
 // biome-ignore lint/suspicious/noRedundantUseStrict: the report inlines this as a classic script
 "use strict";
 const d=document;const root=d.documentElement;const w=window;
-/* the page as served, before any of this runs, for the HTML download */
-const pristine=root.cloneNode(true);
+/* the page as served, before any of this runs, for the HTML download (a hosted page links its own) */
+const pristine=d.querySelector("[data-page]")?root.cloneNode(true):null;
 root.classList.add("js");
 const still=calm();
 const css=getComputedStyle(root);
@@ -43,6 +43,7 @@ const ACTIONS=new Map([
 ]);
 const menuBtn=d.getElementById("dl-button");const menu=d.getElementById("dl-menu");
 let reopened=[];
+const prompt={text:null,load:null};
 
 showTabs();
 each(d.querySelectorAll("[data-js]"),(el)=>{el.hidden=false;});
@@ -59,6 +60,7 @@ d.addEventListener("reset",onReset);
 listenMenu();
 w.addEventListener("beforeprint",openAll);
 w.addEventListener("afterprint",closeAgain);
+w.addEventListener("load",loadPrompt);
 each(d.querySelectorAll("form.filters"),(f)=>{apply(f,false);});
 route();
 if(bar)requestAnimationFrame(()=>{moveInk();bar.classList.add("ready");});
@@ -346,6 +348,7 @@ rows.forEach((r)=>{const dy=before.get(r)-r.getBoundingClientRect().top;if(dy)an
 }
 
 /* ---- downloads: every format is rendered at report time and embedded ---- */
+/* (a hosted page links them as files instead: its menu items are plain links) */
 /* what a host page added (a site's bar, its meta tags) stays with the host */
 function savedPage(){
 const page=pristine.cloneNode(true);
@@ -356,7 +359,8 @@ return `<!doctype html>\n${page.outerHTML}\n`;
 function download(btn){
 const page=btn.getAttribute("data-page");
 if(page)return save(savedPage(),"text/html",page);
-const src=d.getElementById(btn.getAttribute("data-src"));if(!src)return;
+const id=btn.getAttribute("data-src");if(!id)return;
+const src=d.getElementById(id);if(!src)return;
 const data=JSON.parse(src.textContent);
 const text=src.getAttribute("data-format")==="json"?`${JSON.stringify(data,null,2)}\n`:String(data);
 save(text,src.getAttribute("data-type"),src.getAttribute("data-file"));
@@ -368,11 +372,23 @@ d.body.appendChild(a);a.click();a.remove();
 setTimeout(()=>{URL.revokeObjectURL(url);},4000);
 }
 /* ---- copy for AI: the report with a plain-language prompt ---- */
+/* a hosted page links its prompt (data-href); it loads with the page, so a click copies at once */
+function loadPrompt(){
+const btn=d.querySelector("[data-action=copy-ai][data-href]");
+if(!btn||prompt.load)return prompt.load;
+prompt.load=fetch(btn.getAttribute("data-href")).then((r)=>{if(!r.ok)throw new Error(String(r.status));return r.text();});
+prompt.load.then((t)=>{prompt.text=t;},()=>{prompt.load=null;});
+return prompt.load;
+}
 function copyAi(btn){
 const src=d.getElementById("data-ai");
 const c={btn,label:btn.querySelector(".bl"),status:d.getElementById("copy-status")};
-if(!src)return;
-c.text=JSON.parse(src.textContent);
+if(src){c.text=JSON.parse(src.textContent);copyText(c);return;}
+if(prompt.text!==null){c.text=prompt.text;copyText(c);return;}
+const load=loadPrompt();if(!load)return;
+load.then((t)=>{c.text=t;copyText(c);},()=>{copied(c,false);});
+}
+function copyText(c){
 if(navigator.clipboard&&w.isSecureContext)navigator.clipboard.writeText(c.text).then(()=>{copied(c,true);},()=>{copyByHand(c);});
 else copyByHand(c);
 }
