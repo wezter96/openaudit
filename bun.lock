@@ -175,6 +175,17 @@
         "playwright-core": "^1.64.0",
       },
     },
+    "packages/badge": {
+      "name": "@openaudit/badge",
+      "dependencies": {
+        "effect": "4.0.3",
+      },
+      "devDependencies": {
+        "@openaudit/config": "workspace:*",
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/config": {
       "name": "@openaudit/config",
       "version": "0.0.0",
@@ -605,6 +616,8 @@
     "@openaudit/api": ["@openaudit/api@workspace:packages/api"],
 
     "@openaudit/auditors": ["@openaudit/auditors@workspace:packages/auditors"],
+
+    "@openaudit/badge": ["@openaudit/badge@workspace:packages/badge"],
 
     "@openaudit/cli": ["@openaudit/cli@workspace:apps/cli"],
 
