@@ -17,7 +17,7 @@ import { summarize } from "./scoring";
 import { Exec, Http, ignoredPathMatcher, Workspaces } from "./services";
 import { resolveTarget } from "./target";
 
-export const VERSION = "0.2.0";
+export const VERSION = "0.2.1";
 
 export type AuditEvent =
 	| { readonly type: "target"; readonly target: Report["target"] }
