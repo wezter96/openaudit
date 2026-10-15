@@ -134,27 +134,39 @@ export interface FinishedScan {
 const json = (summary: TargetSummary | null) =>
 	summary ? JSON.stringify(summary) : null;
 
-/** Marks the scan done and schedules the next one. */
-export const finishScan = (db: D1, f: FinishedScan) =>
-	db.batch([
-		db
-			.prepare(
-				"UPDATE scans SET status = ?, finished_at = ?, lease_until = NULL, commit_sha = ?, openaudit_version = ?, codebase_summary = ?, site_summary = ?, error = ? WHERE id = ?",
-			)
-			.bind(
-				f.status,
-				f.now,
-				f.commit,
-				f.openauditVersion,
-				json(f.codebase),
-				json(f.site),
-				f.error,
-				f.scan.id,
-			),
-		db
-			.prepare("UPDATE projects SET next_scan_at = ? WHERE id = ?")
-			.bind(f.now + INTERVAL, f.scan.project_id),
-	]);
+/**
+ * Marks the scan done and schedules the next one, only while it's still
+ * running and inside its lease: a late or repeated report changes nothing.
+ * True when this report finished the scan.
+ */
+export const finishScan = async (db: D1, f: FinishedScan) => {
+	const result = await db
+		.prepare(
+			"UPDATE scans SET status = ?, finished_at = ?, lease_until = NULL, commit_sha = ?, openaudit_version = ?, codebase_summary = ?, site_summary = ?, error = ? WHERE id = ? AND status = 'running' AND lease_until >= ?",
+		)
+		.bind(
+			f.status,
+			f.now,
+			f.commit,
+			f.openauditVersion,
+			json(f.codebase),
+			json(f.site),
+			f.error,
+			f.scan.id,
+			f.now,
+		)
+		.run();
+	if (result.meta.changes !== 1) return false;
+	await db
+		.prepare("UPDATE projects SET next_scan_at = ? WHERE id = ?")
+		.bind(f.now + INTERVAL, f.scan.project_id)
+		.run();
+	return true;
+};
+
+/** Deletes one scan's report files (after a lost race to finish it). */
+export const deleteReports = (reports: R2, scan: ScanRow) =>
+	reports.delete(keysOf(scan.project_id, [scan.id]));
 
 /** Every R2 key a scan may have written. */
 const keysOf = (project: ProjectId, scans: ReadonlyArray<ScanId>) =>

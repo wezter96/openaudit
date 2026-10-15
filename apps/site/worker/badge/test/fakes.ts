@@ -25,28 +25,37 @@ class Statement implements D1Statement {
 		const results = this.db.query(this.sql).all(...this.values) as T[];
 		return { results, meta: { changes: 0 } };
 	}
-	async run() {
+	runSync() {
 		const { changes } = this.db.query(this.sql).run(...this.values);
 		return { results: [], meta: { changes } };
+	}
+	async run() {
+		return this.runSync();
 	}
 }
 
 export interface FakeD1 extends D1 {
 	readonly sqlite: Database;
+	/** Every statement prepared, in order. */
+	readonly queries: string[];
 }
 
 export const fakeD1 = (): FakeD1 => {
 	const sqlite = new Database(":memory:");
 	sqlite.run(schema);
+	const queries: string[] = [];
 	return {
 		sqlite,
-		prepare: (sql) => new Statement(sqlite, sql),
-		batch: async (statements) => {
-			sqlite.run("BEGIN");
-			for (const s of statements) await s.run();
-			sqlite.run("COMMIT");
-			return [];
+		queries,
+		prepare: (sql) => {
+			queries.push(sql);
+			return new Statement(sqlite, sql);
 		},
+		// Synchronous, like D1's single transaction: nothing interleaves.
+		batch: async (statements) =>
+			sqlite.transaction(() =>
+				statements.map((s) => (s as Statement).runSync()),
+			)(),
 	};
 };
 

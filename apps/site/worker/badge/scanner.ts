@@ -13,6 +13,7 @@ import {
 import { Effect } from "effect";
 import type { BadgeRequest, R2 } from "./env";
 import {
+	deleteReports,
 	dueProject,
 	expireLeases,
 	findScan,
@@ -104,12 +105,28 @@ const storeReports = (req: BadgeRequest, scan: ScanRow, report: JobReport) =>
 
 const NO_REPORTS: Summaries = { codebase: null, site: null };
 
+const notRunning = () =>
+	new NotFound({ message: "No running scan with this id." });
+
 const runningScan = (req: BadgeRequest, id: ScanId) =>
 	Effect.gen(function* () {
 		const scan = yield* promise(() => findScan(req.env.BADGES, id));
-		if (scan?.status !== "running")
-			return yield* new NotFound({ message: "No running scan with this id." });
+		if (scan?.status !== "running") return yield* notRunning();
+		// Past its lease the job is lost, even before a claim sweeps it.
+		if ((scan.lease_until ?? 0) < req.now) return yield* notRunning();
 		return scan;
+	});
+
+/**
+ * A report that lost the race to finish its scan: its files go, unless an
+ * earlier report for the same scan won and wrote the same keys.
+ */
+const dropLateReports = (req: BadgeRequest, scan: ScanRow) =>
+	Effect.gen(function* () {
+		const now = yield* promise(() => findScan(req.env.BADGES, scan.id));
+		if (now?.status !== "ok")
+			yield* promise(() => deleteReports(req.env.BADGE_REPORTS, scan));
+		return yield* notRunning();
 	});
 
 export const report = (req: BadgeRequest, id: ScanId, body: JobReport) =>
@@ -119,7 +136,7 @@ export const report = (req: BadgeRequest, id: ScanId, body: JobReport) =>
 		const summaries = ok ? yield* storeReports(req, scan, body) : NO_REPORTS;
 		// An ok scan may carry a note, such as why the site wasn't scanned.
 		const error = body.error ?? (ok ? null : "scan failed");
-		yield* promise(() =>
+		const finished = yield* promise(() =>
 			finishScan(req.env.BADGES, {
 				scan,
 				status: body.status,
@@ -130,6 +147,7 @@ export const report = (req: BadgeRequest, id: ScanId, body: JobReport) =>
 				now: req.now,
 			}),
 		);
+		if (!finished) return yield* dropLateReports(req, scan);
 		yield* promise(() =>
 			pruneScans(req.env.BADGES, req.env.BADGE_REPORTS, scan.project_id),
 		);

@@ -19,16 +19,14 @@ import type { BadgeRequest } from "./env";
 import { parseRepo, parseSite, slugOf } from "./input";
 import { deleteAllScans } from "./scans";
 import {
-	DAY,
-	deleteTombstone,
+	claimRegistration,
 	expirePending,
 	findByRepo,
 	idTaken,
-	insertProject,
 	liveProjects,
 	MAX_PROJECTS,
-	MAX_REGISTRATIONS,
-	registrationsSince,
+	replaceable,
+	upsertProject,
 } from "./store";
 import { dnsNameOf, lookupRepo, MAX_REPO_KB } from "./verify";
 
@@ -57,38 +55,41 @@ const ipKey = (req: BadgeRequest) =>
 		req.env.SCANNER_TOKEN ?? "",
 	);
 
-const checkLimits = (req: BadgeRequest, ipDay: string) =>
+/** One attempt per call, at most MAX_REGISTRATIONS a day per address. */
+const checkLimits = (req: BadgeRequest) =>
 	Effect.gen(function* () {
+		if (req.ip === "")
+			return yield* new InvalidInput({
+				message: "We couldn't tell where your request came from.",
+			});
 		const db = req.env.BADGES;
-		const recent = yield* promise(() =>
-			registrationsSince(db, ipDay, req.now - DAY),
-		);
-		if (recent >= MAX_REGISTRATIONS)
+		const ipDay = yield* promise(() => ipKey(req));
+		if (!(yield* promise(() => claimRegistration(db, ipDay, req.now))))
 			return yield* new RateLimited({
 				message: "Too many sign-ups from your network today. Try tomorrow.",
 			});
 		yield* promise(() => expirePending(db, req.now));
 		if ((yield* promise(() => liveProjects(db))) >= MAX_PROJECTS)
-			return yield* new Full({
-				message: "The beta is full right now. Try again later.",
-			});
+			return yield* full();
+		return ipDay;
 	});
 
-/** Refuses a live duplicate; clears a removed one so it can come back. */
-const checkDuplicate = (req: BadgeRequest, repo: RepoSlug) =>
+const full = () =>
+	new Full({ message: "The beta is full right now. Try again later." });
+
+const taken = () =>
+	new AlreadyRegistered({ message: "This repo already has a badge." });
+
+/**
+ * The id to write: the replaced row's own, or a free one. Refuses a live
+ * duplicate early too, before GitHub is asked; the write itself re-checks.
+ */
+const targetId = (req: BadgeRequest, repo: RepoSlug) =>
 	Effect.gen(function* () {
 		const existing = yield* promise(() => findByRepo(req.env.BADGES, repo));
-		if (existing?.status !== "removed") {
-			if (existing)
-				return yield* new AlreadyRegistered({
-					message: "This repo already has a badge.",
-				});
-			return;
-		}
-		yield* promise(() =>
-			deleteAllScans(req.env.BADGES, req.env.BADGE_REPORTS, existing.id),
-		);
-		yield* promise(() => deleteTombstone(req.env.BADGES, existing.id));
+		if (!existing) return { id: yield* freeId(req, repo), replaces: false };
+		if (!replaceable(existing, req.now)) return yield* taken();
+		return { id: existing.id, replaces: true };
 	});
 
 const checkGitHub = (repo: RepoSlug) =>
@@ -120,33 +121,54 @@ const freeId = (req: BadgeRequest, repo: RepoSlug) =>
 		return yield* Effect.die("no free project id");
 	});
 
-const store = (req: BadgeRequest, repo: RepoSlug, site: SiteUrl | null) =>
+interface Store {
+	readonly req: BadgeRequest;
+	readonly repo: RepoSlug;
+	readonly site: SiteUrl | null;
+	readonly ipDay: string;
+}
+
+/** Why the conditional write didn't land: a live duplicate, or the cap. */
+const lost = (req: BadgeRequest, repo: RepoSlug) =>
 	Effect.gen(function* () {
-		const id = yield* freeId(req, repo);
+		const db = req.env.BADGES;
+		if (yield* promise(() => findByRepo(db, repo))) return yield* taken();
+		if ((yield* promise(() => liveProjects(db))) >= MAX_PROJECTS)
+			return yield* full();
+		return yield* new Unavailable({
+			message: "Another sign-up got in the way. Try again.",
+		});
+	});
+
+/**
+ * Writes the project in one conditional statement, then reads it back: the
+ * write won only if the row now holds this sign-up's token hash.
+ */
+const store = ({ req, repo, site, ipDay }: Store) =>
+	Effect.gen(function* () {
+		const db = req.env.BADGES;
+		const { id, replaces } = yield* targetId(req, repo);
 		const code = newCode();
 		const manageToken = newManageToken();
 		const manageHash = yield* promise(() => sha256(manageToken));
-		const ipDay = yield* promise(() => ipKey(req));
 		const project = { id, repo, site, code, manageHash, ipDay, now: req.now };
-		yield* Effect.tryPromise(() => insertProject(req.env.BADGES, project)).pipe(
-			Effect.catch(() =>
-				Effect.fail(
-					new AlreadyRegistered({ message: "This repo already has a badge." }),
-				),
-			),
+		yield* Effect.tryPromise(() => upsertProject(db, project)).pipe(
+			Effect.catch(() => Effect.void),
 		);
-		return { id, code, manageToken };
+		const row = yield* promise(() => findByRepo(db, repo));
+		if (row?.manage_hash !== manageHash) return yield* lost(req, repo);
+		if (replaces)
+			yield* promise(() => deleteAllScans(db, req.env.BADGE_REPORTS, row.id));
+		return { id: row.id, code, manageToken };
 	});
 
 export const register = (req: BadgeRequest, payload: RegisterPayload) =>
 	Effect.gen(function* () {
 		const input = yield* parseInput(payload);
-		yield* checkLimits(req, yield* promise(() => ipKey(req)));
-		yield* checkDuplicate(req, input.repo);
+		const ipDay = yield* checkLimits(req);
+		yield* targetId(req, input.repo);
 		const repo = yield* checkGitHub(input.repo);
-		if (repo.toLowerCase() !== input.repo.toLowerCase())
-			yield* checkDuplicate(req, repo);
-		const saved = yield* store(req, repo, input.site);
+		const saved = yield* store({ req, repo, site: input.site, ipDay });
 		return {
 			id: saved.id,
 			repo,
