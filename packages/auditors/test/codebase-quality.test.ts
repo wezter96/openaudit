@@ -17,6 +17,7 @@ import {
 	scanQualityFile,
 } from "../src/codebase/quality";
 import { fixture, runAuditor } from "./helpers";
+import { must } from "./must";
 
 const emptyStats = (): QualityStats => ({
 	todos: new Map(),
@@ -133,20 +134,17 @@ describe("typescript strictness flags", () => {
 			"ts-no-implicit-override",
 			"ts-no-unchecked-indexed-access",
 		]);
-		expect(byRule["ts-no-unchecked-indexed-access"]?.severity).toBe("low");
-		expect(byRule["ts-no-unchecked-indexed-access"]?.location?.file).toBe(
-			"a/tsconfig.json",
-		);
-		expect(byRule["ts-no-unchecked-indexed-access"]?.message).toContain(
-			"a/tsconfig.json",
-		);
-		expect(byRule["ts-no-implicit-override"]?.severity).toBe("info");
-		expect(byRule["ts-no-implicit-override"]?.message).toContain(
+		const rule = (id: string) => must(byRule[id], id);
+		const fileOf = (id: string) => must(rule(id).location, id).file;
+		const indexed = rule("ts-no-unchecked-indexed-access");
+		expect(indexed.severity).toBe("low");
+		expect(fileOf("ts-no-unchecked-indexed-access")).toBe("a/tsconfig.json");
+		expect(indexed.message).toContain("a/tsconfig.json");
+		expect(rule("ts-no-implicit-override").severity).toBe("info");
+		expect(rule("ts-no-implicit-override").message).toContain(
 			"2 tsconfig.json files",
 		);
-		expect(byRule["ts-allow-js-without-check-js"]?.location?.file).toBe(
-			"b/tsconfig.json",
-		);
+		expect(fileOf("ts-allow-js-without-check-js")).toBe("b/tsconfig.json");
 	});
 
 	test("follows relative extends and skips unresolvable ones", () => {

@@ -8,7 +8,51 @@ import {
 	vitalsFindings,
 } from "../src/web/browser";
 import { runAuditor } from "./helpers";
+import { must } from "./must";
 import { browserSite, redirectingSite, type Site, serve } from "./web-server";
+
+type ConsentFinding = ReturnType<typeof consentFindings>[number];
+
+/** A tracker request before consent: a high-confidence GDPR finding without query strings. */
+const expectTrackerFinding = (f: ConsentFinding) => {
+	expect(f.severity).toBe("medium");
+	expect(f.category).toBe("privacy");
+	expect(f.tags).toEqual(expect.arrayContaining(["gdpr", "eprivacy"]));
+	expect(f.confidence).toBe("high");
+	// no query strings in evidence
+	expect(f.evidence).not.toContain("?");
+	expect(f.evidence).not.toContain("tid=");
+};
+
+/** The first finding of `rule` among `findings`, failing the test without one. */
+const firstOf = (findings: ReadonlyArray<ConsentFinding>, rule: string) =>
+	must(
+		findings.find((f) => f.ruleId === `webapp.browser/${rule}`),
+		`a ${rule} finding`,
+	);
+
+/** A page that sets tracking cookies and storage and shows a OneTrust banner. */
+const consentSite = (thirdParty: string) =>
+	serve(
+		{
+			"/": () =>
+				new Response(
+					`<!doctype html><html lang="en"><head><title>Consent fixture</title>
+<script src="${thirdParty}lib.js"></script>
+<script>document.cookie = "_ga=GA1.1.123456; path=/; max-age=31536000"; document.cookie = "theme=dark; path=/"; localStorage.setItem("ajs_user_id", "secret-user-value"); localStorage.setItem("prefs", "x");</script>
+</head><body><main><h1>Hello</h1>
+<div id="onetrust-banner-sdk" style="position:fixed;bottom:0;width:100%;height:80px">We use cookies <button>Accept</button></div>
+</main></body></html>`,
+					{
+						headers: {
+							"content-type": "text/html",
+							"set-cookie": "srv_session=abc123secret; Path=/; HttpOnly",
+						},
+					},
+				),
+		},
+		() => new Response("not found", { status: 404 }),
+	);
 
 let site: Site;
 beforeAll(() => {
@@ -207,35 +251,29 @@ describe("webapp.browser", () => {
 				"Hotjar contacted before consent",
 				"Meta Pixel / Facebook SDK contacted before consent",
 			]);
-			for (const f of trackers) {
-				expect(f.severity).toBe("medium");
-				expect(f.category).toBe("privacy");
-				expect(f.tags).toEqual(expect.arrayContaining(["gdpr", "eprivacy"]));
-				expect(f.confidence).toBe("high");
-				// no query strings in evidence
-				expect(f.evidence).not.toContain("?");
-				expect(f.evidence).not.toContain("tid=");
-			}
-			const ga = trackers.find((f) => f.title.startsWith("Google Analytics"));
-			expect(ga?.message).toContain("3 requests");
+			for (const f of trackers) expectTrackerFinding(f);
+			const ga = must(
+				trackers.find((f) => f.title.startsWith("Google Analytics")),
+				"the Google Analytics finding",
+			);
+			expect(ga.message).toContain("3 requests");
 			const cookies = byRule(fs, "tracking-cookie-before-consent");
 			expect(cookies).toHaveLength(1);
-			expect(cookies[0]?.evidence).toContain("_ga");
-			expect(cookies[0]?.evidence).not.toContain("session");
-			expect(byRule(fs, "tracking-storage-before-consent")[0]?.evidence).toBe(
+			const gaCookie = must(cookies[0], "the tracking cookie finding");
+			expect(gaCookie.evidence).toContain("_ga");
+			expect(gaCookie.evidence).not.toContain("session");
+			expect(firstOf(fs, "tracking-storage-before-consent").evidence).toBe(
 				"ajs_user_id",
 			);
 			expect(byRule(fs, "consent-banner-bypassed")).toHaveLength(1);
-			expect(byRule(fs, "consent-platform")[0]?.evidence).toBe("OneTrust");
+			expect(firstOf(fs, "consent-platform").evidence).toBe("OneTrust");
 
-			const third = byRule(fs, "third-party-requests")[0];
-			expect(third?.severity).toBe("info");
-			expect(third?.message).toContain("www.google-analytics.com (1)");
-			expect(third?.message).toContain("static.hotjar.com (1)");
-			expect(third?.message).not.toContain("cdn.example.com");
-			expect(byRule(fs, "storage-before-interaction")[0]?.severity).toBe(
-				"info",
-			);
+			const third = firstOf(fs, "third-party-requests");
+			expect(third.severity).toBe("info");
+			expect(third.message).toContain("www.google-analytics.com (1)");
+			expect(third.message).toContain("static.hotjar.com (1)");
+			expect(third.message).not.toContain("cdn.example.com");
+			expect(firstOf(fs, "storage-before-interaction").severity).toBe("info");
 		});
 
 		test("uses lower confidence without a banner and detects CMPs by host", () => {
@@ -284,27 +322,7 @@ describe("webapp.browser", () => {
 			},
 			() => new Response("not found", { status: 404 }),
 		);
-		const thirdParty = other.url.replace("127.0.0.1", "localhost");
-		const target = serve(
-			{
-				"/": () =>
-					new Response(
-						`<!doctype html><html lang="en"><head><title>Consent fixture</title>
-<script src="${thirdParty}lib.js"></script>
-<script>document.cookie = "_ga=GA1.1.123456; path=/; max-age=31536000"; document.cookie = "theme=dark; path=/"; localStorage.setItem("ajs_user_id", "secret-user-value"); localStorage.setItem("prefs", "x");</script>
-</head><body><main><h1>Hello</h1>
-<div id="onetrust-banner-sdk" style="position:fixed;bottom:0;width:100%;height:80px">We use cookies <button>Accept</button></div>
-</main></body></html>`,
-						{
-							headers: {
-								"content-type": "text/html",
-								"set-cookie": "srv_session=abc123secret; Path=/; HttpOnly",
-							},
-						},
-					),
-			},
-			() => new Response("not found", { status: 404 }),
-		);
+		const target = consentSite(other.url.replace("127.0.0.1", "localhost"));
 		try {
 			const report = await runAuditor(browser, target.url, {
 				browser: true,
@@ -318,17 +336,18 @@ describe("webapp.browser", () => {
 
 			const cookies = rule("tracking-cookie-before-consent");
 			expect(cookies).toHaveLength(1);
-			expect(cookies[0]?.evidence).toContain("_ga");
-			expect(cookies[0]?.confidence).toBe("high");
-			expect(rule("tracking-storage-before-consent")[0]?.evidence).toBe(
-				"ajs_user_id",
-			);
-			expect(rule("consent-platform")[0]?.evidence).toBe("OneTrust");
-			const third = rule("third-party-requests")[0];
-			expect(third?.message).toContain("localhost");
-			const inventory = rule("storage-before-interaction")[0];
-			expect(inventory?.message).toContain("srv_session");
-			expect(inventory?.message).toContain("prefs");
+			const gaCookie = must(cookies[0], "the tracking cookie finding");
+			expect(gaCookie.evidence).toContain("_ga");
+			expect(gaCookie.confidence).toBe("high");
+			expect(
+				firstOf(findings, "tracking-storage-before-consent").evidence,
+			).toBe("ajs_user_id");
+			expect(firstOf(findings, "consent-platform").evidence).toBe("OneTrust");
+			const third = firstOf(findings, "third-party-requests");
+			expect(third.message).toContain("localhost");
+			const inventory = firstOf(findings, "storage-before-interaction");
+			expect(inventory.message).toContain("srv_session");
+			expect(inventory.message).toContain("prefs");
 
 			// Cookie and storage values never leave the browser.
 			const all = JSON.stringify(findings);

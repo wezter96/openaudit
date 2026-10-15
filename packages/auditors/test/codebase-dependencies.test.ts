@@ -24,6 +24,7 @@ import {
 	parseDependencies,
 } from "../src/codebase/dependencies";
 import { fixture } from "./helpers";
+import { firstResult, must } from "./must";
 
 // Lockfiles are stored as `*.fixture` so repository dependency scanners do not
 // raise alerts for their intentionally vulnerable versions.
@@ -284,13 +285,13 @@ describe("code.dependencies auditor", () => {
 		const calls: Array<{ url: string; init?: HttpRequest }> = [];
 		const report = await runWithMockOsv(root, calls);
 		const findings = report.results.flatMap((r) => r.findings);
-		expect(report.results[0]?.status).toBe("failed");
+		expect(firstResult(report).status).toBe("failed");
 
 		const batches = calls.filter(
 			(c) => c.url === "https://api.osv.dev/v1/querybatch",
 		);
 		expect(batches).toHaveLength(1);
-		expect(batches[0]?.init?.method).toBe("POST");
+		expect(must(batches[0], "the batch call").init?.method).toBe("POST");
 
 		const vulns = findings.filter(
 			(f) => f.ruleId === "code.dependencies/vulnerable-dependency",
@@ -301,18 +302,21 @@ describe("code.dependencies auditor", () => {
 			"django@3.2.0 PYSEC-2021-9",
 			"lodash@4.17.20 GHSA-35jh-r3h4-6jhm",
 		]);
-		const lodash = vulns.find((f) => f.evidence?.startsWith("lodash"));
-		expect(lodash?.severity).toBe("high");
-		expect(lodash?.remediation).toContain("4.17.21");
-		expect(lodash?.location).toEqual({ file: "bun.lock", line: 7 });
-		expect(lodash?.tags).toEqual([
+		const lodash = must(
+			vulns.find((f) => f.evidence?.startsWith("lodash")),
+			"the lodash finding",
+		);
+		expect(lodash.severity).toBe("high");
+		expect(lodash.remediation).toContain("4.17.21");
+		expect(lodash.location).toEqual({ file: "bun.lock", line: 7 });
+		expect(lodash.tags).toEqual([
 			"owasp-a06",
 			"cwe-77",
 			"cwe-94",
 			"ghsa-35jh-r3h4-6jhm",
 			"cve-2021-23337",
 		]);
-		expect(lodash?.references?.[0]).toBe(
+		expect(lodash.references?.[0]).toBe(
 			"https://osv.dev/vulnerability/GHSA-35jh-r3h4-6jhm",
 		);
 

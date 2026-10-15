@@ -2,11 +2,12 @@ import { describe, expect, test } from "bun:test";
 
 import { auditWorkflow, githubActions } from "../src/infra/github-actions";
 import { fixture, ruleIds, runAuditor } from "./helpers";
+import { findingsOf, firstResult, must } from "./must";
 
 describe("iac.github-actions", () => {
 	test("flags insecure workflows", async () => {
 		const report = await runAuditor(githubActions, fixture("infra", "gha-bad"));
-		expect(report.results[0]?.status).toBe("failed");
+		expect(firstResult(report).status).toBe("failed");
 		expect(ruleIds(report)).toEqual([
 			"iac.github-actions/action-not-pinned",
 			"iac.github-actions/action-not-pinned",
@@ -22,22 +23,29 @@ describe("iac.github-actions", () => {
 			"iac.github-actions/self-hosted-runner-public",
 			"iac.github-actions/unsecure-commands",
 		]);
-		const findings = report.results[0]?.findings ?? [];
+		const findings = findingsOf(report);
 		const byRule = (id: string) =>
 			findings.filter((f) => f.ruleId === `iac.github-actions/${id}`);
-		expect(byRule("pr-target-checkout")[0]?.severity).toBe("critical");
-		expect(byRule("pr-target-checkout")[0]?.location?.line).toBe(15);
-		expect(byRule("script-injection")[0]?.location).toEqual({
+		const prTarget = must(
+			byRule("pr-target-checkout")[0],
+			"pr-target-checkout",
+		);
+		expect(prTarget.severity).toBe("critical");
+		expect(must(prTarget.location, "its location").line).toBe(15);
+		expect(
+			must(byRule("script-injection")[0], "script-injection").location,
+		).toEqual({
 			file: ".github/workflows/pr.yml",
 			line: 20,
 		});
 		const pins = byRule("action-not-pinned");
-		expect(
-			pins.find((f) => f.evidence?.includes("actions/checkout"))?.severity,
-		).toBe("low");
-		expect(pins.find((f) => f.evidence?.includes("some-org"))?.severity).toBe(
-			"medium",
-		);
+		const pinOf = (action: string) =>
+			must(
+				pins.find((f) => (f.evidence ?? "").includes(action)),
+				`a pin finding for ${action}`,
+			);
+		expect(pinOf("actions/checkout").severity).toBe("low");
+		expect(pinOf("some-org").severity).toBe("medium");
 	});
 
 	test("passes a hardened workflow", async () => {

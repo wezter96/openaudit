@@ -21,6 +21,7 @@ import {
 	readProwlerSettings,
 } from "../src/cloud/prowler";
 import { fixture } from "./helpers";
+import { must } from "./must";
 
 // Reconstructed from Prowler's docs and source (the OCSF Detection Finding
 // that `--output-formats json-ocsf` emits); Prowler itself was not installed.
@@ -69,15 +70,15 @@ describe("parseProwlerReport", () => {
 			"cloud.prowler/cloudtrail-log-file-validation-enabled low",
 			"cloud.prowler/account-maintain-current-contact-details info",
 		]); // PASS, MANUAL and the muted ("Suppressed") FAIL are dropped
-		const s3 = findings[0];
-		expect(s3?.location).toEqual({
+		const s3 = must(findings[0], "the S3 finding");
+		expect(s3.location).toEqual({
 			url: "arn:aws:s3:::customer-uploads-prod",
 			selector: "AwsS3Bucket",
 		});
-		expect(s3?.category).toBe("security");
-		expect(s3?.evidence).toContain("customer-uploads-prod");
-		expect(s3?.message).toContain("eu-west-1");
-		expect(s3?.tags).toEqual([
+		expect(s3.category).toBe("security");
+		expect(s3.evidence).toContain("customer-uploads-prod");
+		expect(s3.message).toContain("eu-west-1");
+		expect(s3.tags).toEqual([
 			"prowler",
 			"aws",
 			"cis-1.4",
@@ -85,11 +86,11 @@ describe("parseProwlerReport", () => {
 			"aws-foundational-security-best-practices",
 			"pci-3.2.1",
 		]);
-		expect(s3?.references).toEqual([
+		expect(s3.references).toEqual([
 			"https://docs.aws.amazon.com/AmazonS3/latest/dev/access-control-block-public-access.html",
 			"https://docs.aws.amazon.com/AmazonS3/latest/user-guide/block-public-access-account.html",
 		]); // the CLI one-liner in remediation.references is not a URL
-		expect(s3?.remediation).toContain("Public Access Block");
+		expect(s3.remediation).toContain("Public Access Block");
 		expect(findings[3]?.tags).toEqual(["prowler", "aws"]);
 	});
 

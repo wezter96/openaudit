@@ -26,6 +26,7 @@ import {
 	secretsHistory,
 } from "../src/codebase/secrets-history";
 import { fixture, runAuditor } from "./helpers";
+import { firstResult, must } from "./must";
 
 const recorded: unknown = JSON.parse(
 	readFileSync(fixture("secrets-history", "gitleaks-git.json"), "utf8"),
@@ -47,23 +48,24 @@ describe("parseSecretsHistory", () => {
 			"code.secrets-history/aws-access-token a.env",
 			"code.secrets-history/github-pat b.py",
 		]);
-		const aws = findings[0];
-		expect(aws?.message).toContain("commit d2d6f0a5");
-		expect(aws?.message).toContain("on 2026-10-13");
-		expect(aws?.message).toContain("by T");
-		expect(aws?.message).toContain(
+		const aws = must(findings[0], "the AWS finding");
+		expect(aws.message).toContain("commit d2d6f0a5");
+		expect(aws.message).toContain("on 2026-10-13");
+		expect(aws.message).toContain("by T");
+		expect(aws.message).toContain(
 			"removed from the tree but is still in git history; rotate it",
 		);
-		expect(aws?.tags).toEqual(
+		expect(aws.tags).toEqual(
 			expect.arrayContaining(["secrets", "cwe-798", "removed-from-tree"]),
 		);
-		expect(findings[1]?.message).toContain("still present in the current tree");
-		expect(findings[1]?.tags).not.toContain("removed-from-tree");
+		const pat = must(findings[1], "the PAT finding");
+		expect(pat.message).toContain("still present in the current tree");
+		expect(pat.tags).not.toContain("removed-from-tree");
 		const out = JSON.stringify(findings);
 		expect(out).not.toContain(AWS);
 		expect(out).not.toContain(PAT);
 		expect(out).not.toContain("a@b.c"); // author email is not reported
-		expect(aws?.evidence).toStartWith("AKIA");
+		expect(aws.evidence).toStartWith("AKIA");
 	});
 
 	test("says so when HEAD could not be checked, and groups repeat hits", () => {
@@ -199,14 +201,14 @@ describe("git hardening (real git)", () => {
 		async () => {
 			const { repo, markers } = hostileRepo();
 			const report = await runAuditor(secretsHistory, repo);
-			const result = report.results[0];
-			expect(result?.status).toBe("failed");
-			expect(result?.findings.map((f) => f.ruleId)).toEqual([
+			const result = firstResult(report);
+			expect(result.status).toBe("failed");
+			expect(result.findings.map((f) => f.ruleId)).toEqual([
 				"code.secrets-history/aws-access-token",
 			]);
-			const f = result?.findings[0];
-			expect(f?.message).toContain("removed from the tree");
-			expect(f?.location?.file).toBe("a.env");
+			const f = must(result.findings[0], "the history finding");
+			expect(f.message).toContain("removed from the tree");
+			expect(must(f.location, "its location").file).toBe("a.env");
 			expect(JSON.stringify(report)).not.toContain(AWS);
 			for (const m of ["textconv", "fsmonitor", "external", "hook"])
 				expect(existsSync(join(markers, m))).toBe(false);

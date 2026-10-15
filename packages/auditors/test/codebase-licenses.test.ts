@@ -12,6 +12,7 @@ import {
 	pythonLicense,
 } from "../src/codebase/licenses";
 import { fixture, runAuditor } from "./helpers";
+import { must } from "./must";
 
 // Lockfiles are stored as `*.fixture`, and installed metadata under
 // `_node_modules` / `_venv`, so neither git nor repository scanners treat them
@@ -66,6 +67,9 @@ const summary = (report: Report) =>
 
 const find = (report: Report, pkg: string): Finding | undefined =>
 	result(report).findings.find((f) => f.evidence?.startsWith(`${pkg}:`));
+
+const found = (report: Report, pkg: string): Finding =>
+	must(find(report, pkg), `a finding for ${pkg}`);
 
 describe("licence metadata", () => {
 	test("npm package.json shapes", () => {
@@ -158,7 +162,7 @@ describe("code.licenses", () => {
 			"unknown-license closed-lib@3.0.0",
 		]);
 
-		const gpl = find(report, "gpl-lib@2.0.0");
+		const gpl = found(report, "gpl-lib@2.0.0");
 		expect(gpl).toMatchObject({
 			severity: "high",
 			category: "compliance",
@@ -166,30 +170,32 @@ describe("code.licenses", () => {
 			evidence: "gpl-lib@2.0.0: GPL-3.0",
 			tags: ["licence", "licence-policy"],
 		});
-		expect(gpl?.remediation).toContain("ignorePackages");
+		expect(gpl.remediation).toContain("ignorePackages");
 
 		// Nested installs are read from the package-lock install path.
-		expect(find(report, "nested@2.2.2")?.message).toContain(
+		expect(found(report, "nested@2.2.2").message).toContain(
 			"(from node_modules/wrapper/node_modules/nested/package.json)",
 		);
-		expect(find(report, "gplpkg@1.0.0")?.message).toContain(
+		expect(found(report, "gplpkg@1.0.0").message).toContain(
 			".venv/lib/python3.12/site-packages/gplpkg-1.0.0.dist-info/METADATA",
 		);
-		expect(find(report, "acme/gpl-php@1.0.0")?.location?.file).toBe(
-			"composer.lock",
-		);
-		expect(find(report, "closed-lib@3.0.0")?.severity).toBe("low");
+		const php = found(report, "acme/gpl-php@1.0.0");
+		expect(must(php.location, "its location").file).toBe("composer.lock");
+		expect(found(report, "closed-lib@3.0.0").severity).toBe("low");
 
-		const noData = result(report).findings.find((f) =>
-			f.ruleId.endsWith("/no-license-data"),
+		const noData = must(
+			result(report).findings.find((f) =>
+				f.ruleId.endsWith("/no-license-data"),
+			),
+			"the no-license-data finding",
 		);
-		expect(noData?.severity).toBe("info");
+		expect(noData.severity).toBe("info");
 		for (const pkg of [
 			"not-installed@1.0.0",
 			"mystery@1.0.0",
 			"github.com/example/gomod@1.2.3",
 		])
-			expect(noData?.message).toContain(pkg);
+			expect(noData.message).toContain(pkg);
 	});
 
 	test("allow list flags everything else", async () => {

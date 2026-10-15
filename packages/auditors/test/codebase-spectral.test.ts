@@ -4,6 +4,7 @@ import {
 	Exec,
 	type ExecOptions,
 	type ExecResult,
+	type FindingInput,
 	Http,
 	type Report,
 	runAudit,
@@ -17,6 +18,7 @@ import {
 	spectral,
 } from "../src/codebase/spectral";
 import { fixture } from "./helpers";
+import { findingsOf, findingWith, firstResult, must } from "./must";
 
 const recorded: unknown = JSON.parse(
 	readFileSync(fixture("api", "spectral", "spectral-output.json"), "utf8"),
@@ -27,6 +29,13 @@ interface Call {
 	readonly options: ExecOptions | undefined;
 	readonly ruleset?: string;
 }
+
+/** The ruleset file passed to spectral, read while the call runs. */
+const rulesetOf = (cmd: ReadonlyArray<string>): string | undefined => {
+	const i = cmd.indexOf("--ruleset");
+	const path = i >= 0 ? cmd[i + 1] : undefined;
+	return path && existsSync(path) ? readFileSync(path, "utf8") : undefined;
+};
 
 const runSpectral = async (
 	target: string,
@@ -52,15 +61,7 @@ const runSpectral = async (
 							Effect.succeed("which" in opts ? opts.which : "/bin/spectral"),
 						run: (cmd: ReadonlyArray<string>, options?: ExecOptions) =>
 							Effect.sync((): ExecResult => {
-								const i = cmd.indexOf("--ruleset");
-								calls.push({
-									cmd,
-									options,
-									ruleset:
-										i >= 0 && cmd[i + 1] && existsSync(cmd[i + 1] as string)
-											? readFileSync(cmd[i + 1] as string, "utf8")
-											: undefined,
-								});
+								calls.push({ cmd, options, ruleset: rulesetOf(cmd) });
 								return {
 									code: opts.code ?? 0,
 									stdout: opts.stdout ?? "[]",
@@ -75,28 +76,33 @@ const runSpectral = async (
 	return { report, calls };
 };
 
+const fileOf = (f: FindingInput | undefined) =>
+	must(must(f, "a finding").location, "its location").file;
+
 describe("spectral parser", () => {
 	test("maps recorded output to findings with 1-based lines", () => {
 		const findings = parseSpectralOutput(recorded, "/repo");
 		expect(findings.length).toBe(17);
-		const invalid = findings.find(
-			(f) => f.ruleId === "code.spectral/invalid-ref",
+		const invalid = findingWith(findings, "code.spectral/invalid-ref");
+		expect(invalid.severity).toBe("medium");
+		expect(invalid.location).toEqual({ file: "bad.yaml", line: 9 });
+		expect(invalid.category).toBe("reliability");
+		const contact = must(
+			findings.find(
+				(f) =>
+					f.ruleId === "code.spectral/info-contact" &&
+					f.location?.file === "openapi.yaml",
+			),
+			"the openapi.yaml info-contact finding",
 		);
-		expect(invalid?.severity).toBe("medium");
-		expect(invalid?.location).toEqual({ file: "bad.yaml", line: 9 });
-		expect(invalid?.category).toBe("reliability");
-		const contact = findings.find(
-			(f) =>
-				f.ruleId === "code.spectral/info-contact" &&
-				f.location?.file === "openapi.yaml",
+		expect(contact.severity).toBe("low");
+		expect(must(contact.location, "its location").line).toBe(2);
+		const latest = findingWith(
+			findings,
+			"code.spectral/asyncapi-latest-version",
 		);
-		expect(contact?.severity).toBe("low");
-		expect(contact?.location?.line).toBe(2);
-		const latest = findings.find(
-			(f) => f.ruleId === "code.spectral/asyncapi-latest-version",
-		);
-		expect(latest?.severity).toBe("info");
-		expect(latest?.evidence).toBe("asyncapi-latest-version: asyncapi");
+		expect(latest.severity).toBe("info");
+		expect(latest.evidence).toBe("asyncapi-latest-version: asyncapi");
 	});
 
 	test("tolerates empty and unexpected shapes", () => {
@@ -153,21 +159,23 @@ describe("code.spectral", () => {
 			},
 		);
 		expect(calls.length).toBe(1);
-		const call = calls[0];
-		expect(call?.cmd.slice(0, 2)).toEqual(["/bin/spectral", "lint"]);
-		expect(call?.cmd).toContain("--quiet");
-		expect(call?.cmd).toContain("json");
-		expect(call?.ruleset).toContain("spectral:oas");
-		expect(call?.ruleset).toContain("spectral:asyncapi");
-		const ruleset = call?.cmd[call.cmd.indexOf("--ruleset") + 1] ?? "";
+		const call = must(calls[0], "the spectral call");
+		expect(call.cmd.slice(0, 2)).toEqual(["/bin/spectral", "lint"]);
+		expect(call.cmd).toContain("--quiet");
+		expect(call.cmd).toContain("json");
+		expect(call.ruleset).toContain("spectral:oas");
+		expect(call.ruleset).toContain("spectral:asyncapi");
+		const ruleset = call.cmd[call.cmd.indexOf("--ruleset") + 1] ?? "";
 		expect(ruleset.startsWith(fixture("api"))).toBe(false);
-		expect(call?.options?.cwd).not.toContain("fixtures");
-		expect(call?.options?.cwd).toContain("openaudit-spectral-");
-		expect(existsSync(call?.options?.cwd ?? "")).toBe(false);
-		expect(report.results[0]?.findings.map((f) => f.ruleId)).toEqual([
+		const cwd = call.options?.cwd;
+		expect(cwd).not.toContain("fixtures");
+		expect(cwd).toContain("openaudit-spectral-");
+		expect(existsSync(cwd ?? "")).toBe(false);
+		const findings = firstResult(report).findings;
+		expect(findings.map((f) => f.ruleId)).toEqual([
 			"code.spectral/info-contact",
 		]);
-		expect(report.results[0]?.findings[0]?.location?.file).toBe("openapi.yaml");
+		expect(fileOf(findings[0])).toBe("openapi.yaml");
 	});
 
 	test("does not lint documents with remote, transitive remote or escaping refs", async () => {
@@ -176,21 +184,20 @@ describe("code.spectral", () => {
 				fixture("api", "spectral-refs", dir),
 			);
 			expect(calls).toEqual([]);
-			const findings = report.results[0]?.findings ?? [];
+			const findings = findingsOf(report);
 			expect(findings.map((f) => f.ruleId)).toEqual([
 				"code.spectral/skipped-unsafe-ref",
 			]);
-			expect(findings[0]?.severity).toBe("info");
-			expect(findings[0]?.location?.file).toBe("openapi.yaml");
+			expect(must(findings[0], "the skip finding").severity).toBe("info");
+			expect(fileOf(findings[0])).toBe("openapi.yaml");
 		}
 	});
 
 	test("skips with an install hint when spectral is missing", async () => {
 		const { report } = await runSpectral(fixture("api"), { which: undefined });
-		expect(report.results[0]?.status).toBe("skipped");
-		expect(report.results[0]?.message).toContain(
-			"npm install -g @stoplight/spectral-cli",
-		);
+		const result = firstResult(report);
+		expect(result.status).toBe("skipped");
+		expect(result.message).toContain("npm install -g @stoplight/spectral-cli");
 	});
 
 	test("passes with no spec files and no tool invocation", async () => {

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	type Auditor,
+	type AuditorStatus,
 	Exec,
 	type ExecResult,
 	Http,
@@ -24,6 +25,7 @@ import {
 	scancode,
 } from "../src/codebase/quality-tools";
 import { fixture } from "./helpers";
+import { firstResult } from "./must";
 
 const sampleText = (name: string) =>
 	readFileSync(fixture("codebase", "external", `${name}.json`), "utf8");
@@ -66,6 +68,23 @@ const runWithExec = (
 			),
 		),
 	);
+
+const present = (bin: string) => `/usr/local/bin/${bin}`;
+const unreachable = () => Promise.reject(new Error("unreachable"));
+const exits =
+	(code: number, stderr = "") =>
+	async (): Promise<ExecResult> => ({ code, stdout: "", stderr });
+
+/** The report's single result has `status` and a message containing each of `parts`. */
+const expectResult = (
+	report: Report,
+	status: AuditorStatus,
+	...parts: string[]
+) => {
+	const result = firstResult(report);
+	expect(result.status).toBe(status);
+	for (const part of parts) expect(result.message).toContain(part);
+};
 
 describe("jscpd parser", () => {
 	test("one finding per clone pair plus a project-wide ratio", () => {
@@ -158,11 +177,9 @@ describe("code.jscpd auditor", () => {
 			jscpd,
 			fixture("codebase", "dup"),
 			() => undefined,
-			() => Promise.reject(new Error("unreachable")),
+			unreachable,
 		);
-		expect(report.results[0]?.status).toBe("skipped");
-		expect(report.results[0]?.message).toContain("jscpd not found on PATH");
-		expect(report.results[0]?.message).toContain("Install");
+		expectResult(report, "skipped", "jscpd not found on PATH", "Install");
 		expect(jscpd.engine).toBe("external");
 		expect(jscpd.defaultEnabled).toBe(true);
 	});
@@ -172,7 +189,7 @@ describe("code.jscpd auditor", () => {
 		const report = await runWithExec(
 			jscpd,
 			fixture("codebase", "dup"),
-			(bin) => `/usr/local/bin/${bin}`,
+			present,
 			async (argv) => {
 				cmd = argv;
 				const out = argv[argv.indexOf("--output") + 1] ?? "";
@@ -198,15 +215,10 @@ describe("code.jscpd auditor", () => {
 				}),
 			);
 			let cmd: ReadonlyArray<string> = [];
-			await runWithExec(
-				jscpd,
-				root,
-				(bin) => `/usr/local/bin/${bin}`,
-				async (argv) => {
-					cmd = argv;
-					return { code: 0, stdout: "", stderr: "" };
-				},
-			);
+			await runWithExec(jscpd, root, present, async (argv) => {
+				cmd = argv;
+				return { code: 0, stdout: "", stderr: "" };
+			});
 			expect(cmd[cmd.indexOf("--ignore") + 1]).toBe(
 				"**/node_modules/**,**/dist/**,**/build/**,**/.git/**,**/*.min.js,**/vendor/**,docs/generated.html",
 			);
@@ -219,8 +231,8 @@ describe("code.jscpd auditor", () => {
 		const report = await runWithExec(
 			jscpd,
 			fixture("codebase", "dup"),
-			(bin) => `/usr/local/bin/${bin}`,
-			async () => ({ code: 0, stdout: "", stderr: "" }),
+			present,
+			exits(0),
 		);
 		expect(report.results[0]?.status).toBe("passed");
 	});
@@ -229,11 +241,10 @@ describe("code.jscpd auditor", () => {
 		const report = await runWithExec(
 			jscpd,
 			fixture("codebase", "dup"),
-			(bin) => `/usr/local/bin/${bin}`,
-			async () => ({ code: 2, stdout: "", stderr: "bad option" }),
+			present,
+			exits(2, "bad option"),
 		);
-		expect(report.results[0]?.status).toBe("error");
-		expect(report.results[0]?.message).toContain("bad option");
+		expectResult(report, "error", "bad option");
 	});
 });
 
@@ -248,11 +259,10 @@ describe("code.knip auditor", () => {
 		const report = await runWithExec(
 			knip,
 			fixture("codebase", "external"),
-			(bin) => `/usr/local/bin/${bin}`,
-			() => Promise.reject(new Error("unreachable")),
+			present,
+			unreachable,
 		);
-		expect(report.results[0]?.status).toBe("skipped");
-		expect(report.results[0]?.message).toContain("No package.json");
+		expectResult(report, "skipped", "No package.json");
 	});
 
 	test("skip when node_modules is missing", async () => {
@@ -260,11 +270,10 @@ describe("code.knip auditor", () => {
 		const report = await runWithExec(
 			knip,
 			fixture("codebase", "dup"),
-			(bin) => `/usr/local/bin/${bin}`,
-			() => Promise.reject(new Error("unreachable")),
+			present,
+			unreachable,
 		);
-		expect(report.results[0]?.status).toBe("skipped");
-		expect(report.results[0]?.message).toContain("node_modules is missing");
+		expectResult(report, "skipped", "node_modules is missing");
 	});
 
 	test("skip with an install hint when the tool is missing", async () => {
@@ -272,14 +281,8 @@ describe("code.knip auditor", () => {
 		try {
 			await writeFile(join(dir, "package.json"), '{"name":"x"}');
 			await mkdir(join(dir, "node_modules"));
-			const report = await runWithExec(
-				knip,
-				dir,
-				() => undefined,
-				() => Promise.reject(new Error("unreachable")),
-			);
-			expect(report.results[0]?.status).toBe("skipped");
-			expect(report.results[0]?.message).toContain("knip not found on PATH");
+			const report = await runWithExec(knip, dir, () => undefined, unreachable);
+			expectResult(report, "skipped", "knip not found on PATH");
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
@@ -291,15 +294,10 @@ describe("code.knip auditor", () => {
 			await writeFile(join(dir, "package.json"), '{"name":"x"}');
 			await mkdir(join(dir, "node_modules"));
 			let cmd: ReadonlyArray<string> = [];
-			const report = await runWithExec(
-				knip,
-				dir,
-				(bin) => `/usr/local/bin/${bin}`,
-				async (argv) => {
-					cmd = argv;
-					return { code: 0, stdout: sampleText("knip"), stderr: "" };
-				},
-			);
+			const report = await runWithExec(knip, dir, present, async (argv) => {
+				cmd = argv;
+				return { code: 0, stdout: sampleText("knip"), stderr: "" };
+			});
 			expect(cmd).toEqual([
 				"/usr/local/bin/knip",
 				"--reporter",
@@ -410,11 +408,9 @@ describe("code.scancode auditor", () => {
 			scancode,
 			fixture("codebase", "external"),
 			() => undefined,
-			() => Promise.reject(new Error("unreachable")),
+			unreachable,
 		);
-		expect(report.results[0]?.status).toBe("skipped");
-		expect(report.results[0]?.message).toContain("scancode not found on PATH");
-		expect(report.results[0]?.message).toContain("Install");
+		expectResult(report, "skipped", "scancode not found on PATH", "Install");
 	});
 
 	test("runs scancode with JSON output in a temp file and parses it", async () => {
@@ -422,7 +418,7 @@ describe("code.scancode auditor", () => {
 		const report = await runWithExec(
 			scancode,
 			fixture("codebase", "external"),
-			(bin) => `/usr/local/bin/${bin}`,
+			present,
 			async (argv) => {
 				cmd = argv;
 				const out = argv[argv.indexOf("--json") + 1] ?? "";
@@ -450,10 +446,9 @@ describe("code.scancode auditor", () => {
 		const report = await runWithExec(
 			scancode,
 			fixture("codebase", "external"),
-			(bin) => `/usr/local/bin/${bin}`,
-			async () => ({ code: 0, stdout: "", stderr: "" }),
+			present,
+			exits(0),
 		);
-		expect(report.results[0]?.status).toBe("error");
-		expect(report.results[0]?.message).toContain("did not write a report");
+		expectResult(report, "error", "did not write a report");
 	});
 });

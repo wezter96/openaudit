@@ -8,6 +8,7 @@ import {
 	Exec,
 	type ExecOptions,
 	type ExecResult,
+	type FindingInput,
 	Http,
 	type Report,
 	runAudit,
@@ -44,6 +45,7 @@ import {
 	validSbomPath,
 } from "../src/codebase/supply-chain-tools";
 import { fixture, runAuditor } from "./helpers";
+import { firstResult, must } from "./must";
 
 const text = (name: string) =>
 	readFileSync(fixture("codebase", "external", name), "utf8");
@@ -63,6 +65,9 @@ const summary = (
 			`${f.ruleId} ${f.severity}/${f.confidence} ${f.location?.file}:${f.location?.line ?? "-"}`,
 	);
 
+const fileOf = (f: FindingInput | undefined) =>
+	must(must(f, "a finding").location, "its location").file;
+
 describe("govulncheck", () => {
 	test("splits concatenated JSON objects", () => {
 		expect(splitJsonStream('{"a":"}{"}\n{"b":{"c":1}} junk {"d":2}')).toEqual([
@@ -80,23 +85,23 @@ describe("govulncheck", () => {
 			"code.govulncheck/vulnerable-dependency low/low go.mod:-",
 			"code.govulncheck/vulnerable-dependency low/low go.mod:-",
 		]);
-		const [called, pkgOnly, moduleOnly] = findings;
-		expect(called?.title).toBe(
+		const called = must(findings[0], "the reachable finding");
+		const pkgOnly = must(findings[1], "the imported-only finding");
+		const moduleOnly = must(findings[2], "the module-only finding");
+		expect(called.title).toBe(
 			"golang.org/x/text@v0.3.5: Out-of-bounds read in golang.org/x/text/language",
 		);
-		expect(called?.remediation).toBe(
+		expect(called.remediation).toBe(
 			"Upgrade golang.org/x/text to v0.3.7 or later.",
 		);
-		expect(called?.message).toContain("reachable");
-		expect(called?.tags).toContain("cve-2021-38561");
-		expect(called?.tags).toContain("reachable");
-		expect(pkgOnly?.message).toContain(
+		expect(called.message).toContain("reachable");
+		expect(called.tags).toContain("cve-2021-38561");
+		expect(called.tags).toContain("reachable");
+		expect(pkgOnly.message).toContain(
 			"imported but the vulnerable function is not called",
 		);
-		expect(moduleOnly?.message).toContain("not imported or called");
-		expect(called?.references).toContain(
-			"https://pkg.go.dev/vuln/GO-2021-0113",
-		);
+		expect(moduleOnly.message).toContain("not imported or called");
+		expect(called.references).toContain("https://pkg.go.dev/vuln/GO-2021-0113");
 	});
 
 	test("module-relative paths are prefixed with the module dir", () => {
@@ -176,23 +181,28 @@ describe("cargo-audit", () => {
 			"code.cargo-audit/yanked-dependency low/high Cargo.lock:-",
 		]);
 		// A yanked warning has `"advisory": null`, so there is no id to cite.
-		const yanked = findings.find((f) => f.ruleId.endsWith("yanked-dependency"));
-		expect(yanked?.title).toBe("bytes@1.2.0: was yanked from crates.io");
-		expect(yanked?.references).toEqual([]);
-		expect(
-			findings.find((f) => f.ruleId.endsWith("unmaintained-dependency"))
-				?.evidence,
-		).toBe("atty@0.2.14 RUSTSEC-2024-0375");
-		expect(findings[0]?.title).toBe(
+		const ending = (suffix: string) =>
+			must(
+				findings.find((f) => f.ruleId.endsWith(suffix)),
+				`a ${suffix} finding`,
+			);
+		const yanked = ending("yanked-dependency");
+		expect(yanked.title).toBe("bytes@1.2.0: was yanked from crates.io");
+		expect(yanked.references).toEqual([]);
+		expect(ending("unmaintained-dependency").evidence).toBe(
+			"atty@0.2.14 RUSTSEC-2024-0375",
+		);
+		const time = must(findings[0], "the time finding");
+		expect(time.title).toBe(
 			"time@0.1.45: Potential segfault in the time crate",
 		);
-		expect(findings[0]?.remediation).toBe("Upgrade time to 0.2.23 or later.");
-		expect(findings[0]?.tags).toEqual([
+		expect(time.remediation).toBe("Upgrade time to 0.2.23 or later.");
+		expect(time.tags).toEqual([
 			"owasp-a06",
 			"cve-2020-26235",
 			"ghsa-wcg3-cvx6-7396",
 		]);
-		expect(findings[0]?.references?.[0]).toBe(
+		expect(time.references?.[0]).toBe(
 			"https://rustsec.org/advisories/RUSTSEC-2020-0071.html",
 		);
 	});
@@ -207,23 +217,25 @@ describe("npm / pnpm / bun audit", () => {
 	test("npm v7+ report: one finding per advisory with lockfile versions", () => {
 		const findings = parseNpmAuditReport(sample("npm-audit"), "/repo", npmLock);
 		expect(findings.length).toBe(8);
-		const cmd = findings.find(
-			(f) => f.evidence === "lodash@4.17.15 GHSA-35jh-r3h4-6jhm",
+		const cmd = must(
+			findings.find((f) => f.evidence === "lodash@4.17.15 GHSA-35jh-r3h4-6jhm"),
+			"the command injection finding",
 		);
-		expect(cmd?.severity).toBe("high");
-		expect(cmd?.title).toBe("lodash@4.17.15: Command Injection in lodash");
-		expect(cmd?.remediation).toBe("Upgrade lodash to 4.17.21 or later.");
-		expect(cmd?.tags).toEqual([
+		expect(cmd.severity).toBe("high");
+		expect(cmd.title).toBe("lodash@4.17.15: Command Injection in lodash");
+		expect(cmd.remediation).toBe("Upgrade lodash to 4.17.21 or later.");
+		expect(cmd.tags).toEqual([
 			"owasp-a06",
 			"ghsa-35jh-r3h4-6jhm",
 			"cwe-77",
 			"cwe-94",
 		]);
-		expect(cmd?.location?.file).toBe("package-lock.json");
-		const ranges = findings.find((f) =>
-			f.evidence?.endsWith("GHSA-f23m-r3pf-42rh"),
+		expect(fileOf(cmd)).toBe("package-lock.json");
+		const ranges = must(
+			findings.find((f) => f.evidence?.endsWith("GHSA-f23m-r3pf-42rh")),
+			"the ranges finding",
 		);
-		expect(ranges?.remediation).toContain("Upgrade lodash to 4.18.1");
+		expect(ranges.remediation).toContain("Upgrade lodash to 4.18.1");
 	});
 
 	test("pnpm report", () => {
@@ -515,15 +527,16 @@ describe("auditor runs", () => {
 				return { code: 0, stdout: text("govulncheck.json"), stderr: "" };
 			},
 		);
-		expect(calls[0]?.cmd).toEqual([
+		const call = must(calls[0], "the govulncheck call");
+		expect(call.cmd).toEqual([
 			"/usr/local/bin/govulncheck",
 			"-format",
 			"json",
 			"./...",
 		]);
-		expect(calls[0]?.options?.cwd).toContain("supply/go");
-		expect(calls[0]?.options?.env?.CGO_ENABLED).toBe("0");
-		expect(report.results[0]?.findings.length).toBe(4);
+		expect(call.options?.cwd).toContain("supply/go");
+		expect(call.options?.env?.CGO_ENABLED).toBe("0");
+		expect(firstResult(report).findings.length).toBe(4);
 		expect(govulncheck.defaultEnabled).toBe(false);
 	});
 
@@ -540,9 +553,10 @@ describe("auditor runs", () => {
 				return { code: 1, stdout: text("pip-audit.json"), stderr: "" };
 			},
 		);
-		expect(calls[0]?.cmd.slice(1)).toEqual([
+		const call = must(calls[0], "the pip-audit call");
+		expect(call.cmd.slice(1)).toEqual([
 			"-r",
-			calls[0]?.cmd[2] ?? "",
+			call.cmd[2] ?? "",
 			"--no-deps",
 			"--disable-pip",
 			"--format",
@@ -550,11 +564,9 @@ describe("auditor runs", () => {
 			"--progress-spinner",
 			"off",
 		]);
-		expect(calls[0]?.cmd[2]).not.toContain("py-pinned");
+		expect(call.cmd[2]).not.toContain("py-pinned");
 		expect(pins).toBe("requests==2.19.0\ndjango[argon2]==3.2.0\n");
-		expect(report.results[0]?.findings[0]?.location?.file).toBe(
-			"requirements.txt",
-		);
+		expect(fileOf(firstResult(report).findings[0])).toBe("requirements.txt");
 	});
 
 	test("pip-audit reads poetry.lock pins", async () => {
@@ -587,14 +599,16 @@ describe("auditor runs", () => {
 				return { code: 1, stdout: text("cargo-audit.json"), stderr: "" };
 			},
 		);
-		expect(calls[0]?.cmd.slice(1, 4)).toEqual(["audit", "--json", "-f"]);
-		expect(calls[0]?.cmd[4]).toEndWith("supply/cargo/Cargo.lock");
+		const call = must(calls[0], "the cargo-audit call");
+		expect(call.cmd.slice(1, 4)).toEqual(["audit", "--json", "-f"]);
+		expect(call.cmd[4]).toEndWith("supply/cargo/Cargo.lock");
 		// Not the project dir, whose .cargo/audit.toml could ignore advisories.
-		expect(calls[0]?.options?.cwd).toStartWith(
+		expect(call.options?.cwd).toStartWith(
 			join(tmpdir(), "openaudit-cargo-audit-"),
 		);
-		expect(report.results[0]?.findings.length).toBe(4);
-		expect(report.results[0]?.findings[0]?.location?.file).toBe("Cargo.lock");
+		const findings = firstResult(report).findings;
+		expect(findings.length).toBe(4);
+		expect(fileOf(findings[0])).toBe("Cargo.lock");
 	});
 
 	test("npm, pnpm and bun audits pin the registry and stay lockfile-only", async () => {

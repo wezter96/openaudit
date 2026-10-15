@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { auditTerraform, parseBlocks, terraform } from "../src/infra/terraform";
 import { fixture, ruleIds, runAuditor } from "./helpers";
+import { findingsOf, findingWith, firstResult, must } from "./must";
 
 const ids = (text: string) =>
 	auditTerraform("main.tf", text).map((f) => f.ruleId);
@@ -12,7 +13,7 @@ describe("iac.terraform", () => {
 			terraform,
 			fixture("infra", "terraform-bad"),
 		);
-		expect(report.results[0]?.status).toBe("failed");
+		expect(firstResult(report).status).toBe("failed");
 		expect(ruleIds(report)).toEqual([
 			"iac.terraform/azure-blob-public",
 			"iac.terraform/db-publicly-accessible",
@@ -29,13 +30,13 @@ describe("iac.terraform", () => {
 			"iac.terraform/state-committed",
 			"iac.terraform/storage-unencrypted",
 		]);
-		const findings = report.results[0]?.findings ?? [];
-		const find = (id: string) =>
-			findings.find((f) => f.ruleId === `iac.terraform/${id}`);
-		expect(find("state-committed")?.severity).toBe("critical");
-		expect(find("state-committed")?.location?.file).toBe("terraform.tfstate");
-		expect(find("security-group-open")?.location?.line).toBe(15);
-		expect(find("iam-wildcard-policy")?.location?.line).toBe(51);
+		const findings = findingsOf(report);
+		const find = (id: string) => findingWith(findings, `iac.terraform/${id}`);
+		const location = (id: string) => must(find(id).location, `${id} location`);
+		expect(find("state-committed").severity).toBe("critical");
+		expect(location("state-committed").file).toBe("terraform.tfstate");
+		expect(location("security-group-open").line).toBe(15);
+		expect(location("iam-wildcard-policy").line).toBe(51);
 		for (const f of findings.filter((f) => f.ruleId.includes("hardcoded")))
 			expect(f.evidence).toContain("****");
 	});

@@ -46,6 +46,14 @@ const rules = (findings: ReadonlyArray<Finding>) =>
 
 const SHA512 = `sha512-${"A".repeat(86)}==`;
 
+// A pnpm resolution whose tarball is a YAML list. Joined rather than a
+// template, as `${…}}` trips up some code-analysis parsers.
+const TARBALL_ARRAY_RESOLUTION = [
+	"{tarball: [http://evil.example/d-1.0.0.tgz], integrity: ",
+	SHA512,
+	"}",
+].join("");
+
 const npmLock = (
 	packages: Record<string, unknown>,
 	extra: Record<string, unknown> = {},
@@ -285,7 +293,7 @@ a@^1.0.0:
 packages:
 
   d@1.0.0:
-    resolution: {tarball: [http://evil.example/d-1.0.0.tgz], integrity: ${SHA512}}
+    resolution: ${TARBALL_ARRAY_RESOLUTION}
 
 snapshots:
 

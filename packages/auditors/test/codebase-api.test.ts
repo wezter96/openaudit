@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { Finding } from "@openaudit/core";
 
 import {
 	api,
@@ -8,6 +9,7 @@ import {
 	owaspApiUrl,
 } from "../src/codebase/api";
 import { fixture, runAuditor } from "./helpers";
+import { must } from "./must";
 
 const rules = (
 	findings: ReadonlyArray<{ ruleId: string; location?: { file?: string } }>,
@@ -17,6 +19,8 @@ const rules = (
 		.filter((f) => file === undefined || f.location?.file === file)
 		.map((f) => f.ruleId.replace("code.api/", ""))
 		.sort();
+
+const lineOf = (f: Finding) => must(f.location, `${f.ruleId} location`).line;
 
 describe("code.api OpenAPI", () => {
 	test("flags insecure patterns in a realistic spec", async () => {
@@ -59,19 +63,25 @@ describe("code.api OpenAPI", () => {
 	test("locations point at the offending line", async () => {
 		const report = await runAuditor(api, fixture("api"));
 		const findings = report.results.flatMap((r) => r.findings);
-		const server = findings.find(
-			(f) =>
-				f.ruleId === "code.api/insecure-server-url" &&
-				f.location?.file === "openapi.yaml",
+		const server = must(
+			findings.find(
+				(f) =>
+					f.ruleId === "code.api/insecure-server-url" &&
+					f.location?.file === "openapi.yaml",
+			),
+			"the insecure server url finding",
 		);
-		expect(server?.location?.line).toBe(6);
-		expect(server?.evidence).toBe("url: http://api.pets.example.com/v1");
-		const get = findings.find(
-			(f) =>
-				f.ruleId === "code.api/operation-no-security" &&
-				f.evidence === "GET /pets",
+		expect(lineOf(server)).toBe(6);
+		expect(server.evidence).toBe("url: http://api.pets.example.com/v1");
+		const get = must(
+			findings.find(
+				(f) =>
+					f.ruleId === "code.api/operation-no-security" &&
+					f.evidence === "GET /pets",
+			),
+			"the GET /pets finding",
 		);
-		expect(get?.location?.line).toBe(10);
+		expect(lineOf(get)).toBe(10);
 	});
 
 	test("localhost servers, bounded lists and hardened bodies are not flagged", async () => {

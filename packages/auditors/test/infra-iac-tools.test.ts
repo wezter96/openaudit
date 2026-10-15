@@ -25,6 +25,7 @@ import {
 } from "../src/infra/kubeconform";
 import { parseTflintReport, tflint, tflintConfig } from "../src/infra/tflint";
 import { fixture } from "./helpers";
+import { must } from "./must";
 
 const sampleText = (name: string) =>
 	readFileSync(fixture("infra", "external", name), "utf8");
@@ -70,23 +71,20 @@ describe("kubeconform parser", () => {
 			"iac.kubeconform/unknown-field medium deploy/crds.yaml:11",
 			"iac.kubeconform/missing-schema info deploy/crds.yaml:13",
 		]);
-		const [wrongType, unknown] = findings;
-		expect(unknown?.message).toBe(
+		const wrongType = must(findings[0], "the wrong-type finding");
+		const unknown = must(findings[1], "the unknown-field finding");
+		expect(unknown.message).toBe(
 			"Deployment/web at /spec/template/spec/containers/0: additional properties 'imagePullPolicyy' not allowed",
 		);
-		expect(unknown?.category).toBe("reliability");
-		expect(unknown?.evidence).toBe(
+		expect(unknown.category).toBe("reliability");
+		expect(unknown.evidence).toBe(
 			"Deployment/web /spec/template/spec/containers/0/imagePullPolicyy",
 		);
-		expect(wrongType?.title).toBe("Field has the wrong type: Deployment/web");
-		expect(wrongType?.tags).toEqual([
-			"kubeconform",
-			"kubernetes",
-			"wrong-type",
-		]);
-		const missing = findings.at(-1);
-		expect(missing?.category).toBe("best-practices");
-		expect(missing?.message).toBe(
+		expect(wrongType.title).toBe("Field has the wrong type: Deployment/web");
+		expect(wrongType.tags).toEqual(["kubeconform", "kubernetes", "wrong-type"]);
+		const missing = must(findings.at(-1), "the missing-schema finding");
+		expect(missing.category).toBe("best-practices");
+		expect(missing.message).toBe(
 			"1 Widget resource (widgets.example.com/v1) not validated: no JSON schema found. Files: deploy/crds.yaml.",
 		);
 		for (const f of findings) {
@@ -170,30 +168,32 @@ describe("tflint parser", () => {
 			"iac.tflint/terraform-deprecated-interpolation low main.tf:20",
 			"iac.tflint/terraform-module-version medium main.tf:24",
 		]);
-		const invalid = findings[4];
-		expect(invalid?.category).toBe("reliability");
-		expect(invalid?.message).toBe(
+		const invalid = must(findings[4], "the invalid-type finding");
+		expect(invalid.category).toBe("reliability");
+		expect(invalid.message).toBe(
 			'"t9.mega" is an invalid value as instance_type',
 		);
-		expect(invalid?.location?.column).toBe(19);
-		expect(invalid?.evidence).toBe('instance_type = "t9.mega"');
-		expect(invalid?.tags).toEqual([
+		expect(must(invalid.location, "its location").column).toBe(19);
+		expect(invalid.evidence).toBe('instance_type = "t9.mega"');
+		expect(invalid.tags).toEqual([
 			"tflint",
 			"terraform",
 			"aws_instance_invalid_type",
 			"aws",
 		]);
 		// The AWS ruleset leaves `link` empty; the ruleset's rule index stands in.
-		expect(invalid?.references).toEqual([
+		expect(invalid.references).toEqual([
 			"https://github.com/terraform-linters/tflint-ruleset-aws/blob/master/docs/rules/README.md",
 		]);
-		const moduleVersion = findings[6];
-		expect(moduleVersion?.category).toBe("supply-chain");
-		expect(moduleVersion?.references).toEqual([
+		const moduleVersion = must(findings[6], "the module-version finding");
+		expect(moduleVersion.category).toBe("supply-chain");
+		expect(moduleVersion.references).toEqual([
 			"https://github.com/terraform-linters/tflint-ruleset-terraform/blob/v0.15.0/docs/rules/terraform_module_version.md",
 		]);
-		expect(moduleVersion?.remediation).toContain("version");
-		expect(findings[0]?.category).toBe("best-practices");
+		expect(moduleVersion.remediation).toContain("version");
+		expect(must(findings[0], "the first finding").category).toBe(
+			"best-practices",
+		);
 	});
 
 	test("recorded Google and Azure rulesets", () => {

@@ -6,6 +6,7 @@ import {
 	parseLighthouse,
 } from "../src/web/lighthouse";
 import { fixture, runAuditor } from "./helpers";
+import { must } from "./must";
 
 const sample = (): Promise<LighthouseReport> =>
 	Bun.file(fixture("web", "lighthouse", "report.json")).json();
@@ -22,22 +23,22 @@ describe("web.lighthouse", () => {
 			"web.lighthouse/render-blocking-resources",
 		]);
 
-		const lcp = byRule["web.lighthouse/largest-contentful-paint"];
-		expect(lcp?.severity).toBe("high");
-		expect(lcp?.category).toBe("performance");
-		expect(lcp?.message).toContain("5.1 s");
-		expect(lcp?.references).toEqual([
+		const lcp = must(byRule["web.lighthouse/largest-contentful-paint"], "lcp");
+		expect(lcp.severity).toBe("high");
+		expect(lcp.category).toBe("performance");
+		expect(lcp.message).toContain("5.1 s");
+		expect(lcp.references).toEqual([
 			"https://developer.chrome.com/docs/lighthouse/performance/lighthouse-largest-contentful-paint/",
 		]);
 
-		const alt = byRule["web.lighthouse/image-alt"];
-		expect(alt?.category).toBe("accessibility");
-		expect(alt?.severity).toBe("high");
-		expect(alt?.location).toEqual({
+		const alt = must(byRule["web.lighthouse/image-alt"], "image-alt");
+		expect(alt.category).toBe("accessibility");
+		expect(alt.severity).toBe("high");
+		expect(alt.location).toEqual({
 			url: "https://example.com/",
 			selector: "body > main > img.hero",
 		});
-		expect(alt?.evidence).toContain('<img class="hero"');
+		expect(alt.evidence).toContain('<img class="hero"');
 
 		expect(byRule["web.lighthouse/errors-in-console"]?.category).toBe(
 			"best-practices",

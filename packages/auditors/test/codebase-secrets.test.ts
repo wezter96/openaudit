@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { isPlaceholder, scanSecrets, secrets } from "../src/codebase/secrets";
 import { scrubLine } from "../src/codebase/util";
 import { ruleIds, runAuditor } from "./helpers";
+import { must } from "./must";
 
 // Fake credentials are assembled at runtime so no token-shaped literal is
 // committed (keeps push protection and other scanners quiet).
@@ -43,6 +44,14 @@ const FILES: Record<string, string> = {
 	"fixtures/fake.ts": `export const k = "${FAKE.aws}";`,
 };
 
+/** No fake credential except the PEM block appears in full in `serialised`. */
+const expectNoFullSecret = (serialised: string) => {
+	for (const value of Object.values(FAKE)) {
+		if (value === FAKE.pem) continue;
+		expect(serialised).not.toContain(value);
+	}
+};
+
 let root = "";
 
 beforeAll(async () => {
@@ -77,21 +86,23 @@ describe("code.secrets", () => {
 	test("never leaks a full secret in evidence and reports locations", async () => {
 		const report = await runAuditor(secrets, root);
 		const findings = report.results.flatMap((r) => r.findings);
-		const all = JSON.stringify(findings);
-		for (const value of Object.values(FAKE)) {
-			if (value === FAKE.pem) continue;
-			expect(all).not.toContain(value);
-		}
-		const gh = findings.find((f) => f.ruleId === "code.secrets/github-token");
-		expect(gh?.location).toEqual({ file: "src/config.ts", line: 3 });
-		expect(gh?.evidence).toContain("ghp_");
-		expect(gh?.tags).toContain("cwe-798");
-		const env = findings.find(
-			(f) =>
-				f.ruleId === "code.secrets/generic-secret" &&
-				f.location?.file === ".env.production",
+		expectNoFullSecret(JSON.stringify(findings));
+		const gh = must(
+			findings.find((f) => f.ruleId === "code.secrets/github-token"),
+			"the GitHub token finding",
 		);
-		expect(env?.location?.line).toBe(2);
+		expect(gh.location).toEqual({ file: "src/config.ts", line: 3 });
+		expect(gh.evidence).toContain("ghp_");
+		expect(gh.tags).toContain("cwe-798");
+		const env = must(
+			findings.find(
+				(f) =>
+					f.ruleId === "code.secrets/generic-secret" &&
+					f.location?.file === ".env.production",
+			),
+			"the .env.production finding",
+		);
+		expect(must(env.location, "its location").line).toBe(2);
 	});
 
 	test("treats documentation placeholders as non-secrets", () => {

@@ -6,6 +6,7 @@ import {
 	type Auditor,
 	Exec,
 	type ExecResult,
+	type FindingInput,
 	Http,
 	type Report,
 	runAudit,
@@ -20,6 +21,7 @@ import { kubeLinter, parseKubeLinterReport } from "../src/infra/kube-linter";
 import { kubescape, parseKubescapeReport } from "../src/infra/kubescape";
 import { parseZizmorReport, zizmor } from "../src/infra/zizmor";
 import { fixture } from "./helpers";
+import { firstResult, must } from "./must";
 
 const sampleText = (name: string) =>
 	readFileSync(fixture("infra", "external", name), "utf8");
@@ -37,6 +39,15 @@ const summary = (
 			`${f.ruleId} ${f.severity} ${f.location?.file}:${f.location?.line ?? "-"}`,
 	);
 
+const ending = (findings: ReadonlyArray<FindingInput>, suffix: string) =>
+	must(
+		findings.find((f) => f.ruleId.endsWith(suffix)),
+		`a ${suffix} finding`,
+	);
+
+const fileOf = (f: FindingInput) =>
+	must(f.location, `${f.ruleId} location`).file;
+
 describe("infra tool parsers", () => {
 	test("zizmor (recorded)", () => {
 		const findings = parseZizmorReport(sample("zizmor.json"), "/repo");
@@ -52,15 +63,15 @@ describe("infra tool parsers", () => {
 			"iac.zizmor/unpinned-uses high .github/workflows/pr.yml:29",
 			"iac.zizmor/insecure-commands high .github/workflows/pr.yml:7",
 		]);
-		const [artipacked] = findings;
-		expect(artipacked?.confidence).toBe("low");
-		expect(artipacked?.category).toBe("security");
-		expect(artipacked?.references).toEqual([
+		const artipacked = must(findings[0], "the artipacked finding");
+		expect(artipacked.confidence).toBe("low");
+		expect(artipacked.category).toBe("security");
+		expect(artipacked.references).toEqual([
 			"https://docs.zizmor.sh/audits/#artipacked",
 		]);
-		expect(artipacked?.remediation).toContain("persist-credentials: false");
-		expect(findings[2]?.category).toBe("supply-chain");
-		expect(findings[5]?.tags).toContain("cwe-94");
+		expect(artipacked.remediation).toContain("persist-credentials: false");
+		expect(must(findings[2], "finding 2").category).toBe("supply-chain");
+		expect(must(findings[5], "finding 5").tags).toContain("cwe-94");
 	});
 
 	test("zizmor drops ignored findings", () => {
@@ -74,10 +85,11 @@ describe("infra tool parsers", () => {
 		expect(summary(findings)).toEqual([
 			"iac.actionlint/expression high .github/workflows/pr.yml:18",
 		]);
-		expect(findings[0]?.category).toBe("security");
-		expect(findings[0]?.location?.column).toBe(44);
-		expect(findings[0]?.tags).toContain("cwe-94");
-		expect(findings[0]?.title).not.toContain("see https");
+		const expression = must(findings[0], "the expression finding");
+		expect(expression.category).toBe("security");
+		expect(must(expression.location, "its location").column).toBe(44);
+		expect(expression.tags).toContain("cwe-94");
+		expect(expression.title).not.toContain("see https");
 	});
 
 	test("actionlint classifies non-security kinds as reliability or hygiene", () => {
@@ -111,21 +123,18 @@ describe("infra tool parsers", () => {
 		const findings = parseKubeLinterReport(sample("kube-linter.json"), "/repo");
 		expect(findings).toHaveLength(12);
 		const byRule = new Map(findings.map((f) => [f.ruleId, f]));
-		const priv = byRule.get("iac.kube-linter/privileged-container");
-		expect(priv?.severity).toBe("high");
-		expect(priv?.category).toBe("security");
-		expect(priv?.location?.file).toBe("app.yaml");
-		expect(priv?.evidence).toBe("Deployment/web");
-		expect(priv?.references).toEqual([
+		const rule = (id: string) => must(byRule.get(`iac.kube-linter/${id}`), id);
+		const priv = rule("privileged-container");
+		expect(priv.severity).toBe("high");
+		expect(priv.category).toBe("security");
+		expect(fileOf(priv)).toBe("app.yaml");
+		expect(priv.evidence).toBe("Deployment/web");
+		expect(priv.references).toEqual([
 			"https://docs.kubelinter.io/#/generated/checks?id=privileged-container",
 		]);
-		expect(priv?.remediation).toBeTruthy();
-		expect(byRule.get("iac.kube-linter/unset-cpu-requirements")?.category).toBe(
-			"reliability",
-		);
-		expect(byRule.get("iac.kube-linter/latest-tag")?.category).toBe(
-			"best-practices",
-		);
+		expect(priv.remediation).toBeTruthy();
+		expect(rule("unset-cpu-requirements").category).toBe("reliability");
+		expect(rule("latest-tag").category).toBe("best-practices");
 		expect(parseKubeLinterReport({ Reports: null }, "/repo")).toEqual([]);
 	});
 
@@ -135,32 +144,27 @@ describe("infra tool parsers", () => {
 		expect(new Set(findings.map((f) => f.location?.file))).toEqual(
 			new Set(["tf/main.tf", "k8s/app.yaml", "docker/Dockerfile"]),
 		);
-		const rds = findings.find((f) =>
-			f.ruleId.endsWith("rds-db-instance-publicly-accessible"),
-		);
-		expect(rds?.ruleId).toBe(
+		const rds = ending(findings, "rds-db-instance-publicly-accessible");
+		expect(rds.ruleId).toBe(
 			"iac.kics/terraform-rds-db-instance-publicly-accessible",
 		);
-		expect(rds?.severity).toBe("critical");
-		expect(rds?.category).toBe("security");
-		expect(rds?.location).toEqual({ file: "tf/main.tf", line: 35 });
-		expect(rds?.evidence).toBe("aws_db_instance[db].publicly_accessible");
-		expect(rds?.tags).toContain("cwe-668");
+		expect(rds.severity).toBe("critical");
+		expect(rds.category).toBe("security");
+		expect(rds.location).toEqual({ file: "tf/main.tf", line: 35 });
+		expect(rds.evidence).toBe("aws_db_instance[db].publicly_accessible");
+		expect(rds.tags).toContain("cwe-668");
 		// `remediation` is a before/after JSON string for replacement fixes.
-		expect(rds?.remediation).toBe("Change true to false.");
-		expect(rds?.references).toEqual([
+		expect(rds.remediation).toBe("Change true to false.");
+		expect(rds.references).toEqual([
 			"https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/db_instance#publicly_accessible",
 		]);
-		const noUser = findings.find((f) =>
-			f.ruleId.endsWith("dockerfile-missing-user-instruction"),
+		const noUser = ending(findings, "dockerfile-missing-user-instruction");
+		expect(noUser.severity).toBe("high");
+		expect(noUser.category).toBe("best-practices");
+		expect(noUser.location).toEqual({ file: "docker/Dockerfile", line: 2 });
+		expect(ending(findings, "dockerfile-add-instead-of-copy").category).toBe(
+			"supply-chain",
 		);
-		expect(noUser?.severity).toBe("high");
-		expect(noUser?.category).toBe("best-practices");
-		expect(noUser?.location).toEqual({ file: "docker/Dockerfile", line: 2 });
-		expect(
-			findings.find((f) => f.ruleId.endsWith("dockerfile-add-instead-of-copy"))
-				?.category,
-		).toBe("supply-chain");
 	});
 
 	test("kubescape (recorded from kubescape 4.0.15)", () => {
@@ -171,29 +175,25 @@ describe("infra tool parsers", () => {
 		expect(new Set(findings.map((f) => f.location?.file))).toEqual(
 			new Set(["deploy/sub/app.yaml"]),
 		);
-		const privileged = findings.find((f) => f.ruleId.endsWith("c-0057"));
-		expect(privileged?.severity).toBe("high");
-		expect(privileged?.category).toBe("security");
-		expect(privileged?.message).toBe(
+		const privileged = ending(findings, "c-0057");
+		expect(privileged.severity).toBe("high");
+		expect(privileged.category).toBe("security");
+		expect(privileged.message).toBe(
 			"Privileged container failed for Deployment/web.",
 		);
-		expect(privileged?.references).toEqual([
+		expect(privileged.references).toEqual([
 			"https://hub.armosec.io/docs/c-0057",
 		]);
-		expect(privileged?.remediation).toContain(
+		expect(privileged.remediation).toContain(
 			"Suggested: remove spec.template.spec.containers[0]",
 		);
-		const memory = findings.find((f) => f.ruleId.endsWith("c-0004"));
-		expect(memory?.category).toBe("reliability");
-		expect(memory?.remediation).toContain(
+		const memory = ending(findings, "c-0004");
+		expect(memory.category).toBe("reliability");
+		expect(memory.remediation).toContain(
 			'resources.limits.memory to "YOUR_VALUE"',
 		);
-		expect(findings.find((f) => f.ruleId.endsWith("c-0013"))?.severity).toBe(
-			"medium",
-		);
-		expect(findings.find((f) => f.ruleId.endsWith("c-0076"))?.severity).toBe(
-			"low",
-		);
+		expect(ending(findings, "c-0013").severity).toBe("medium");
+		expect(ending(findings, "c-0076").severity).toBe("low");
 		// Passed and skipped controls never become findings.
 		expect(findings.every((f) => f.title.startsWith("C-"))).toBe(true);
 	});
@@ -205,19 +205,15 @@ describe("infra tool parsers", () => {
 		);
 		// The README sample has 10 details, none of them SKIP/PASS.
 		expect(findings).toHaveLength(10);
-		const first = findings[0];
-		expect(first?.ruleId).toBe("container.dockle/cis-di-0001");
-		expect(first?.severity).toBe("medium");
-		expect(first?.location?.file).toBe("goodwithtech/test-image:v1");
-		expect(first?.references).toEqual([
+		const first = must(findings[0], "the first finding");
+		expect(first.ruleId).toBe("container.dockle/cis-di-0001");
+		expect(first.severity).toBe("medium");
+		expect(fileOf(first)).toBe("goodwithtech/test-image:v1");
+		expect(first.references).toEqual([
 			"https://github.com/goodwithtech/dockle/blob/master/CHECKPOINT.md#cis-di-0001",
 		]);
-		expect(
-			findings.find((f) => f.ruleId.endsWith("cis-di-0005"))?.severity,
-		).toBe("low");
-		expect(
-			findings.find((f) => f.ruleId.endsWith("cis-di-0009"))?.category,
-		).toBe("best-practices");
+		expect(ending(findings, "cis-di-0005").severity).toBe("low");
+		expect(ending(findings, "cis-di-0009").category).toBe("best-practices");
 		expect(findings.filter((f) => f.severity === "high")).toHaveLength(6);
 		const noisy = parseDockleReport(
 			{
@@ -238,12 +234,12 @@ describe("infra tool parsers", () => {
 			"container.dockle/cis-di-0005 low alpine:-",
 			"container.dockle/cis-di-0006 low alpine:-",
 		]);
-		expect(alpine[2]?.category).toBe("reliability");
+		expect(must(alpine[2], "finding 2").category).toBe("reliability");
 		const bun = parseDockleReport(sample("dockle-bun.json"), "oven/bun");
 		// CIS-DI-0008 reports one alert per setuid/setgid file.
 		const setuid = bun.filter((f) => f.ruleId.endsWith("cis-di-0008"));
 		expect(setuid).toHaveLength(11);
-		expect(setuid[0]?.evidence).toBe(
+		expect(must(setuid[0], "a setuid finding").evidence).toBe(
 			"setgid file: grwxr-xr-x usr/sbin/unix_chkpwd",
 		);
 		expect(bun).toHaveLength(14);
@@ -327,9 +323,10 @@ describe("infra tool auditors", () => {
 				() => undefined,
 				unreachable,
 			);
-			expect(report.results[0]?.status).toBe("skipped");
-			expect(report.results[0]?.message).toContain("not found on PATH");
-			expect(report.results[0]?.message).toContain("Install");
+			const result = firstResult(report);
+			expect(result.status).toBe("skipped");
+			expect(result.message).toContain("not found on PATH");
+			expect(result.message).toContain("Install");
 		}
 	});
 
@@ -348,11 +345,10 @@ describe("infra tool auditors", () => {
 				() => undefined,
 				unreachable,
 			);
-			expect(`${auditor.id} ${report.results[0]?.status}`).toBe(
-				`${auditor.id} skipped`,
-			);
-			expect(report.results[0]?.message).toContain(message);
-			expect(report.results[0]?.message).not.toContain("Install");
+			const result = firstResult(report);
+			expect(`${auditor.id} ${result.status}`).toBe(`${auditor.id} skipped`);
+			expect(result.message).toContain(message);
+			expect(result.message).not.toContain("Install");
 		}
 	});
 
@@ -368,8 +364,9 @@ describe("infra tool auditors", () => {
 			});
 			expect(seen).toContain("--offline");
 			expect(seen).toContain("./.github/workflows/ci.yml");
-			expect(report.results[0]?.status).toBe("failed");
-			expect(report.results[0]?.findings).toHaveLength(10);
+			const result = firstResult(report);
+			expect(result.status).toBe("failed");
+			expect(result.findings).toHaveLength(10);
 		} finally {
 			if (saved[0] !== undefined) process.env.GH_TOKEN = saved[0];
 			if (saved[1] !== undefined) process.env.GITHUB_TOKEN = saved[1];
@@ -398,8 +395,9 @@ describe("infra tool auditors", () => {
 			stdout: "",
 			stderr: "error: boom",
 		}));
-		expect(report.results[0]?.status).toBe("error");
-		expect(report.results[0]?.message).toContain("boom");
+		const result = firstResult(report);
+		expect(result.status).toBe("error");
+		expect(result.message).toContain("boom");
 	});
 
 	test("actionlint exit 1 means findings", async () => {
@@ -407,8 +405,9 @@ describe("infra tool auditors", () => {
 			expect(cmd).toContain("{{json .}}");
 			return { code: 1, stdout: sampleText("actionlint.json"), stderr: "" };
 		});
-		expect(report.results[0]?.status).toBe("failed");
-		expect(report.results[0]?.findings).toHaveLength(1);
+		const result = firstResult(report);
+		expect(result.status).toBe("failed");
+		expect(result.findings).toHaveLength(1);
 		const clean = await runWithExec(actionlint, GHA, present, async () => ({
 			code: 0,
 			stdout: "null\n",

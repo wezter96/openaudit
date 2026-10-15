@@ -25,6 +25,7 @@ import {
 	trufflehog,
 } from "../src/codebase/sast-tools";
 import { fixture } from "./helpers";
+import { must } from "./must";
 
 const text = (name: string) =>
 	readFileSync(fixture("codebase", "external", name), "utf8");
@@ -93,13 +94,15 @@ describe("bandit parser", () => {
 			"code.bandit/b301-blacklist medium py/app.py:7",
 			"code.bandit/b105-hardcoded-password-string low py/app.py:8",
 		]);
-		expect(findings[1]?.tags).toEqual(["cwe-78"]);
-		expect(findings[1]?.evidence).toBe("subprocess.call(cmd, shell=True)");
-		expect(findings[1]?.location?.column).toBe(5);
-		expect(findings[1]?.references?.[0]).toContain("bandit.readthedocs.io");
-		expect(findings[4]?.confidence).toBe("medium");
+		const shell = must(findings[1], "the shell=True finding");
+		expect(shell.tags).toEqual(["cwe-78"]);
+		expect(shell.evidence).toBe("subprocess.call(cmd, shell=True)");
+		expect(must(shell.location, "its location").column).toBe(5);
+		expect(shell.references?.[0]).toContain("bandit.readthedocs.io");
+		const password = must(findings[4], "the hardcoded password finding");
+		expect(password.confidence).toBe("medium");
 		// hardcoded-password snippets are the secret: never surfaced
-		expect(findings[4]?.evidence).toBeUndefined();
+		expect(password.evidence).toBeUndefined();
 	});
 
 	test("low confidence lowers severity one step", () => {

@@ -22,25 +22,33 @@ interface Zone {
 	failing?: Set<string>;
 }
 
+const recordOf = <T>(
+	records: Record<string, T> | undefined,
+	name: string,
+): T | undefined => records?.[name];
+
+const listed = (names: Set<string> | undefined, name: string) =>
+	names?.has(name) ?? false;
+
 const fakeResolver = (zone: Zone): Resolver => {
 	const check = (name: string) => {
-		if (zone.failing?.has(name)) throw new Error("SERVFAIL");
+		if (listed(zone.failing, name)) throw new Error("SERVFAIL");
 	};
 	return {
 		resolveTxt: async (n) => {
 			check(n);
-			return zone.txt?.[n] ?? [];
+			return recordOf(zone.txt, n) ?? [];
 		},
 		resolveMx: async (n) => {
 			check(n);
-			return zone.mx?.[n] ?? [];
+			return recordOf(zone.mx, n) ?? [];
 		},
 		resolveCaa: async (n) => {
 			check(n);
-			return zone.caa?.[n] ?? 0;
+			return recordOf(zone.caa, n) ?? 0;
 		},
-		resolveCname: async (n) => zone.cname?.[n],
-		nameExists: async (n) => !zone.missing?.has(n),
+		resolveCname: async (n) => recordOf(zone.cname, n),
+		nameExists: async (n) => !listed(zone.missing, n),
 	};
 };
 

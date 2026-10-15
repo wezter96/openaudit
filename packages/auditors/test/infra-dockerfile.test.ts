@@ -6,6 +6,7 @@ import {
 	parseDockerfile,
 } from "../src/infra/dockerfile";
 import { fixture, ruleIds, runAuditor } from "./helpers";
+import { findingsOf, findingWith, firstResult, must } from "./must";
 
 const BAD = [
 	"container.dockerfile/add-instead-of-copy",
@@ -28,20 +29,21 @@ const BAD = [
 describe("container.dockerfile", () => {
 	test("flags insecure Dockerfile", async () => {
 		const report = await runAuditor(dockerfile, fixture("infra", "docker-bad"));
-		expect(report.results[0]?.status).toBe("failed");
+		expect(firstResult(report).status).toBe("failed");
 		expect(ruleIds(report)).toEqual(BAD);
-		const findings = report.results[0]?.findings ?? [];
+		const findings = findingsOf(report);
 		const byRule = (id: string) =>
-			findings.find((f) => f.ruleId === `container.dockerfile/${id}`);
-		expect(byRule("from-latest")?.location).toEqual({
+			findingWith(findings, `container.dockerfile/${id}`);
+		const line = (id: string) => must(byRule(id).location, id).line;
+		expect(byRule("from-latest").location).toEqual({
 			file: "Dockerfile",
 			line: 2,
 		});
-		expect(byRule("apt-no-install-recommends")?.location?.line).toBe(6);
-		expect(byRule("curl-pipe-shell")?.location?.line).toBe(9);
+		expect(line("apt-no-install-recommends")).toBe(6);
+		expect(line("curl-pipe-shell")).toBe(9);
 		const secret = byRule("secret-in-env");
-		expect(secret?.severity).toBe("high");
-		expect(secret?.evidence).not.toContain("hunter2hunter2");
+		expect(secret.severity).toBe("high");
+		expect(secret.evidence).not.toContain("hunter2hunter2");
 	});
 
 	test("single-file target audits only that Dockerfile", async () => {

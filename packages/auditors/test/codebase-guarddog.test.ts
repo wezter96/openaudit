@@ -22,6 +22,7 @@ import {
 	parseGuarddogReport,
 } from "../src/codebase/supply-chain-tools";
 import { fixture } from "./helpers";
+import { findingsOf, firstResult, must } from "./must";
 
 const text = (name: string) =>
 	readFileSync(fixture("codebase", "external", name), "utf8");
@@ -151,35 +152,38 @@ describe("guarddog report", () => {
 			"code.guarddog/suspicious-code medium/low package.json:15",
 			"code.guarddog/suspicious-code high/low package.json:16",
 		]);
-		const [coreJs, crossenv, , vite, wrangler] = findings;
-		expect(coreJs?.title).toBe("core-js@3.38.1: suspicious code (GuardDog)");
-		expect(coreJs?.message).toBe(
+		const coreJs = must(findings[0], "the core-js finding");
+		const crossenv = must(findings[1], "the crossenv finding");
+		const vite = must(findings[3], "the vite finding");
+		const wrangler = must(findings[4], "the wrangler finding");
+		expect(coreJs.title).toBe("core-js@3.38.1: suspicious code (GuardDog)");
+		expect(coreJs.message).toBe(
 			"GuardDog rates core-js@3.38.1 suspicious (risk score 5.5/10). Source-code heuristics: process hooks (package/package.json:71).",
 		);
-		expect(coreJs?.evidence).toBe(
+		expect(coreJs.evidence).toBe(
 			'package/package.json:71: "postinstall": "node -e \\',
 		);
-		expect(coreJs?.tags).toEqual(["owasp-a08", "cwe-506"]);
-		expect(coreJs?.category).toBe("supply-chain");
-		expect(coreJs?.references).toEqual([
+		expect(coreJs.tags).toEqual(["owasp-a08", "cwe-506"]);
+		expect(coreJs.category).toBe("supply-chain");
+		expect(coreJs.references).toEqual([
 			"https://github.com/DataDog/guarddog",
 			"https://www.npmjs.com/package/core-js/v/3.38.1",
 		]);
-		expect(crossenv?.message).toContain("typosquatting attempt: cross-env");
-		expect(crossenv?.tags).toEqual(["owasp-a08"]);
-		expect(crossenv?.remediation).toContain("crossenv");
+		expect(crossenv.message).toContain("typosquatting attempt: cross-env");
+		expect(crossenv.tags).toEqual(["owasp-a08"]);
+		expect(crossenv.remediation).toContain("crossenv");
 		// Most severe heuristics first, repeated locations counted.
-		expect(vite?.message).toContain(
+		expect(vite.message).toContain(
 			"Source-code heuristics: runtime obfuscation base64exec (package/dist/node/chunks/node.js:2481);",
 		);
-		expect(vite?.message).toContain(
+		expect(vite.message).toContain(
 			"filesystem read (package/dist/node/module-runner.js:790, +4)",
 		);
-		expect(wrangler?.title).toBe("wrangler@4.151.0: high risk code (GuardDog)");
-		expect(wrangler?.message).toStartWith(
+		expect(wrangler.title).toBe("wrangler@4.151.0: high risk code (GuardDog)");
+		expect(wrangler.message).toStartWith(
 			"GuardDog rates wrangler@4.151.0 high risk (risk score 10/10).",
 		);
-		expect(wrangler?.message).toEndWith("; +5 more.");
+		expect(wrangler.message).toEndWith("; +5 more.");
 	});
 
 	test("recorded guarddog 3.2.0 pypi verify", () => {
@@ -243,6 +247,39 @@ const runWithExec = (
 	);
 
 const present = (bin: string) => `/usr/local/bin/${bin}`;
+
+type GuarddogCall = {
+	cmd: ReadonlyArray<string>;
+	cwd?: string;
+	input: string;
+};
+
+/** A fake guarddog that records each call with its manifest and replays the recorded report. */
+const recordGuarddog =
+	(calls: GuarddogCall[]) =>
+	async (
+		cmd: ReadonlyArray<string>,
+		options?: ExecOptions,
+	): Promise<ExecResult> => {
+		const input = await readFile(cmd[5] ?? "", "utf8");
+		calls.push({ cmd, cwd: options?.cwd, input });
+		const eco = cmd[3];
+		return {
+			code: 0,
+			stdout: text(`guarddog-${eco}.json`),
+			stderr: "",
+		};
+	};
+
+/** Each call verifies a manifest copy inside its own scratch cwd, as JSON. */
+const expectScratchCalls = (calls: ReadonlyArray<GuarddogCall>) => {
+	for (const call of calls) {
+		expect(call.cwd).toBeDefined();
+		expect(call.cwd).not.toBe(manifestDir);
+		expect(call.cmd[5]?.startsWith(`${call.cwd}/`)).toBe(true);
+		expect(call.cmd.slice(6, 8)).toEqual(["--output-format", "json"]);
+	}
+};
 const unreachable = () => Promise.reject(new Error("tool must not run"));
 
 describe("guarddog auditor", () => {
@@ -303,39 +340,22 @@ describe("guarddog auditor", () => {
 	});
 
 	test("verifies a sanitised copy of each manifest from a scratch directory", async () => {
-		const calls: Array<{
-			cmd: ReadonlyArray<string>;
-			cwd?: string;
-			input: string;
-		}> = [];
+		const calls: GuarddogCall[] = [];
 		const report = await runWithExec(
 			guarddog,
 			manifestDir,
 			present,
-			async (cmd, options) => {
-				const input = await readFile(cmd[5] ?? "", "utf8");
-				calls.push({ cmd, cwd: options?.cwd, input });
-				const eco = cmd[3];
-				return {
-					code: 0,
-					stdout: text(`guarddog-${eco}.json`),
-					stderr: "",
-				};
-			},
+			recordGuarddog(calls),
 		);
-		expect(report.results[0]?.status).toBe("failed");
+		expect(firstResult(report).status).toBe("failed");
 		expect(calls.map((c) => c.cmd.slice(0, 5))).toEqual([
 			["/usr/local/bin/guarddog", "--log-level", "error", "npm", "verify"],
 			["/usr/local/bin/guarddog", "--log-level", "error", "pypi", "verify"],
 		]);
-		for (const call of calls) {
-			expect(call.cwd).toBeDefined();
-			expect(call.cwd).not.toBe(manifestDir);
-			expect(call.cmd[5]?.startsWith(`${call.cwd}/`)).toBe(true);
-			expect(call.cmd.slice(6, 8)).toEqual(["--output-format", "json"]);
-		}
-		expect(calls[0]?.cmd.at(-1)).toBe("--include-dev-dependencies");
-		expect(JSON.parse(calls[0]?.input ?? "")).toEqual({
+		expectScratchCalls(calls);
+		const npmCall = must(calls[0], "the npm call");
+		expect(npmCall.cmd.at(-1)).toBe("--include-dev-dependencies");
+		expect(JSON.parse(npmCall.input)).toEqual({
 			dependencies: {
 				"core-js": "3.38.1",
 				crossenv: "^0.0.2-security",
@@ -350,10 +370,10 @@ describe("guarddog auditor", () => {
 				wrangler: "4.151.0",
 			},
 		});
-		expect(calls[1]?.input).toBe(
+		expect(must(calls[1], "the pypi call").input).toBe(
 			"requests==2.32.3\nbeautifulsoup==3.2.2\ncolorama==0.4.6\nreqeusts\n",
 		);
-		const findings = report.results[0]?.findings ?? [];
+		const findings = findingsOf(report);
 		// The engine orders findings by severity.
 		expect(
 			findings.map(

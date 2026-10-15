@@ -34,6 +34,7 @@ import {
 	pmd,
 } from "../src/codebase/lint-langs";
 import { fixture, runAuditor } from "./helpers";
+import { must } from "./must";
 
 const text = (name: string) =>
 	readFileSync(fixture("lint-langs", name), "utf8");
@@ -170,22 +171,23 @@ describe("pmd parser", () => {
 	});
 
 	test("carries columns, docs, CWE tags and parse errors", () => {
-		const key = findings.find((f) =>
-			f.ruleId.endsWith("hard-coded-crypto-key"),
-		);
-		expect(key?.location?.column).toBe(47);
-		expect(key?.references).toEqual([
+		const ending = (suffix: string) =>
+			must(
+				findings.find((f) => f.ruleId.endsWith(suffix)),
+				`a ${suffix} finding`,
+			);
+		const key = ending("hard-coded-crypto-key");
+		expect(must(key.location, "its location").column).toBe(47);
+		expect(key.references).toEqual([
 			"https://docs.pmd-code.org/snapshot/pmd_rules_java_security.html#hardcodedcryptokey",
 		]);
-		expect(key?.tags).toEqual(["java", "pmd-security", "cwe-321"]);
-		expect(
-			findings.find((f) => f.ruleId.endsWith("insecure-crypto-iv"))?.tags,
-		).toContain("cwe-329");
-		const parse = findings.at(-1);
-		expect(parse?.confidence).toBe("low");
-		expect(parse?.location?.column).toBe(23);
-		expect(parse?.message).not.toContain("/repo/");
-		expect(parse?.message).toContain('Encountered "{"');
+		expect(key.tags).toEqual(["java", "pmd-security", "cwe-321"]);
+		expect(ending("insecure-crypto-iv").tags).toContain("cwe-329");
+		const parse = must(findings.at(-1), "the parse error finding");
+		expect(parse.confidence).toBe("low");
+		expect(must(parse.location, "its location").column).toBe(23);
+		expect(parse.message).not.toContain("/repo/");
+		expect(parse.message).toContain('Encountered "{"');
 	});
 
 	test("priority 4-5 is info; unknown categories are maintainability", () => {

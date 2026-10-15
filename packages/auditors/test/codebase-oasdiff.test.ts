@@ -17,6 +17,7 @@ import {
 	Exec,
 	type ExecOptions,
 	type ExecResult,
+	type FindingInput,
 	GIT_HARDENING_ENV,
 	Http,
 	type Report,
@@ -31,6 +32,7 @@ import {
 	parseOasdiffOutput,
 } from "../src/codebase/oasdiff";
 import { fixture } from "./helpers";
+import { findingsOf, firstResult, must } from "./must";
 
 const fx = (name: string) => fixture("api", "oasdiff", name);
 const read = (name: string) => readFileSync(fx(name), "utf8");
@@ -51,6 +53,21 @@ const scratch = (prefix: string) => {
 /*                                   Parser                                   */
 /* -------------------------------------------------------------------------- */
 
+/** What every recorded breaking change maps to. */
+const expectBreakingChange = (f: FindingInput) => {
+	expect(f.severity).toBe("high");
+	expect(f.category).toBe("reliability");
+	expect(f.confidence).toBe("high");
+	expect(f.tags).toEqual(["openapi", "breaking-change"]);
+	expect(f.location?.file).toBe("api/openapi.yaml");
+	expect(f.remediation).toBeTruthy();
+	expect(f.references?.[0]).toContain("oasdiff");
+};
+
+const lineAt = (findings: ReadonlyArray<FindingInput>, i: number) =>
+	must(must(findings[i], `finding ${i}`).location, `finding ${i} location`)
+		.line;
+
 describe("oasdiff parser", () => {
 	const yaml = parseOasdiffOutput(recordedYaml, {
 		file: "api/openapi.yaml",
@@ -70,37 +87,31 @@ describe("oasdiff parser", () => {
 			"code.oasdiff/request-parameter-type-changed",
 			"code.oasdiff/response-required-property-removed",
 		]);
-		for (const f of yaml) {
-			expect(f.severity).toBe("high");
-			expect(f.category).toBe("reliability");
-			expect(f.confidence).toBe("high");
-			expect(f.tags).toEqual(["openapi", "breaking-change"]);
-			expect(f.location?.file).toBe("api/openapi.yaml");
-			expect(f.remediation).toBeTruthy();
-			expect(f.references?.[0]).toContain("oasdiff");
-		}
-		const added = yaml[0];
-		expect(added?.title).toBe(
+		for (const f of yaml) expectBreakingChange(f);
+		const added = must(yaml[0], "the added parameter finding");
+		expect(added.title).toBe(
 			"added the new required `query` request parameter `owner`",
 		);
-		expect(added?.message).toContain("GET /pets");
-		expect(added?.message).toContain("main");
-		expect(added?.evidence).toBe(
+		expect(added.message).toContain("GET /pets");
+		expect(added.message).toContain("main");
+		expect(added.evidence).toBe(
 			"GET /pets: added the new required `query` request parameter `owner`",
 		);
 		// The comment oasdiff attaches explains the check.
-		expect(yaml[4]?.message).toContain("Setting a bound rejects values");
+		expect(must(yaml[4], "the max-length finding").message).toContain(
+			"Setting a bound rejects values",
+		);
 	});
 
 	test("uses the revision line, else finds the operation in the new spec", () => {
 		// From revisionSource.
-		expect(yaml[0]?.location?.line).toBe(15);
-		expect(yaml[3]?.location?.line).toBe(69);
+		expect(lineAt(yaml, 0)).toBe(15);
+		expect(lineAt(yaml, 3)).toBe(69);
 		// No revisionSource: the operation's line in the new spec.
-		expect(yaml[2]?.location?.line).toBe(7);
-		expect(yaml[7]?.location?.line).toBe(40);
+		expect(lineAt(yaml, 2)).toBe(7);
+		expect(lineAt(yaml, 7)).toBe(40);
 		// The removed DELETE no longer exists: its path's line.
-		expect(yaml[5]?.location?.line).toBe(39);
+		expect(lineAt(yaml, 5)).toBe(39);
 	});
 
 	test("findings stay distinct when one rule fires twice", () => {
@@ -120,20 +131,20 @@ describe("oasdiff parser", () => {
 			["code.oasdiff/request-parameter-removed", "medium", 6],
 			["code.oasdiff/request-property-removed", "medium", 6],
 		]);
-		expect(json[0]?.confidence).toBe("medium");
+		expect(must(json[0], "a finding").confidence).toBe("medium");
 	});
 
 	test("maps info levels and tolerates unexpected shapes", () => {
 		const ctx = { file: "o.yaml", text: "", revisionFile: "r", base: "m" };
 		expect(parseOasdiffOutput(null, ctx)).toEqual([]);
 		expect(parseOasdiffOutput([1, {}, { level: 3 }], ctx)).toEqual([]);
-		const [info] = parseOasdiffOutput(
-			[{ id: "Some_Check", text: "t", level: 1 }],
-			ctx,
+		const info = must(
+			parseOasdiffOutput([{ id: "Some_Check", text: "t", level: 1 }], ctx)[0],
+			"the info finding",
 		);
-		expect(info?.ruleId).toBe("code.oasdiff/some-check");
-		expect(info?.severity).toBe("info");
-		expect(info?.location).toEqual({ file: "o.yaml" });
+		expect(info.ruleId).toBe("code.oasdiff/some-check");
+		expect(info.severity).toBe("info");
+		expect(info.location).toEqual({ file: "o.yaml" });
 	});
 });
 
@@ -187,14 +198,44 @@ const fakeGit =
 		return undefined;
 	};
 
+const OASDIFF_BIN = "/usr/bin/oasdiff";
+
+/** The specs an oasdiff call compares, read from its cwd while it runs. */
+const comparedSpecs = (cmd: ReadonlyArray<string>, cwd: string) =>
+	cmd.slice(2, 4).map((f) => readFileSync(join(cwd, f), "utf8"));
+
+const recordCall = (
+	cmd: ReadonlyArray<string>,
+	options: ExecOptions | undefined,
+): Call => {
+	const cwd = options?.cwd;
+	const isOasdiff = cmd[0] === OASDIFF_BIN;
+	return {
+		cmd,
+		options,
+		files: isOasdiff && cwd ? comparedSpecs(cmd, cwd) : undefined,
+	};
+};
+
+interface FakeTools {
+	readonly options?: AuditOptions;
+	readonly which?: (bin: string) => string | undefined;
+	readonly respond?: Responder;
+	readonly git?: ReturnType<typeof fakeGit>;
+}
+
+/** Git answers from `opts.git`, anything else from `opts.respond`, else `[]`. */
+const fakeAnswer = (
+	cmd: ReadonlyArray<string>,
+	opts: FakeTools,
+): Partial<ExecResult> => {
+	const git = cmd[0] === OASDIFF_BIN ? undefined : opts.git?.(cmd);
+	return git || opts.respond?.(cmd) || { stdout: "[]" };
+};
+
 const runOasdiff = async (
 	target: string,
-	opts: {
-		options?: AuditOptions;
-		which?: (bin: string) => string | undefined;
-		respond?: Responder;
-		git?: ReturnType<typeof fakeGit>;
-	} = {},
+	opts: FakeTools = {},
 ): Promise<{ report: Report; calls: Call[] }> => {
 	const calls: Call[] = [];
 	const report = await Effect.runPromise(
@@ -213,24 +254,8 @@ const runOasdiff = async (
 							Effect.succeed(opts.which ? opts.which(bin) : `/usr/bin/${bin}`),
 						run: (cmd: ReadonlyArray<string>, options?: ExecOptions) =>
 							Effect.sync((): ExecResult => {
-								const isOasdiff = cmd[0] === "/usr/bin/oasdiff";
-								calls.push({
-									cmd,
-									options,
-									files:
-										isOasdiff && options?.cwd
-											? cmd
-													.slice(2, 4)
-													.map((f) =>
-														readFileSync(
-															join(options.cwd as string, f),
-															"utf8",
-														),
-													)
-											: undefined,
-								});
-								const res = (!isOasdiff && opts.git?.(cmd)) ||
-									opts.respond?.(cmd) || { stdout: "[]" };
+								calls.push(recordCall(cmd, options));
+								const res = fakeAnswer(cmd, opts);
 								return { code: 0, stdout: "", stderr: "", ...res };
 							}),
 					}),
@@ -239,6 +264,42 @@ const runOasdiff = async (
 		),
 	);
 	return { report, calls };
+};
+
+type Env = NonNullable<ExecOptions["env"]>;
+
+/** `[key, value]` for each GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n pair. */
+const gitConfigPairs = (env: Env) =>
+	Object.entries(env)
+		.filter(([k]) => k.startsWith("GIT_CONFIG_KEY_"))
+		.map(([k, key]) => [
+			key,
+			env[k.replace("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")],
+		]);
+
+/** The hardening variables other than the GIT_CONFIG_* pairs are all set. */
+const expectHardeningVars = (env: Env) => {
+	for (const [k, v] of Object.entries(GIT_HARDENING_ENV))
+		if (!k.startsWith("GIT_CONFIG_")) expect(env[k]).toBe(v);
+};
+
+/** A git call on `root` with the full hardening env, run from elsewhere. */
+const expectHardenedGit = (c: Call, root: string) => {
+	expect(c.cmd.slice(0, 3)).toEqual(["/usr/bin/git", "-C", root]);
+	const env = c.options?.env ?? {};
+	expectHardeningVars(env);
+	const pairs = gitConfigPairs(env);
+	expect(pairs).toEqual(
+		expect.arrayContaining([
+			["core.fsmonitor", "false"],
+			["core.hooksPath", "/dev/null"],
+			["protocol.allow", "never"],
+		]),
+	);
+	expect(Number(env.GIT_CONFIG_COUNT)).toBe(pairs.length);
+	expect(env.GIT_CONFIG_GLOBAL).toBe("/dev/null");
+	expect(env.GIT_NO_LAZY_FETCH).toBe("1");
+	expect(c.options?.cwd).not.toBe(root);
 };
 
 /** A target holding the revision spec as `openapi.yaml`. */
@@ -300,38 +361,21 @@ describe("code.oasdiff", () => {
 			git: fakeGit({ baseText }),
 			respond: () => ({ stdout: read("breaking-yaml.json") }),
 		});
-		expect(report.results[0]?.status).toBe("failed");
-		expect(report.results[0]?.findings.length).toBe(8);
+		const result = firstResult(report);
+		expect(result.status).toBe("failed");
+		expect(result.findings.length).toBe(8);
 
-		const [mergeBase, lsTree, catFile, run] = calls;
+		const call = (i: number) => must(calls[i], `call ${i}`);
+		const mergeBase = call(0);
+		const lsTree = call(1);
+		const catFile = call(2);
+		const run = call(3);
 		expect(calls.length).toBe(4);
-		const root = mergeBase?.cmd[2] as string;
+		const root = mergeBase.cmd[2] as string;
 		expect(realpathSync(root)).toBe(realpathSync(target));
-		for (const c of [mergeBase, lsTree, catFile]) {
-			expect(c?.cmd.slice(0, 3)).toEqual(["/usr/bin/git", "-C", root]);
-			const env = c?.options?.env ?? {};
-			for (const [k, v] of Object.entries(GIT_HARDENING_ENV))
-				if (!k.startsWith("GIT_CONFIG_")) expect(env[k]).toBe(v);
-			const pairs = Object.entries(env)
-				.filter(([k]) => k.startsWith("GIT_CONFIG_KEY_"))
-				.map(([k, key]) => [
-					key,
-					env[k.replace("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")],
-				]);
-			expect(pairs).toEqual(
-				expect.arrayContaining([
-					["core.fsmonitor", "false"],
-					["core.hooksPath", "/dev/null"],
-					["protocol.allow", "never"],
-				]),
-			);
-			expect(Number(env.GIT_CONFIG_COUNT)).toBe(pairs.length);
-			expect(env.GIT_CONFIG_GLOBAL).toBe("/dev/null");
-			expect(env.GIT_NO_LAZY_FETCH).toBe("1");
-			expect(c?.options?.cwd).not.toBe(root);
-		}
+		for (const c of [mergeBase, lsTree, catFile]) expectHardenedGit(c, root);
 		// The user's ref only ever follows --end-of-options.
-		expect(mergeBase?.cmd.slice(3)).toEqual([
+		expect(mergeBase.cmd.slice(3)).toEqual([
 			"merge-base",
 			"--end-of-options",
 			"main",
@@ -339,7 +383,7 @@ describe("code.oasdiff", () => {
 		]);
 		// Paths come after `--`; blobs are read by object id, so no
 		// working-tree filter or textconv driver can run.
-		expect(lsTree?.cmd.slice(3)).toEqual([
+		expect(lsTree.cmd.slice(3)).toEqual([
 			"ls-tree",
 			"-l",
 			"-z",
@@ -347,12 +391,12 @@ describe("code.oasdiff", () => {
 			"--",
 			"openapi.yaml",
 		]);
-		expect(catFile?.cmd.slice(3)).toEqual(["cat-file", "blob", BASE_OID]);
+		expect(catFile.cmd.slice(3)).toEqual(["cat-file", "blob", BASE_OID]);
 
 		// oasdiff: our empty config, no external refs, relative temp files.
-		const cwd = run?.options?.cwd as string;
+		const cwd = run.options?.cwd as string;
 		expect(cwd).not.toBe(root);
-		expect(run?.cmd).toEqual([
+		expect(run.cmd).toEqual([
 			"/usr/bin/oasdiff",
 			"breaking",
 			"0/base.yaml",
@@ -363,7 +407,7 @@ describe("code.oasdiff", () => {
 			"--config",
 			join(cwd, "oasdiff.yaml"),
 		]);
-		expect(run?.files).toEqual([baseText, read("revision.yaml")]);
+		expect(run.files).toEqual([baseText, read("revision.yaml")]);
 		// The temp dir is gone afterwards.
 		expect(existsSync(cwd)).toBe(false);
 	});
@@ -417,13 +461,13 @@ describe("code.oasdiff", () => {
 					'Error: failed to load revision spec from "0/revision.yaml": encountered disallowed external reference: "http://127.0.0.1:8765/pet.yaml"\n',
 			}),
 		});
-		const result = report.results[0];
-		expect(result?.status).toBe("passed");
-		const [f] = result?.findings ?? [];
-		expect(f?.ruleId).toBe("code.oasdiff/not-compared");
-		expect(f?.severity).toBe("info");
-		expect(f?.location).toEqual({ file: "openapi.yaml" });
-		expect(f?.message).toContain("external $ref");
+		const result = firstResult(report);
+		expect(result.status).toBe("passed");
+		const f = must(result.findings[0], "the not-compared finding");
+		expect(f.ruleId).toBe("code.oasdiff/not-compared");
+		expect(f.severity).toBe("info");
+		expect(f.location).toEqual({ file: "openapi.yaml" });
+		expect(f.message).toContain("external $ref");
 	});
 
 	test("an unloadable spec is reported, other failures are errors", async () => {
@@ -434,24 +478,25 @@ describe("code.oasdiff", () => {
 				stderr: 'Error: failed to load base spec from "0/base.yaml": boom\n',
 			}),
 		});
-		const f = bad.report.results[0]?.findings[0];
-		expect(f?.ruleId).toBe("code.oasdiff/not-compared");
-		expect(f?.message).toContain("openapi.yaml at main");
-		expect(f?.message).not.toContain("0/base.yaml");
+		const f = must(findingsOf(bad.report)[0], "the not-compared finding");
+		expect(f.ruleId).toBe("code.oasdiff/not-compared");
+		expect(f.message).toContain("openapi.yaml at main");
+		expect(f.message).not.toContain("0/base.yaml");
 
 		const crash = await runOasdiff(specTarget(), {
 			git: fakeGit({ baseText: read("base.yaml") }),
 			respond: () => ({ code: 2, stderr: "panic" }),
 		});
-		expect(crash.report.results[0]?.status).toBe("error");
+		expect(firstResult(crash.report).status).toBe("error");
 
 		const noBase = await runOasdiff(specTarget(), {
 			git: fakeGit({
 				mergeBase: { code: 128, stderr: "fatal: Not a valid object name" },
 			}),
 		});
-		expect(noBase.report.results[0]?.status).toBe("error");
-		expect(noBase.report.results[0]?.message).toContain("git merge-base");
+		const noBaseResult = firstResult(noBase.report);
+		expect(noBaseResult.status).toBe("error");
+		expect(noBaseResult.message).toContain("git merge-base");
 	});
 });
 
