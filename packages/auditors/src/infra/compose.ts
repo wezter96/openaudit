@@ -102,112 +102,153 @@ const volumeSource = (v: unknown): string => {
 	return String(v).split(":")[0] ?? "";
 };
 
-const auditService = (
-	file: string,
-	doc: YamlDoc,
-	name: string,
-	svc: Record<string, unknown>,
-): FindingInput[] => {
-	const findings: FindingInput[] = [];
-	const loc = (...path: Array<string | number>) => ({
-		file,
-		line: doc.lineOf(["services", name, ...path]),
-	});
-	const push = (
-		f: Omit<FindingInput, "location"> & { path?: Array<string | number> },
-	) => {
-		const { path = [], ...rest } = f;
-		findings.push({ location: loc(...path), ...rest });
-	};
+/** Repository-relative path of a compose file. */
+type FilePath = string;
+/** Raw compose file contents. */
+type FileText = string;
+/** Keys and indexes below a service, e.g. `["ports", 0]`. */
+type ServicePath = Array<string | number>;
 
-	if (svc.privileged === true)
-		push({
-			path: ["privileged"],
-			ruleId: "container.compose/privileged",
-			title: "Privileged container",
-			severity: "high",
-			category: "security",
-			message: `Service \`${name}\` runs privileged, giving it full access to host devices and disabling most isolation.`,
-			remediation:
-				"Remove `privileged: true`; grant only the specific capabilities or devices needed.",
-			evidence: "privileged: true",
-			references: [COMPOSE_SPEC, CIS_DOCKER],
-			tags: ["cis-docker-5.4", "cwe-250"],
-		});
+/** One service of a compose document, with what is needed to locate its keys. */
+interface Service {
+	readonly file: FilePath;
+	readonly doc: YamlDoc;
+	readonly name: string;
+	readonly svc: Record<string, unknown>;
+}
 
-	for (const [key, rule, severity] of [
-		["network_mode", "network-mode-host", "medium"],
-		["pid", "pid-host", "high"],
-		["ipc", "ipc-host", "medium"],
-	] as const) {
-		if (svc[key] === "host")
-			push({
-				path: [key],
+type ServiceRule = (service: Service) => FindingInput[];
+
+/** A finding located at `path` below the service. */
+const at = (
+	{ file, doc, name }: Service,
+	path: ServicePath,
+	finding: Omit<FindingInput, "location">,
+): FindingInput => ({
+	location: { file, line: doc.lineOf(["services", name, ...path]) },
+	...finding,
+});
+
+const privilegedFindings: ServiceRule = (service) =>
+	service.svc.privileged === true
+		? [
+				at(service, ["privileged"], {
+					ruleId: "container.compose/privileged",
+					title: "Privileged container",
+					severity: "high",
+					category: "security",
+					message: `Service \`${service.name}\` runs privileged, giving it full access to host devices and disabling most isolation.`,
+					remediation:
+						"Remove `privileged: true`; grant only the specific capabilities or devices needed.",
+					evidence: "privileged: true",
+					references: [COMPOSE_SPEC, CIS_DOCKER],
+					tags: ["cis-docker-5.4", "cwe-250"],
+				}),
+			]
+		: [];
+
+/** Host namespaces a service can join, with how each is reported. */
+const HOST_NAMESPACES = [
+	{
+		key: "network_mode",
+		rule: "network-mode-host",
+		severity: "medium",
+		label: "network",
+		remediationSuffix: " with published ports",
+		tag: "cis-docker-5.10",
+	},
+	{
+		key: "pid",
+		rule: "pid-host",
+		severity: "high",
+		label: "PID",
+		remediationSuffix: "",
+		tag: "cis-docker-5.16",
+	},
+	{
+		key: "ipc",
+		rule: "ipc-host",
+		severity: "medium",
+		label: "IPC",
+		remediationSuffix: "",
+		tag: "cis-docker-5.17",
+	},
+] as const;
+
+const hostNamespaceFindings: ServiceRule = (service) =>
+	HOST_NAMESPACES.filter(({ key }) => service.svc[key] === "host").map(
+		({ key, rule, severity, label, remediationSuffix, tag }) =>
+			at(service, [key], {
 				ruleId: `container.compose/${rule}`,
-				title: `Host ${key === "network_mode" ? "network" : key.toUpperCase()} namespace shared`,
+				title: `Host ${label} namespace shared`,
 				severity,
 				category: "security",
-				message: `Service \`${name}\` uses \`${key}: host\`, removing ${key === "network_mode" ? "network" : key.toUpperCase()} isolation from the host.`,
-				remediation: `Remove \`${key}: host\` and use the default isolated namespace${key === "network_mode" ? " with published ports" : ""}.`,
+				message: `Service \`${service.name}\` uses \`${key}: host\`, removing ${label} isolation from the host.`,
+				remediation: `Remove \`${key}: host\` and use the default isolated namespace${remediationSuffix}.`,
 				evidence: `${key}: host`,
 				references: [COMPOSE_SPEC, CIS_DOCKER],
-				tags: [
-					key === "pid"
-						? "cis-docker-5.16"
-						: key === "ipc"
-							? "cis-docker-5.17"
-							: "cis-docker-5.10",
-				],
-			});
-	}
+				tags: [tag],
+			}),
+	);
 
-	asArray(svc.volumes).forEach((v, i) => {
+const DOCKER_SOCKET_RE = /(^|\/)(var\/)?run\/docker\.sock$|docker\.sock$/;
+
+const dockerSocketFindings: ServiceRule = (service) =>
+	asArray(service.svc.volumes).flatMap((v, i) => {
 		const source = volumeSource(v);
-		if (/(^|\/)(var\/)?run\/docker\.sock$|docker\.sock$/.test(source))
-			push({
-				path: ["volumes", i],
+		if (!DOCKER_SOCKET_RE.test(source)) return [];
+		return [
+			at(service, ["volumes", i], {
 				ruleId: "container.compose/docker-socket",
 				title: "Docker socket mounted into container",
 				severity: "high",
 				category: "security",
-				message: `Service \`${name}\` mounts the Docker socket, which is equivalent to root on the host.`,
+				message: `Service \`${service.name}\` mounts the Docker socket, which is equivalent to root on the host.`,
 				remediation:
 					"Avoid mounting the socket; if unavoidable, use a filtering proxy (e.g. docker-socket-proxy) with read-only, minimal API access.",
 				evidence: source,
 				references: [OWASP_DOCKER, CIS_DOCKER],
 				tags: ["cis-docker-5.31", "cwe-250"],
-			});
+			}),
+		];
 	});
 
-	asArray(svc.cap_add).forEach((c, i) => {
+const isDangerousCapability = (cap: string) =>
+	CRITICAL_CAPS.has(cap) || RISKY_CAPS.has(cap);
+
+const capabilityFindings: ServiceRule = (service) =>
+	asArray(service.svc.cap_add).flatMap((c, i) => {
 		const cap = String(c).toUpperCase().replace(/^CAP_/, "");
-		if (CRITICAL_CAPS.has(cap) || RISKY_CAPS.has(cap))
-			push({
-				path: ["cap_add", i],
+		if (!isDangerousCapability(cap)) return [];
+		return [
+			at(service, ["cap_add", i], {
 				ruleId: "container.compose/dangerous-capability",
 				title: `Dangerous capability ${cap} added`,
 				severity: CRITICAL_CAPS.has(cap) ? "high" : "medium",
 				category: "security",
-				message: `Service \`${name}\` adds \`${cap}\`, which enables container escape or host interference.`,
+				message: `Service \`${service.name}\` adds \`${cap}\`, which enables container escape or host interference.`,
 				remediation:
 					"Drop the capability; add only narrowly scoped ones (and `cap_drop: [ALL]`).",
 				evidence: `cap_add: ${cap}`,
 				references: [CIS_DOCKER, OWASP_DOCKER],
 				tags: ["cis-docker-5.3", "cwe-250"],
-			});
+			}),
+		];
 	});
 
-	asArray(svc.security_opt).forEach((o, i) => {
+const unconfinedProfileFindings: ServiceRule = (service) =>
+	asArray(service.svc.security_opt).flatMap((o, i) => {
 		const opt = String(o);
 		const m = /^(seccomp|apparmor)[:=]unconfined$/i.exec(opt);
-		if (m)
-			push({
-				path: ["security_opt", i],
-				ruleId: `container.compose/${(m[1] ?? "").toLowerCase()}-unconfined`,
-				title: `${m[1]} profile disabled`,
-				severity: m[1]?.toLowerCase() === "seccomp" ? "high" : "medium",
+		if (!m) return [];
+		const profile = m[1];
+		return [
+			at(service, ["security_opt", i], {
+				ruleId: `container.compose/${(profile ?? "").toLowerCase()}-unconfined`,
+				title: `${profile} profile disabled`,
+				severity: profile?.toLowerCase() === "seccomp" ? "high" : "medium",
 				category: "security",
-				message: `Service \`${name}\` disables the default ${m[1]} profile, exposing the full kernel syscall surface.`,
+				message: `Service \`${service.name}\` disables the default ${profile} profile, exposing the full kernel syscall surface.`,
 				remediation: `Remove \`${opt}\` or supply a custom profile allowing only the needed syscalls.`,
 				evidence: opt,
 				references: [
@@ -215,42 +256,53 @@ const auditService = (
 					CIS_DOCKER,
 				],
 				tags: ["cis-docker-5.21"],
-			});
+			}),
+		];
 	});
 
-	for (const { key, value, index } of envEntries(svc.environment)) {
-		if (
-			!SECRET_NAME_RE.test(key) ||
-			value === undefined ||
-			isPlaceholderValue(value)
-		)
-			continue;
-		push({
-			path: ["environment", index],
-			ruleId: "container.compose/plaintext-secret",
-			title: "Plaintext secret in environment",
-			severity: "high",
-			category: "security",
-			message: `Service \`${name}\` sets \`${key}\` to a literal value in the compose file.`,
-			remediation:
-				"Interpolate it from an untracked `.env` file (`$VAR`) or use Compose `secrets:`; rotate the exposed value.",
-			evidence: `${key}=${redact(value)}`,
-			references: ["https://docs.docker.com/compose/how-tos/use-secrets/"],
-			tags: ["cwe-798"],
-		});
-	}
+type EnvEntry = ReturnType<typeof envEntries>[number];
 
-	asArray(svc.ports).forEach((p, i) => {
+/** A secret-named variable set to a literal (non-placeholder) value. */
+const isLiteralSecret = (
+	entry: EnvEntry,
+): entry is EnvEntry & { value: string } =>
+	SECRET_NAME_RE.test(entry.key) &&
+	entry.value !== undefined &&
+	!isPlaceholderValue(entry.value);
+
+const plaintextSecretFindings: ServiceRule = (service) =>
+	envEntries(service.svc.environment)
+		.filter(isLiteralSecret)
+		.map(({ key, value, index }) =>
+			at(service, ["environment", index], {
+				ruleId: "container.compose/plaintext-secret",
+				title: "Plaintext secret in environment",
+				severity: "high",
+				category: "security",
+				message: `Service \`${service.name}\` sets \`${key}\` to a literal value in the compose file.`,
+				remediation:
+					"Interpolate it from an untracked `.env` file (`$VAR`) or use Compose `secrets:`; rotate the exposed value.",
+				evidence: `${key}=${redact(value)}`,
+				references: ["https://docs.docker.com/compose/how-tos/use-secrets/"],
+				tags: ["cwe-798"],
+			}),
+		);
+
+const isLoopback = (hostIp: string | undefined) =>
+	hostIp !== undefined && hostIp !== "" && LOOPBACK_RE.test(hostIp);
+
+const databasePortFindings: ServiceRule = (service) =>
+	asArray(service.svc.ports).flatMap((p, i) => {
 		const { hostIp, container } = parsePort(p);
 		const db = container === undefined ? undefined : DATABASE_PORTS[container];
-		if (db && !(hostIp && LOOPBACK_RE.test(hostIp)))
-			push({
-				path: ["ports", i],
+		if (!db || isLoopback(hostIp)) return [];
+		return [
+			at(service, ["ports", i], {
 				ruleId: "container.compose/database-port-exposed",
 				title: `${db} port published on all interfaces`,
 				severity: "medium",
 				category: "security",
-				message: `Service \`${name}\` publishes ${db} port ${container} on ${hostIp ?? "all interfaces"}; Docker bypasses host firewalls such as ufw.`,
+				message: `Service \`${service.name}\` publishes ${db} port ${container} on ${hostIp ?? "all interfaces"}; Docker bypasses host firewalls such as ufw.`,
 				remediation: `Bind to loopback (\`127.0.0.1:${container}:${container}\`) or drop the port mapping and use the internal network.`,
 				evidence: typeof p === "object" ? JSON.stringify(p) : String(p),
 				references: [
@@ -258,72 +310,103 @@ const auditService = (
 					COMPOSE_SPEC,
 				],
 				tags: ["cwe-668"],
-			});
+			}),
+		];
 	});
 
-	if (
-		typeof svc.image === "string" &&
-		svc.build === undefined &&
-		!svc.image.includes("$")
-	) {
-		if (isMutableTag(parseImageRef(svc.image)))
-			push({
-				path: ["image"],
-				ruleId: "container.compose/image-latest",
-				title: "Image uses a mutable tag",
-				severity: "medium",
-				category: "supply-chain",
-				message: `Service \`${name}\` uses \`${svc.image}\`, which resolves to whatever \`latest\` points to at pull time.`,
-				remediation: "Pin a version tag (and ideally a digest).",
-				evidence: `image: ${svc.image}`,
-				references: [COMPOSE_SPEC],
-				tags: ["cwe-1357"],
-			});
-	}
+/** The service's pulled image, unless it is built locally or interpolated. */
+const pulledImage = (svc: Record<string, unknown>): string | undefined => {
+	if (typeof svc.image !== "string") return undefined;
+	if (svc.build !== undefined) return undefined;
+	return svc.image.includes("$") ? undefined : svc.image;
+};
 
-	if (
-		svc.restart === undefined &&
-		asRecord(svc.deploy)?.restart_policy === undefined
-	)
-		push({
-			ruleId: "container.compose/restart-missing",
-			title: "No restart policy",
-			severity: "low",
-			category: "reliability",
-			message: `Service \`${name}\` has no \`restart\` policy and will stay down after a crash or host reboot.`,
-			remediation: "Add `restart: unless-stopped` (or `on-failure`).",
-			references: [`${COMPOSE_SPEC}#restart`],
-		});
+const mutableImageFindings: ServiceRule = (service) => {
+	const image = pulledImage(service.svc);
+	if (image === undefined) return [];
+	if (!isMutableTag(parseImageRef(image))) return [];
+	return [
+		at(service, ["image"], {
+			ruleId: "container.compose/image-latest",
+			title: "Image uses a mutable tag",
+			severity: "medium",
+			category: "supply-chain",
+			message: `Service \`${service.name}\` uses \`${image}\`, which resolves to whatever \`latest\` points to at pull time.`,
+			remediation: "Pin a version tag (and ideally a digest).",
+			evidence: `image: ${image}`,
+			references: [COMPOSE_SPEC],
+			tags: ["cwe-1357"],
+		}),
+	];
+};
 
-	if (svc.healthcheck === undefined)
-		push({
-			ruleId: "container.compose/healthcheck-missing",
-			title: "No healthcheck",
-			severity: "low",
-			category: "reliability",
-			message: `Service \`${name}\` defines no healthcheck (the image may define one); \`depends_on\` cannot wait for it to become healthy.`,
-			remediation: "Add a `healthcheck:` with a cheap readiness command.",
-			confidence: "medium",
-			references: [`${COMPOSE_SPEC}#healthcheck`],
-		});
+const hasRestartPolicy = (svc: Record<string, unknown>) =>
+	svc.restart !== undefined ||
+	asRecord(svc.deploy)?.restart_policy !== undefined;
 
-	return findings;
+const restartFindings: ServiceRule = (service) =>
+	hasRestartPolicy(service.svc)
+		? []
+		: [
+				at(service, [], {
+					ruleId: "container.compose/restart-missing",
+					title: "No restart policy",
+					severity: "low",
+					category: "reliability",
+					message: `Service \`${service.name}\` has no \`restart\` policy and will stay down after a crash or host reboot.`,
+					remediation: "Add `restart: unless-stopped` (or `on-failure`).",
+					references: [`${COMPOSE_SPEC}#restart`],
+				}),
+			];
+
+const healthcheckFindings: ServiceRule = (service) =>
+	service.svc.healthcheck === undefined
+		? [
+				at(service, [], {
+					ruleId: "container.compose/healthcheck-missing",
+					title: "No healthcheck",
+					severity: "low",
+					category: "reliability",
+					message: `Service \`${service.name}\` defines no healthcheck (the image may define one); \`depends_on\` cannot wait for it to become healthy.`,
+					remediation: "Add a `healthcheck:` with a cheap readiness command.",
+					confidence: "medium",
+					references: [`${COMPOSE_SPEC}#healthcheck`],
+				}),
+			]
+		: [];
+
+/** Service checks, in reporting order. */
+const SERVICE_RULES: ReadonlyArray<ServiceRule> = [
+	privilegedFindings,
+	hostNamespaceFindings,
+	dockerSocketFindings,
+	capabilityFindings,
+	unconfinedProfileFindings,
+	plaintextSecretFindings,
+	databasePortFindings,
+	mutableImageFindings,
+	restartFindings,
+	healthcheckFindings,
+];
+
+const auditService = (service: Service): FindingInput[] =>
+	SERVICE_RULES.flatMap((rule) => rule(service));
+
+/** The document's services that are mappings. */
+const servicesOf = (file: FilePath, doc: YamlDoc): Service[] => {
+	const services = asRecord(asRecord(doc.value)?.services);
+	if (!services) return [];
+	return Object.entries(services).flatMap(([name, value]) => {
+		const svc = asRecord(value);
+		return svc ? [{ file, doc, name, svc }] : [];
+	});
 };
 
 /** Audits one compose file's text. Exported for tests. */
-export const auditCompose = (file: string, text: string): FindingInput[] => {
-	const { docs } = parseYaml(text);
-	const findings: FindingInput[] = [];
-	for (const doc of docs) {
-		const services = asRecord(asRecord(doc.value)?.services);
-		if (!services) continue;
-		for (const [name, svc] of Object.entries(services)) {
-			const record = asRecord(svc);
-			if (record) findings.push(...auditService(file, doc, name, record));
-		}
-	}
-	return findings;
-};
+export const auditCompose = (file: FilePath, text: FileText): FindingInput[] =>
+	parseYaml(text)
+		.docs.flatMap((doc) => servicesOf(file, doc))
+		.flatMap(auditService);
 
 /** Static analysis of docker-compose files. */
 export const compose = defineAuditor({
