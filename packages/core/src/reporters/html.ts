@@ -1,4 +1,4 @@
-import type { Finding, Report } from "../model";
+import type { Finding, Report, TargetInfo } from "../model";
 import { toCsv } from "./csv";
 import {
 	auditorsPanel,
@@ -118,13 +118,17 @@ const categoryTab = (c: CategoryView, i: number): Tab => {
 const tabButton = (tab: Tab, i: number): string =>
 	`<button type="button" class="tab${tab.sep ? " sep" : ""}" role="tab" id="tab-${tab.id}" aria-controls="${tab.id}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}"><span class="tg" aria-hidden="true">${tab.glyph}</span><span class="tl">${e(tab.label)}${tab.spoken ? `<span class="sr-only">${e(tab.spoken)}</span>` : ""}</span>${tab.figure ? `<span class="ts" aria-hidden="true">${e(tab.figure)}</span>` : ""}${tab.bar ?? ""}</button>`;
 
+/** URL, image and cloud targets carry no local path to hide. */
+const namesNoPath = (t: TargetInfo): boolean =>
+	[t.url, t.image, t.cloud].some(Boolean);
+
 /**
  * The page is made to be shared, so its embedded copy of the report (also the
  * "Download JSON" file) names the folder or file, not the local path.
  */
 const shareable = (report: Report): Report => {
 	const t = report.target;
-	if (t.url || t.image || t.cloud) return report;
+	if (namesNoPath(t)) return report;
 	const name = targetLabel(report);
 	return {
 		...report,
@@ -232,29 +236,12 @@ const dataBlocks = (items: ReadonlyArray<Download>): string =>
 		)
 		.join("\n");
 
-export const toHtml = (report: Report, options: HtmlOptions = {}): string => {
-	const { summary, target } = report;
-	const label = targetLabel(report);
-	const title = options.title ?? `openaudit report: ${label}`;
-
-	// Duplicates confirm a finding another auditor kept; they are not listed.
-	const findings = sortedFindings(report).filter(
-		(f) => f.duplicateOf === undefined,
-	);
-	const ids = new Map<Finding, string>(
-		findings.map((f, i) => [f, `f-${i + 1}`]),
-	);
-	const categories = categoryViews(report, findings);
-	const files = downloads(report, options.suppressed ?? report.suppressed);
-	const view: View = {
-		report,
-		findings,
-		ids,
-		categories,
-		suppressed: options.suppressed ?? report.suppressed ?? [],
-	};
-
-	const tabs: Tab[] = [
+const tabsOf = (
+	report: Report,
+	categories: ReadonlyArray<CategoryView>,
+): Tab[] => {
+	const { summary } = report;
+	return [
 		{
 			id: "overview",
 			label: "Overview",
@@ -278,8 +265,15 @@ export const toHtml = (report: Report, options: HtmlOptions = {}): string => {
 			spoken: `, ${plural(report.results.length, "auditor")}`,
 		},
 	];
+};
 
-	const tech = target.technologies;
+const stackOf = (tech: ReadonlyArray<string>): string =>
+	tech.slice(0, MAX_TECH).join(", ") +
+	(tech.length > MAX_TECH ? `, and ${tech.length - MAX_TECH} more` : "");
+
+/** The facts under the title: target, timing, diff base and stack. */
+const metaOf = (report: Report): Array<[string, string]> => {
+	const { target } = report;
 	const meta: Array<[string, string]> = [
 		["Target", target.kinds.join(", ") || target.type],
 	];
@@ -291,16 +285,13 @@ export const toHtml = (report: Report, options: HtmlOptions = {}): string => {
 			"Changes since",
 			`${report.diff.base} (${plural(report.diff.changedFiles, "file")})`,
 		]);
-	if (tech.length)
-		meta.push([
-			"Stack",
-			tech.slice(0, MAX_TECH).join(", ") +
-				(tech.length > MAX_TECH ? `, and ${tech.length - MAX_TECH} more` : ""),
-		]);
+	if (target.technologies.length)
+		meta.push(["Stack", stackOf(target.technologies)]);
+	return meta;
+};
 
-	return `<!doctype html>
-<html lang="en">
-<head>
+const pageHead = (report: Report, title: string, label: string): string =>
+	`<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="${CSP}">
@@ -311,10 +302,14 @@ export const toHtml = (report: Report, options: HtmlOptions = {}): string => {
 <meta name="description" content="${t(`openaudit report for ${label}: score ${report.summary.score}/100, grade ${report.summary.grade}, ${report.results.length} auditors.`)}">
 <link rel="icon" href="${FAVICON}">
 <style>${STYLE}</style>
-</head>
-<body>
-<a class="skip" href="#main">Skip to report</a>
-<header class="mast"><div class="wrap">
+</head>`;
+
+const masthead = (
+	report: Report,
+	label: string,
+	files: ReadonlyArray<Download>,
+): string =>
+	`<header class="mast"><div class="wrap">
 <div class="slug">
 <p class="brand">${ICON.logo}<span>${t(report.tool.name)}</span><span class="ver">${t(report.tool.version)}</span></p>
 <div class="actions" data-js hidden>
@@ -324,14 +319,53 @@ ${downloadMenu(files)}
 </div>
 </div>
 <h1><span class="h1-pre">Audit of</span> <span class="h1-target">${t(label)}</span></h1>
-<dl class="meta">${meta.map(([k, v]) => `<div><dt>${k}</dt><dd>${t(v)}</dd></div>`).join("")}</dl>
-</div></header>
-<div class="frame">
-<nav class="rail" id="tabbar" aria-label="Report sections" hidden>
+<dl class="meta">${metaOf(report)
+		.map(([k, v]) => `<div><dt>${k}</dt><dd>${t(v)}</dd></div>`)
+		.join("")}</dl>
+</div></header>`;
+
+const sectionNav = (report: Report, tabs: ReadonlyArray<Tab>): string => {
+	const { summary } = report;
+	return `<nav class="rail" id="tabbar" aria-label="Report sections" hidden>
 <p class="mini" aria-hidden="true">${tinyRing(summary.score, summary.grade)}<b class="gm-${summary.grade}">${summary.grade}</b><span class="num">${summary.score}/100</span></p>
 <div class="tablist" role="tablist" aria-label="Report sections" aria-orientation="vertical">${tabs.map(tabButton).join("")}<span class="tab-ink" aria-hidden="true"></span></div>
 </nav>
-<nav class="toc" id="toc" aria-label="Report sections"><ul>${tabs.map((tab) => `<li><a href="#${tab.id}">${e(tab.label)}</a></li>`).join("")}</ul></nav>
+<nav class="toc" id="toc" aria-label="Report sections"><ul>${tabs.map((tab) => `<li><a href="#${tab.id}">${e(tab.label)}</a></li>`).join("")}</ul></nav>`;
+};
+
+const pageFooter = (report: Report): string =>
+	`<footer><div class="wrap"><span>Generated by ${t(report.tool.name)} ${t(report.tool.version)}</span><span>Report schema v${t(report.schemaVersion)}</span><span>Started ${t(formatTime(report.startedAt))}</span><span>Finished ${t(formatTime(report.finishedAt))}</span></div></footer>`;
+
+export const toHtml = (report: Report, options: HtmlOptions = {}): string => {
+	const label = targetLabel(report);
+	const title = options.title ?? `openaudit report: ${label}`;
+	const suppressed = options.suppressed ?? report.suppressed;
+
+	// Duplicates confirm a finding another auditor kept; they are not listed.
+	const findings = sortedFindings(report).filter(
+		(f) => f.duplicateOf === undefined,
+	);
+	const ids = new Map<Finding, string>(
+		findings.map((f, i) => [f, `f-${i + 1}`]),
+	);
+	const categories = categoryViews(report, findings);
+	const files = downloads(report, suppressed);
+	const view: View = {
+		report,
+		findings,
+		ids,
+		categories,
+		suppressed: suppressed ?? [],
+	};
+
+	return `<!doctype html>
+<html lang="en">
+${pageHead(report, title, label)}
+<body>
+<a class="skip" href="#main">Skip to report</a>
+${masthead(report, label, files)}
+<div class="frame">
+${sectionNav(report, tabsOf(report, categories))}
 <main id="main" tabindex="-1">
 ${overviewPanel(view)}
 ${categories.map((c) => categoryPanel(c, view)).join("\n")}
@@ -339,9 +373,9 @@ ${standardsPanel(view)}
 ${auditorsPanel(view)}
 </main>
 </div>
-<footer><div class="wrap"><span>Generated by ${t(report.tool.name)} ${t(report.tool.version)}</span><span>Report schema v${t(report.schemaVersion)}</span><span>Started ${t(formatTime(report.startedAt))}</span><span>Finished ${t(formatTime(report.finishedAt))}</span></div></footer>
+${pageFooter(report)}
 ${dataBlocks(files)}
-<script type="application/json" id="data-ai">${scriptSafeJson(toAiPrompt(shareable(report), { suppressed: options.suppressed ?? report.suppressed }))}</script>
+<script type="application/json" id="data-ai">${scriptSafeJson(toAiPrompt(shareable(report), { suppressed }))}</script>
 <p class="sr-only" role="status" id="copy-status"></p>
 <script>${SCRIPT}</script>
 </body>
