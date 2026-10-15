@@ -10,6 +10,7 @@ import { Effect } from "effect";
 import { arr, num, str } from "../../tool";
 import { type OsvVuln, osvSeverity } from "../dependencies";
 import { isRecord } from "../util";
+import type { AdvisoryId, FilePath, FileText, RootPath } from "./report";
 import {
 	baseOf,
 	dirOf,
@@ -25,34 +26,63 @@ import {
 /*                                 govulncheck                                */
 /* -------------------------------------------------------------------------- */
 
+interface StreamState {
+	level: number;
+	start: number;
+	inString: boolean;
+	escaped: boolean;
+}
+
+/** Steps over one character inside a JSON string. */
+const stepString = (s: StreamState, c: string | undefined): void => {
+	if (s.escaped) s.escaped = false;
+	else if (c === "\\") s.escaped = true;
+	else if (c === '"') s.inString = false;
+};
+
+/** Steps over one character outside strings; true when it closes a top-level object. */
+const closesObject = (
+	s: StreamState,
+	c: string | undefined,
+	i: number,
+): boolean => {
+	if (s.level > 0 && c === '"') {
+		s.inString = true;
+		return false;
+	}
+	if (c === "{") {
+		if (s.level === 0) s.start = i;
+		s.level++;
+		return false;
+	}
+	if (c !== "}" || s.level === 0) return false;
+	s.level--;
+	return s.level === 0 && s.start >= 0;
+};
+
+const pushParsed = (out: unknown[], chunk: string): void => {
+	try {
+		out.push(JSON.parse(chunk));
+	} catch {
+		// Truncated or corrupt message: skip it.
+	}
+};
+
 /** Splits a stream of concatenated JSON objects (govulncheck's output). */
-export const splitJsonStream = (text: string): unknown[] => {
+export const splitJsonStream = (text: FileText): unknown[] => {
 	const out: unknown[] = [];
-	let level = 0;
-	let start = -1;
-	let inString = false;
-	let escaped = false;
+	const s: StreamState = {
+		level: 0,
+		start: -1,
+		inString: false,
+		escaped: false,
+	};
 	for (let i = 0; i < text.length; i++) {
 		const c = text[i];
-		if (inString) {
-			if (escaped) escaped = false;
-			else if (c === "\\") escaped = true;
-			else if (c === '"') inString = false;
-		} else if (level > 0 && c === '"') {
-			inString = true;
-		} else if (c === "{") {
-			if (level === 0) start = i;
-			level++;
-		} else if (c === "}" && level > 0) {
-			level--;
-			if (level === 0 && start >= 0) {
-				try {
-					out.push(JSON.parse(text.slice(start, i + 1)));
-				} catch {
-					// Truncated or corrupt message: skip it.
-				}
-				start = -1;
-			}
+		if (s.inString) stepString(s, c);
+		else if (closesObject(s, c, i)) {
+			pushParsed(out, text.slice(s.start, i + 1));
+			s.start = -1;
 		}
 	}
 	return out;
@@ -60,6 +90,12 @@ export const splitJsonStream = (text: string): unknown[] => {
 
 type GoLevel = "module" | "package" | "symbol";
 const GO_LEVELS: ReadonlyArray<GoLevel> = ["module", "package", "symbol"];
+
+interface GoCaller {
+	readonly file?: string;
+	readonly line?: number;
+	readonly fn?: string;
+}
 
 interface GoFinding {
 	readonly level: GoLevel;
@@ -70,40 +106,135 @@ interface GoFinding {
 	readonly pkg?: string;
 	readonly fn?: string;
 	/** Where the main module reaches the vulnerable symbol. */
-	readonly caller?: { file?: string; line?: number; fn?: string };
+	readonly caller?: GoCaller;
 }
+
+type GoFrame = Record<string, unknown>;
+
+const goLevelOf = (top: GoFrame): GoLevel => {
+	if (str(top.function)) return "symbol";
+	return str(top.package) ? "package" : "module";
+};
+
+const goFunctionName = (top: GoFrame): string | undefined =>
+	str(top.function)
+		? `${str(top.receiver) ? `${str(top.receiver)}.` : ""}${str(top.function)}`
+		: undefined;
+
+/** The last frame with a position is the entry point in the user's own module. */
+const goCaller = (trace: ReadonlyArray<GoFrame>): GoCaller | undefined => {
+	const entry = [...trace].reverse().find((f) => isRecord(f.position));
+	if (!entry || !isRecord(entry.position)) return undefined;
+	const pos = entry.position;
+	return {
+		file: str(pos.filename),
+		line: num(pos.line),
+		fn: str(entry.function),
+	};
+};
 
 const goFinding = (raw: Record<string, unknown>): GoFinding | undefined => {
 	const osv = str(raw.osv);
 	const trace = arr(raw.trace).filter(isRecord);
 	const top = trace[0];
 	if (!osv || !top) return undefined;
-	const level: GoLevel = str(top.function)
-		? "symbol"
-		: str(top.package)
-			? "package"
-			: "module";
-	// The last frame is the entry point in the user's own module.
-	const entry = [...trace].reverse().find((f) => isRecord(f.position));
-	const pos = isRecord(entry?.position) ? entry.position : undefined;
 	return {
-		level,
+		level: goLevelOf(top),
 		osv,
 		fixed: str(raw.fixed_version),
 		module: str(top.module) ?? "unknown",
 		version: str(top.version),
 		pkg: str(top.package),
-		fn: str(top.function)
-			? `${str(top.receiver) ? `${str(top.receiver)}.` : ""}${str(top.function)}`
-			: undefined,
-		caller: pos
-			? {
-					file: str(pos.filename),
-					line: num(pos.line),
-					fn: str(entry?.function),
-				}
-			: undefined,
+		fn: goFunctionName(top),
+		caller: goCaller(trace),
 	};
+};
+
+/** Keeps the most specific finding per advisory and module. */
+const keepBest = (best: Map<string, GoFinding>, f: GoFinding): void => {
+	const key = `${f.osv}|${f.module}`;
+	const prev = best.get(key);
+	if (!prev || GO_LEVELS.indexOf(f.level) > GO_LEVELS.indexOf(prev.level))
+		best.set(key, f);
+};
+
+const readGoStream = (stdout: FileText) => {
+	const osvs = new Map<string, OsvVuln>();
+	const best = new Map<string, GoFinding>();
+	for (const msg of splitJsonStream(stdout)) {
+		if (!isRecord(msg)) continue;
+		if (isRecord(msg.osv) && typeof msg.osv.id === "string") {
+			osvs.set(msg.osv.id, msg.osv as unknown as OsvVuln);
+		} else if (isRecord(msg.finding)) {
+			const f = goFinding(msg.finding);
+			if (f) keepBest(best, f);
+		}
+	}
+	return { osvs, findings: [...best.values()] };
+};
+
+const goNote = (f: GoFinding): string => {
+	if (f.level === "symbol")
+		return `Your code calls ${f.pkg}.${f.fn}${f.caller?.fn ? ` (from ${f.caller.fn})` : ""}, so the vulnerable code is reachable.`;
+	if (f.level === "package")
+		return `${f.pkg ?? f.module} is imported but the vulnerable function is not called by your code.`;
+	return `${f.module} is required but its vulnerable packages are not imported or called by your code.`;
+};
+
+const goCallerFile = (f: GoFinding, moduleDir: FilePath) =>
+	f.caller?.file && f.level === "symbol"
+		? joinRel(moduleDir, f.caller.file)
+		: undefined;
+
+/** Reachable findings point at the calling line; the rest at go.mod. */
+const goLocation = (f: GoFinding, moduleDir: FilePath) => {
+	const callerFile = goCallerFile(f, moduleDir);
+	return callerFile
+		? { file: callerFile, line: f.caller?.line }
+		: { file: joinRel(moduleDir, "go.mod"), line: undefined };
+};
+
+/** Imported-but-not-called findings are one severity step lower, with low confidence. */
+const goReach = (f: GoFinding, vuln: OsvVuln | undefined) => {
+	const base = vuln ? osvSeverity(vuln) : "medium";
+	return f.level === "symbol"
+		? { severity: base, confidence: "high" as const, tags: ["reachable"] }
+		: {
+				severity: lower(base),
+				confidence: "low" as const,
+				tags: ["not-called"],
+			};
+};
+
+const goReferences = (id: AdvisoryId, vuln: OsvVuln | undefined) => [
+	`https://pkg.go.dev/vuln/${id}`,
+	...(vuln?.aliases ?? []).filter((a) => a.startsWith("GHSA-")).map(osvUrl),
+];
+
+const goVulnFinding = (
+	f: GoFinding,
+	vuln: OsvVuln | undefined,
+	moduleDir: FilePath,
+): FindingInput => {
+	const fixed = f.fixed?.replace(/^v/, "");
+	return vulnFinding({
+		auditor: "code.govulncheck",
+		name: f.module,
+		version: f.version,
+		ecosystem: "Go",
+		id: f.osv,
+		aliases: vuln?.aliases,
+		summary: vuln?.summary ?? f.osv,
+		fixed: fixed ? [f.fixed ?? fixed] : [],
+		fixHint:
+			f.module === "stdlib"
+				? "Upgrade the Go toolchain to a release containing the fix."
+				: undefined,
+		...goLocation(f, moduleDir),
+		...goReach(f, vuln),
+		references: goReferences(f.osv, vuln),
+		note: goNote(f),
+	});
 };
 
 /**
@@ -113,69 +244,12 @@ const goFinding = (raw: Record<string, unknown>): GoFinding | undefined => {
  * they are reported one severity step lower with low confidence.
  */
 export const parseGovulncheckReport = (
-	stdout: string,
-	_root: string,
-	moduleDir = "",
+	stdout: FileText,
+	_root: RootPath,
+	moduleDir: FilePath = "",
 ): FindingInput[] => {
-	const osvs = new Map<string, OsvVuln>();
-	const best = new Map<string, GoFinding>();
-	for (const msg of splitJsonStream(stdout)) {
-		if (!isRecord(msg)) continue;
-		if (isRecord(msg.osv) && typeof msg.osv.id === "string") {
-			osvs.set(msg.osv.id, msg.osv as unknown as OsvVuln);
-		} else if (isRecord(msg.finding)) {
-			const f = goFinding(msg.finding);
-			if (!f) continue;
-			const key = `${f.osv}|${f.module}`;
-			const prev = best.get(key);
-			if (!prev || GO_LEVELS.indexOf(f.level) > GO_LEVELS.indexOf(prev.level))
-				best.set(key, f);
-		}
-	}
-	const goMod = joinRel(moduleDir, "go.mod");
-	return [...best.values()].map((f) => {
-		const vuln = osvs.get(f.osv);
-		const reachable = f.level === "symbol";
-		const base = vuln ? osvSeverity(vuln) : "medium";
-		const callerFile =
-			f.caller?.file && reachable
-				? joinRel(moduleDir, f.caller.file)
-				: undefined;
-		const stdlib = f.module === "stdlib";
-		const where = f.pkg ?? f.module;
-		const note = reachable
-			? `Your code calls ${f.pkg}.${f.fn}${f.caller?.fn ? ` (from ${f.caller.fn})` : ""}, so the vulnerable code is reachable.`
-			: f.level === "package"
-				? `${where} is imported but the vulnerable function is not called by your code.`
-				: `${f.module} is required but its vulnerable packages are not imported or called by your code.`;
-		const fixed = f.fixed?.replace(/^v/, "");
-		const finding = vulnFinding({
-			auditor: "code.govulncheck",
-			name: f.module,
-			version: f.version,
-			ecosystem: "Go",
-			id: f.osv,
-			aliases: vuln?.aliases,
-			summary: vuln?.summary ?? f.osv,
-			severity: reachable ? base : lower(base),
-			fixed: fixed ? [f.fixed ?? fixed] : [],
-			fixHint: stdlib
-				? "Upgrade the Go toolchain to a release containing the fix."
-				: undefined,
-			file: callerFile ?? goMod,
-			line: callerFile ? f.caller?.line : undefined,
-			references: [
-				`https://pkg.go.dev/vuln/${f.osv}`,
-				...(vuln?.aliases ?? [])
-					.filter((a) => a.startsWith("GHSA-"))
-					.map(osvUrl),
-			],
-			confidence: reachable ? "high" : "low",
-			note,
-			tags: [reachable ? "reachable" : "not-called"],
-		});
-		return finding;
-	});
+	const { osvs, findings } = readGoStream(stdout);
+	return findings.map((f) => goVulnFinding(f, osvs.get(f.osv), moduleDir));
 };
 
 export const govulncheck = defineAuditor({

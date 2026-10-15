@@ -12,6 +12,13 @@ import { arr, parseJson, str, withTempDir } from "../../tool";
 import { osvSeverity } from "../dependencies";
 import { isRecord } from "../util";
 import {
+	type AdvisoryId,
+	type FilePath,
+	type Json,
+	type RootPath,
+	strings,
+} from "./report";
+import {
 	advisoryTags,
 	baseOf,
 	findFiles,
@@ -50,85 +57,96 @@ const CARGO_WARNINGS: Record<
 	},
 };
 
+type CargoWarning = (typeof CARGO_WARNINGS)[string];
+
+const recordOf = (value: unknown): Json => (isRecord(value) ? value : {});
+
+const rustsecUrl = (id: AdvisoryId) =>
+	`https://rustsec.org/advisories/${id}.html`;
+
+const cargoSeverity = (id: AdvisoryId, cvss: string | undefined): Severity =>
+	cvss
+		? osvSeverity({ id, severity: [{ type: "CVSS_V3", score: cvss }] })
+		: "medium";
+
+const cargoVulnFinding = (item: Json, file: FilePath): FindingInput => {
+	const advisory = recordOf(item.advisory);
+	const pkg = recordOf(item.package);
+	const versions = recordOf(item.versions);
+	const id = str(advisory.id) ?? "unknown";
+	const url = str(advisory.url);
+	return vulnFinding({
+		auditor: "code.cargo-audit",
+		name: str(pkg.name) ?? "unknown",
+		version: str(pkg.version),
+		ecosystem: "crates.io",
+		id,
+		aliases: strings(advisory.aliases),
+		summary: str(advisory.title) ?? id,
+		severity: cargoSeverity(id, str(advisory.cvss)),
+		fixed: strings(versions.patched).map((p) => fixedFromPatched(p) ?? p),
+		file,
+		references: [rustsecUrl(id), ...(url ? [url] : [])],
+	});
+};
+
+const cargoWarningFinding = (
+	meta: CargoWarning,
+	w: Json,
+	file: FilePath,
+): FindingInput => {
+	const pkg = recordOf(w.package);
+	const advisory = recordOf(w.advisory);
+	const name = str(pkg.name) ?? "unknown";
+	const version = str(pkg.version);
+	const id = str(advisory.id);
+	const at = version ? `${name}@${version}` : name;
+	return {
+		ruleId: `code.cargo-audit/${meta.rule}`,
+		title: `${at}: ${str(advisory.title) ?? meta.label}`,
+		severity: meta.severity,
+		category: "supply-chain",
+		message: `${at} ${meta.label}${id ? ` (${id})` : ""}.`,
+		location: { file },
+		evidence: id ? `${at} ${id}` : at,
+		remediation: `Replace or upgrade ${name}; see the advisory for maintained alternatives.`,
+		references: id ? [rustsecUrl(id)] : [],
+		confidence: "high",
+		tags: [
+			"owasp-a06",
+			...advisoryTags([id ?? "", ...strings(advisory.aliases)]),
+		],
+	};
+};
+
+/** Warnings (unmaintained, unsound, yanked, ...) of one kind. */
+const cargoWarningFindings = (
+	[kind, list]: [string, unknown],
+	file: FilePath,
+): FindingInput[] => {
+	const meta = CARGO_WARNINGS[kind] ?? CARGO_WARNINGS.notice;
+	if (!meta) return [];
+	return arr(list)
+		.filter(isRecord)
+		.map((w) => cargoWarningFinding(meta, w, file));
+};
+
 /** Parses `cargo-audit audit --json`. */
 export const parseCargoAuditReport = (
 	json: unknown,
-	_root: string,
-	file = "Cargo.lock",
+	_root: RootPath,
+	file: FilePath = "Cargo.lock",
 ): FindingInput[] => {
 	if (!isRecord(json)) return [];
-	const findings: FindingInput[] = [];
-	const vulns = isRecord(json.vulnerabilities) ? json.vulnerabilities : {};
-	for (const item of arr(vulns.list)) {
-		if (!isRecord(item)) continue;
-		const advisory = isRecord(item.advisory) ? item.advisory : {};
-		const pkg = isRecord(item.package) ? item.package : {};
-		const versions = isRecord(item.versions) ? item.versions : {};
-		const id = str(advisory.id) ?? "unknown";
-		const cvss = str(advisory.cvss);
-		const severity = cvss
-			? osvSeverity({ id, severity: [{ type: "CVSS_V3", score: cvss }] })
-			: "medium";
-		const url = str(advisory.url);
-		findings.push(
-			vulnFinding({
-				auditor: "code.cargo-audit",
-				name: str(pkg.name) ?? "unknown",
-				version: str(pkg.version),
-				ecosystem: "crates.io",
-				id,
-				aliases: arr(advisory.aliases).filter(
-					(a): a is string => typeof a === "string",
-				),
-				summary: str(advisory.title) ?? id,
-				severity,
-				fixed: arr(versions.patched)
-					.filter((p): p is string => typeof p === "string")
-					.map((p) => fixedFromPatched(p) ?? p),
-				file,
-				references: [
-					`https://rustsec.org/advisories/${id}.html`,
-					...(url ? [url] : []),
-				],
-			}),
-		);
-	}
-	const warnings = isRecord(json.warnings) ? json.warnings : {};
-	for (const [kind, list] of Object.entries(warnings)) {
-		const meta = CARGO_WARNINGS[kind] ?? CARGO_WARNINGS.notice;
-		if (!meta) continue;
-		for (const w of arr(list)) {
-			if (!isRecord(w)) continue;
-			const pkg = isRecord(w.package) ? w.package : {};
-			const advisory = isRecord(w.advisory) ? w.advisory : {};
-			const name = str(pkg.name) ?? "unknown";
-			const version = str(pkg.version);
-			const id = str(advisory.id);
-			const at = version ? `${name}@${version}` : name;
-			findings.push({
-				ruleId: `code.cargo-audit/${meta.rule}`,
-				title: `${at}: ${str(advisory.title) ?? meta.label}`,
-				severity: meta.severity,
-				category: "supply-chain",
-				message: `${at} ${meta.label}${id ? ` (${id})` : ""}.`,
-				location: { file },
-				evidence: id ? `${at} ${id}` : at,
-				remediation: `Replace or upgrade ${name}; see the advisory for maintained alternatives.`,
-				references: id ? [`https://rustsec.org/advisories/${id}.html`] : [],
-				confidence: "high",
-				tags: [
-					"owasp-a06",
-					...advisoryTags([
-						id ?? "",
-						...arr(advisory.aliases).filter(
-							(a): a is string => typeof a === "string",
-						),
-					]),
-				],
-			});
-		}
-	}
-	return findings;
+	const vulns = recordOf(json.vulnerabilities);
+	return [
+		...arr(vulns.list)
+			.filter(isRecord)
+			.map((item) => cargoVulnFinding(item, file)),
+		...Object.entries(recordOf(json.warnings)).flatMap((entry) =>
+			cargoWarningFindings(entry, file),
+		),
+	];
 };
 
 export const cargoAudit = defineAuditor({

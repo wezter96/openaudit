@@ -2,6 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+	type AuditContext,
 	type Auditor,
 	AuditorError,
 	defineAuditor,
@@ -9,12 +10,25 @@ import {
 	requireTool,
 	requireWorkspace,
 	skip,
+	type Workspace,
 } from "@openaudit/core";
 import { Effect } from "effect";
 
 import { arr, cweTags, parseJson, severityOf, str } from "../../tool";
 import { parseBunLock } from "../dependencies";
 import { isRecord, truncate } from "../util";
+import {
+	type FilePath,
+	type FileText,
+	firstPerKey,
+	type Json,
+	type Keyed,
+	type PackageName,
+	type RootPath,
+	strings,
+	type ToolBin,
+	type Url,
+} from "./report";
 import {
 	baseOf,
 	dirOf,
@@ -23,7 +37,6 @@ import {
 	fixedFromRange,
 	ghsaOf,
 	NPM_REGISTRY,
-	osvUrl,
 	run,
 	vulnFinding,
 } from "./shared";
@@ -33,8 +46,8 @@ import {
 /* -------------------------------------------------------------------------- */
 
 export interface LockText {
-	readonly file: string;
-	readonly text: string;
+	readonly file: FilePath;
+	readonly text: FileText;
 }
 
 const errorMessage = (json: unknown): string | undefined => {
@@ -48,186 +61,292 @@ const errorMessage = (json: unknown): string | undefined => {
 	);
 };
 
-const jsRefs = (url: string | undefined, id?: string) => [
-	...(url ? [url] : []),
-	...(id ? [osvUrl(id)] : []),
-];
+/** Advisory page, if any. */
+const jsRefs = (url: Url | undefined) => (url ? [url] : []);
+
+/* --------------------------------- npm audit -------------------------------- */
+
+/** package-lock.json's `packages` map, when the lockfile parses. */
+const lockedPackages = (lock?: LockText): Json => {
+	try {
+		const parsed: unknown = lock ? JSON.parse(lock.text) : undefined;
+		if (isRecord(parsed) && isRecord(parsed.packages)) return parsed.packages;
+	} catch {
+		// Versions are optional.
+	}
+	return {};
+};
+
+/** The installed version, from the package's first node in the lockfile. */
+const lockedVersion = (entry: Json, packages: Json) => {
+	const node = str(arr(entry.nodes)[0]);
+	const locked = node ? packages[node] : undefined;
+	return isRecord(locked) ? str(locked.version) : undefined;
+};
+
+const npmFixHint = (fa: unknown, name: PackageName) => {
+	if (isRecord(fa))
+		return `Upgrade ${str(fa.name) ?? name} to ${str(fa.version) ?? "the latest version"} (npm audit fix${fa.isSemVerMajor ? " --force, a breaking change" : ""}).`;
+	return fa === true
+		? "Run npm audit fix to update to a patched version."
+		: undefined;
+};
+
+/** One entry of npm's `vulnerabilities` map. */
+interface NpmVulnerable {
+	readonly key: PackageName;
+	readonly version?: string;
+	readonly fixAvailable: unknown;
+	readonly file?: FilePath;
+}
+
+const npmViaFinding = (via: Json, pkg: NpmVulnerable): Keyed => {
+	const name = str(via.name) ?? pkg.key;
+	const url = str(via.url);
+	const id = ghsaOf(url) ?? String(via.source ?? url ?? "unknown");
+	const fixed = fixedFromRange(str(via.range));
+	const finding = vulnFinding({
+		auditor: "code.npm-audit",
+		name,
+		version: pkg.version,
+		ecosystem: "npm",
+		id,
+		summary: str(via.title) ?? id,
+		severity: severityOf(via.severity),
+		fixed: fixed ? [fixed] : [],
+		fixHint: npmFixHint(pkg.fixAvailable, name),
+		file: pkg.file,
+		references: jsRefs(url),
+		tags: cweTags(strings(via.cwe)),
+	});
+	return { key: `${name}|${id}`, finding };
+};
+
+const npmEntryFindings = (
+	[key, entry]: [PackageName, unknown],
+	packages: Json,
+	file?: FilePath,
+): Keyed[] => {
+	if (!isRecord(entry)) return [];
+	const pkg: NpmVulnerable = {
+		key,
+		version: lockedVersion(entry, packages),
+		fixAvailable: entry.fixAvailable,
+		file,
+	};
+	// String entries only name another vulnerable package (reported on its own).
+	return arr(entry.via)
+		.filter(isRecord)
+		.map((via) => npmViaFinding(via, pkg));
+};
 
 /** Parses `npm audit --json` (npm v7+: `vulnerabilities` map with `via`). */
 export const parseNpmAuditReport = (
 	json: unknown,
-	_root: string,
+	_root: RootPath,
 	lock?: LockText,
 ): FindingInput[] => {
 	if (!isRecord(json) || !isRecord(json.vulnerabilities)) return [];
-	let packages: Record<string, unknown> = {};
-	try {
-		const parsed: unknown = lock ? JSON.parse(lock.text) : undefined;
-		if (isRecord(parsed) && isRecord(parsed.packages))
-			packages = parsed.packages;
-	} catch {
-		// Versions are optional.
-	}
-	const findings: FindingInput[] = [];
-	const seen = new Set<string>();
-	for (const [key, entry] of Object.entries(json.vulnerabilities)) {
-		if (!isRecord(entry)) continue;
-		const node = str(arr(entry.nodes)[0]);
-		const locked = node ? packages[node] : undefined;
-		const version = isRecord(locked) ? str(locked.version) : undefined;
-		const fa = entry.fixAvailable;
-		for (const via of arr(entry.via)) {
-			// String entries only name another vulnerable package (reported on its own).
-			if (!isRecord(via)) continue;
-			const name = str(via.name) ?? key;
-			const url = str(via.url);
-			const id = ghsaOf(url) ?? String(via.source ?? url ?? "unknown");
-			const dedupe = `${name}|${id}`;
-			if (seen.has(dedupe)) continue;
-			seen.add(dedupe);
-			const fixed = fixedFromRange(str(via.range));
-			const cwes = arr(via.cwe).filter(
-				(c): c is string => typeof c === "string",
-			);
-			findings.push(
-				vulnFinding({
-					auditor: "code.npm-audit",
-					name,
-					version,
-					ecosystem: "npm",
-					id,
-					summary: str(via.title) ?? id,
-					severity: severityOf(via.severity),
-					fixed: fixed ? [fixed] : [],
-					fixHint: isRecord(fa)
-						? `Upgrade ${str(fa.name) ?? name} to ${str(fa.version) ?? "the latest version"} (npm audit fix${fa.isSemVerMajor ? " --force, a breaking change" : ""}).`
-						: fa === true
-							? "Run npm audit fix to update to a patched version."
-							: undefined,
-					file: lock?.file,
-					references: jsRefs(url),
-					tags: cweTags(cwes),
-				}),
-			);
-		}
-	}
-	return findings;
+	const packages = lockedPackages(lock);
+	return firstPerKey(
+		Object.entries(json.vulnerabilities).flatMap((entry) =>
+			npmEntryFindings(entry, packages, lock?.file),
+		),
+	);
+};
+
+/* -------------------------------- pnpm audit -------------------------------- */
+
+/** Installed versions an advisory was found in (one undefined entry when none are listed). */
+const pnpmVersions = (adv: Json): Array<string | undefined> => {
+	const versions = [
+		...new Set(
+			arr(adv.findings)
+				.filter(isRecord)
+				.map((f) => str(f.version))
+				.filter((v): v is string => !!v),
+		),
+	];
+	return versions.length ? versions : [undefined];
+};
+
+const pnpmAdvisoryFindings = (adv: unknown, file?: FilePath): Keyed[] => {
+	if (!isRecord(adv)) return [];
+	const name = str(adv.module_name) ?? "unknown";
+	const url = str(adv.url);
+	const id =
+		str(adv.github_advisory_id) ?? ghsaOf(url) ?? String(adv.id ?? "unknown");
+	const fixed = fixedFromPatched(str(adv.patched_versions));
+	return pnpmVersions(adv).map((version) => ({
+		key: `${name}|${id}|${version}`,
+		finding: vulnFinding({
+			auditor: "code.pnpm-audit",
+			name,
+			version,
+			ecosystem: "npm",
+			id,
+			aliases: strings(adv.cves),
+			summary: str(adv.title) ?? id,
+			severity: severityOf(adv.severity),
+			fixed: fixed ? [fixed] : [],
+			file,
+			references: jsRefs(url),
+			tags: cweTags(strings(adv.cwe)),
+		}),
+	}));
 };
 
 /** Parses `pnpm audit --json` (legacy `advisories` map). */
 export const parsePnpmAuditReport = (
 	json: unknown,
-	_root: string,
-	file?: string,
+	_root: RootPath,
+	file?: FilePath,
 ): FindingInput[] => {
 	if (!isRecord(json) || !isRecord(json.advisories)) return [];
-	const findings: FindingInput[] = [];
-	const seen = new Set<string>();
-	for (const adv of Object.values(json.advisories)) {
-		if (!isRecord(adv)) continue;
-		const name = str(adv.module_name) ?? "unknown";
-		const url = str(adv.url);
-		const id =
-			str(adv.github_advisory_id) ?? ghsaOf(url) ?? String(adv.id ?? "unknown");
-		const cves = arr(adv.cves).filter(
-			(c): c is string => typeof c === "string",
-		);
-		const cwes = arr(adv.cwe).filter((c): c is string => typeof c === "string");
-		const fixed = fixedFromPatched(str(adv.patched_versions));
-		const versions = [
-			...new Set(
-				arr(adv.findings)
-					.filter(isRecord)
-					.map((f) => str(f.version))
-					.filter((v): v is string => !!v),
-			),
-		];
-		for (const version of versions.length ? versions : [undefined]) {
-			const dedupe = `${name}|${id}|${version}`;
-			if (seen.has(dedupe)) continue;
-			seen.add(dedupe);
-			findings.push(
-				vulnFinding({
-					auditor: "code.pnpm-audit",
-					name,
-					version,
-					ecosystem: "npm",
-					id,
-					aliases: cves,
-					summary: str(adv.title) ?? id,
-					severity: severityOf(adv.severity),
-					fixed: fixed ? [fixed] : [],
-					file,
-					references: jsRefs(url),
-					tags: cweTags(cwes),
-				}),
-			);
-		}
-	}
-	return findings;
+	return firstPerKey(
+		Object.values(json.advisories).flatMap((adv) =>
+			pnpmAdvisoryFindings(adv, file),
+		),
+	);
+};
+
+/* --------------------------------- bun audit -------------------------------- */
+
+/** Versions per package in bun.lock. */
+const bunLockVersions = (lock?: LockText) => {
+	const versions = new Map<PackageName, string[]>();
+	if (lock)
+		for (const d of parseBunLock(lock.text, lock.file))
+			versions.set(d.name, [...(versions.get(d.name) ?? []), d.version]);
+	return versions;
+};
+
+const isBunAdvisory = (adv: unknown): adv is Json =>
+	isRecord(adv) && !!(adv.id || adv.url);
+
+interface BunPackage {
+	readonly name: PackageName;
+	/** Versions in bun.lock: bun does not print the installed version. */
+	readonly known: ReadonlyArray<string>;
+	readonly file?: FilePath;
+}
+
+const bunAdvisoryFinding = (adv: Json, pkg: BunPackage): Keyed => {
+	const url = str(adv.url);
+	const id = ghsaOf(url) ?? String(adv.id ?? "unknown");
+	const fixed = fixedFromRange(str(adv.vulnerable_versions));
+	const finding = vulnFinding({
+		auditor: "code.bun-audit",
+		name: pkg.name,
+		version: pkg.known.length ? pkg.known.join(", ") : undefined,
+		ecosystem: "npm",
+		id,
+		summary: str(adv.title) ?? id,
+		severity: severityOf(adv.severity),
+		fixed: fixed ? [fixed] : [],
+		file: pkg.file,
+		references: jsRefs(url),
+		tags: cweTags(strings(adv.cwe)),
+	});
+	return { key: `${pkg.name}|${id}`, finding };
 };
 
 /** Parses `bun audit --json` (`{ "<package>": [advisory, ...] }`). */
 export const parseBunAuditReport = (
 	json: unknown,
-	_root: string,
+	_root: RootPath,
 	lock?: LockText,
 ): FindingInput[] => {
 	if (!isRecord(json) || isRecord(json.error)) return [];
-	const versions = new Map<string, string[]>();
-	if (lock)
-		for (const d of parseBunLock(lock.text, lock.file))
-			versions.set(d.name, [...(versions.get(d.name) ?? []), d.version]);
-	const findings: FindingInput[] = [];
-	const seen = new Set<string>();
-	for (const [name, list] of Object.entries(json)) {
-		for (const adv of arr(list)) {
-			if (!isRecord(adv) || (!adv.id && !adv.url)) continue;
-			const url = str(adv.url);
-			const id = ghsaOf(url) ?? String(adv.id ?? "unknown");
-			if (seen.has(`${name}|${id}`)) continue;
-			seen.add(`${name}|${id}`);
-			const fixed = fixedFromRange(str(adv.vulnerable_versions));
-			const cwes = arr(adv.cwe).filter(
-				(c): c is string => typeof c === "string",
-			);
-			const known = [...new Set(versions.get(name) ?? [])];
-			findings.push(
-				vulnFinding({
-					auditor: "code.bun-audit",
-					name,
-					// bun does not print the installed version; take it from bun.lock.
-					version: known.length ? known.join(", ") : undefined,
-					ecosystem: "npm",
-					id,
-					summary: str(adv.title) ?? id,
-					severity: severityOf(adv.severity),
-					fixed: fixed ? [fixed] : [],
-					file: lock?.file,
-					references: jsRefs(url),
-					tags: cweTags(cwes),
-				}),
-			);
-		}
-	}
-	return findings;
+	const versions = bunLockVersions(lock);
+	return firstPerKey(
+		Object.entries(json).flatMap(([name, list]) => {
+			const pkg: BunPackage = {
+				name,
+				known: [...new Set(versions.get(name) ?? [])],
+				file: lock?.file,
+			};
+			return arr(list)
+				.filter(isBunAdvisory)
+				.map((adv) => bunAdvisoryFinding(adv, pkg));
+		}),
+	);
 };
 
-const jsAudit = (opts: {
-	id: string;
-	title: string;
-	tool: string;
-	lockfiles: ReadonlyArray<string>;
-	install: string;
-	args: ReadonlyArray<string>;
-	env?: Record<string, string>;
-	parse: (
+/* ---------------------------------- runner ---------------------------------- */
+
+interface JsAuditOptions {
+	readonly id: string;
+	readonly title: string;
+	readonly tool: string;
+	readonly lockfiles: ReadonlyArray<string>;
+	readonly install: string;
+	readonly args: ReadonlyArray<string>;
+	readonly env?: Record<string, string>;
+	readonly parse: (
 		json: unknown,
-		root: string,
-		file: string,
-		lockText: string,
+		root: RootPath,
+		file: FilePath,
+		lockText: FileText,
 	) => FindingInput[];
-}): Auditor =>
+}
+
+/** A lockfile and its package.json, read for copying into a scratch dir. */
+interface LockCopy {
+	readonly lock: FilePath;
+	readonly text: FileText;
+	readonly pkg?: FileText;
+}
+
+const manifestOf = (lock: FilePath) =>
+	dirOf(lock) ? `${dirOf(lock)}/package.json` : "package.json";
+
+const readLockCopy = (ws: Workspace, lock: FilePath) =>
+	Effect.gen(function* () {
+		const text = yield* ws.readText(lock).pipe(Effect.orElseSucceed(() => ""));
+		const pkg = yield* ws
+			.readText(manifestOf(lock))
+			.pipe(Effect.orElseSucceed(() => undefined));
+		return { lock, text, pkg } satisfies LockCopy;
+	});
+
+const writeCopies = (scratch: string, copy: LockCopy) =>
+	Effect.promise(async () => {
+		await writeFile(join(scratch, baseOf(copy.lock)), copy.text);
+		if (copy.pkg !== undefined)
+			await writeFile(join(scratch, "package.json"), copy.pkg);
+	});
+
+/**
+ * Runs the audit against copies of the lockfile and package.json only, so the
+ * project's .npmrc / bunfig.toml / pnpm-workspace.yaml / hook files are never
+ * read (they can set proxies, CAs or run code).
+ */
+const auditCopy = (
+	ctx: AuditContext,
+	tool: { readonly opts: JsAuditOptions; readonly bin: ToolBin },
+	copy: LockCopy,
+) =>
+	Effect.gen(function* () {
+		const scratch = yield* Effect.promise(() =>
+			mkdtemp(join(tmpdir(), "openaudit-js-audit-")),
+		);
+		// Exit 1 = vulnerabilities found (or an error, reported as JSON).
+		return yield* writeCopies(scratch, copy).pipe(
+			Effect.andThen(
+				run(ctx, [tool.bin, ...tool.opts.args, "--registry", NPM_REGISTRY], {
+					cwd: scratch,
+					okCodes: [0, 1],
+					env: tool.opts.env,
+				}),
+			),
+			Effect.ensuring(
+				Effect.promise(() => rm(scratch, { recursive: true, force: true })),
+			),
+		);
+	});
+
+const jsAudit = (opts: JsAuditOptions): Auditor =>
 	defineAuditor({
 		id: opts.id,
 		title: opts.title,
@@ -249,40 +368,8 @@ const jsAudit = (opts: {
 				const bin = yield* requireTool(ctx, opts.tool, opts.install);
 				const findings: FindingInput[] = [];
 				for (const lock of locks) {
-					const text = yield* ws
-						.readText(lock)
-						.pipe(Effect.orElseSucceed(() => ""));
-					const manifest = dirOf(lock)
-						? `${dirOf(lock)}/package.json`
-						: "package.json";
-					const pkg = yield* ws
-						.readText(manifest)
-						.pipe(Effect.orElseSucceed(() => undefined));
-					// Run against copies of the lockfile and package.json only, so the
-					// project's .npmrc / bunfig.toml / pnpm-workspace.yaml / hook files
-					// are never read (they can set proxies, CAs or run code).
-					const scratch = yield* Effect.promise(() =>
-						mkdtemp(join(tmpdir(), "openaudit-js-audit-")),
-					);
-					// Exit 1 = vulnerabilities found (or an error, reported as JSON).
-					const res = yield* Effect.promise(async () => {
-						await writeFile(join(scratch, baseOf(lock)), text);
-						if (pkg !== undefined)
-							await writeFile(join(scratch, "package.json"), pkg);
-					}).pipe(
-						Effect.andThen(
-							run(ctx, [bin, ...opts.args, "--registry", NPM_REGISTRY], {
-								cwd: scratch,
-								okCodes: [0, 1],
-								env: opts.env,
-							}),
-						),
-						Effect.ensuring(
-							Effect.promise(() =>
-								rm(scratch, { recursive: true, force: true }),
-							),
-						),
-					);
+					const copy = yield* readLockCopy(ws, lock);
+					const res = yield* auditCopy(ctx, { opts, bin }, copy);
 					const json = yield* parseJson(res.stdout || "{}", opts.tool);
 					const err = errorMessage(json);
 					if (err)
@@ -291,7 +378,7 @@ const jsAudit = (opts: {
 								message: `${opts.tool} audit failed: ${truncate(err, 300)}`,
 							}),
 						);
-					findings.push(...opts.parse(json, ws.root, lock, text));
+					findings.push(...opts.parse(json, ws.root, lock, copy.text));
 				}
 				return findings;
 			}),

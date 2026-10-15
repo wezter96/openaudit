@@ -21,25 +21,30 @@ import {
 } from "../../tool";
 import { severityFromScore } from "../dependencies";
 import { isRecord, truncate } from "../util";
+import type { FilePath, Json, PackageName, RootPath } from "./report";
 import { run, scanPath, vulnFinding, withTempDir } from "./shared";
 
 /* -------------------------------------------------------------------------- */
 /*                                    grype                                   */
 /* -------------------------------------------------------------------------- */
 
+const strings = (value: unknown): string[] =>
+	arr(value).filter((v): v is string => typeof v === "string");
+
+const baseScores = (cvss: unknown): number[] => {
+	if (!isRecord(cvss) || !isRecord(cvss.metrics)) return [];
+	const score = num(cvss.metrics.baseScore);
+	return score !== undefined ? [score] : [];
+};
+
 const grypeSeverity = (vuln: Record<string, unknown>): Severity => {
 	const label = str(vuln.severity)?.toLowerCase();
 	if (label === "negligible") return "info";
 	if (label && label !== "unknown") return severityOf(label);
-	const scores = arr(vuln.cvss).flatMap((c) =>
-		isRecord(c) && isRecord(c.metrics) && num(c.metrics.baseScore) !== undefined
-			? [num(c.metrics.baseScore) as number]
-			: [],
-	);
+	const scores = arr(vuln.cvss).flatMap(baseScores);
 	return scores.length ? severityFromScore(Math.max(...scores)) : "medium";
 };
 
-/** Parses `grype -o json`. */
 /** grype and syft `--exclude` globs, relative to the scanned directory, for what .gitignore excludes. */
 const anchoreExcludes = (ws: Workspace) =>
 	Effect.map(gitignoredPaths(ws), (paths) =>
@@ -49,71 +54,90 @@ const anchoreExcludes = (ws: Workspace) =>
 		]),
 	);
 
+interface GrypeMatch extends Json {
+	readonly vulnerability: Json;
+	readonly artifact: Json;
+}
+
+const isGrypeMatch = (m: unknown): m is GrypeMatch =>
+	isRecord(m) && isRecord(m.vulnerability) && isRecord(m.artifact);
+
+const grypeFix = (vuln: Json, name: PackageName) => {
+	const fix = isRecord(vuln.fix) ? vuln.fix : {};
+	return {
+		fixed: strings(fix.versions),
+		fixHint:
+			str(fix.state) === "wont-fix"
+				? `The vendor will not fix this in ${name}; consider replacing it.`
+				: undefined,
+	};
+};
+
+/** CPE matches can be false positives. */
+const grypeConfidence = (m: GrypeMatch) => {
+	const details = arr(m.matchDetails).find(isRecord);
+	return (str(details?.type) ?? "").includes("cpe")
+		? {
+				confidence: "low" as const,
+				note: "Matched by CPE, which can produce false positives.",
+			}
+		: { confidence: "high" as const, note: undefined };
+};
+
+const grypeReferences = (vuln: Json) => {
+	const source = str(vuln.dataSource);
+	return [...(source ? [source] : []), ...strings(vuln.urls).slice(0, 2)];
+};
+
+/** One match as a finding, with the key grype's duplicate matches share. */
+const grypeFinding = (m: GrypeMatch, root: RootPath) => {
+	const vuln = m.vulnerability;
+	const art = m.artifact;
+	const id = str(vuln.id) ?? "unknown";
+	const name = str(art.name) ?? "unknown";
+	const version = str(art.version);
+	const loc = arr(art.locations).find(isRecord);
+	const file = scanPath(root, loc ? str(loc.path) : undefined);
+	const description = str(vuln.description);
+	const finding = vulnFinding({
+		auditor: "code.grype",
+		name,
+		version,
+		ecosystem: str(art.type),
+		id,
+		aliases: arr(m.relatedVulnerabilities)
+			.filter(isRecord)
+			.map((r) => str(r.id))
+			.filter((r): r is string => !!r),
+		summary: truncate((description ?? id).split("\n")[0] ?? id, 140),
+		severity: grypeSeverity(vuln),
+		...grypeFix(vuln, name),
+		file,
+		references: grypeReferences(vuln),
+		...grypeConfidence(m),
+		tags: cweTags(
+			arr(vuln.cwes)
+				.filter(isRecord)
+				.map((c) => str(c.cwe) ?? ""),
+		),
+	});
+	return { key: `${id}|${name}|${version}|${file}`, finding };
+};
+
+/** Parses `grype -o json`. */
 export const parseGrypeReport = (
 	json: unknown,
-	root: string,
+	root: RootPath,
 ): FindingInput[] => {
 	if (!isRecord(json)) return [];
 	const findings: FindingInput[] = [];
 	const seen = new Set<string>();
 	for (const m of arr(json.matches)) {
-		if (!isRecord(m) || !isRecord(m.vulnerability) || !isRecord(m.artifact))
-			continue;
-		const vuln = m.vulnerability;
-		const art = m.artifact;
-		const id = str(vuln.id) ?? "unknown";
-		const name = str(art.name) ?? "unknown";
-		const version = str(art.version);
-		const loc = arr(art.locations).find(isRecord);
-		const file = scanPath(root, loc ? str(loc.path) : undefined);
-		const key = `${id}|${name}|${version}|${file}`;
+		if (!isGrypeMatch(m)) continue;
+		const { key, finding } = grypeFinding(m, root);
 		if (seen.has(key)) continue;
 		seen.add(key);
-		const related = arr(m.relatedVulnerabilities)
-			.filter(isRecord)
-			.map((r) => str(r.id))
-			.filter((r): r is string => !!r);
-		const fix = isRecord(vuln.fix) ? vuln.fix : {};
-		const state = str(fix.state);
-		const details = arr(m.matchDetails).find(isRecord);
-		const fuzzy = (str(details?.type) ?? "").includes("cpe");
-		const urls = arr(vuln.urls).filter(
-			(u): u is string => typeof u === "string",
-		);
-		const description = str(vuln.description);
-		findings.push(
-			vulnFinding({
-				auditor: "code.grype",
-				name,
-				version,
-				ecosystem: str(art.type),
-				id,
-				aliases: related,
-				summary: truncate((description ?? id).split("\n")[0] ?? id, 140),
-				severity: grypeSeverity(vuln),
-				fixed: arr(fix.versions).filter(
-					(v): v is string => typeof v === "string",
-				),
-				fixHint:
-					state === "wont-fix"
-						? `The vendor will not fix this in ${name}; consider replacing it.`
-						: undefined,
-				file,
-				references: [
-					...(str(vuln.dataSource) ? [str(vuln.dataSource) as string] : []),
-					...urls.slice(0, 2),
-				],
-				confidence: fuzzy ? "low" : "high",
-				note: fuzzy
-					? "Matched by CPE, which can produce false positives."
-					: undefined,
-				tags: cweTags(
-					arr(vuln.cwes)
-						.filter(isRecord)
-						.map((c) => str(c.cwe) ?? ""),
-				),
-			}),
-		);
+		findings.push(finding);
 	}
 	return findings;
 };
@@ -154,13 +178,15 @@ export const grype = defineAuditor({
 /* -------------------------------------------------------------------------- */
 
 type LicenseClass = "strong" | "weak" | "permissive";
+/** An SPDX licence id or expression, or a registry's free-form licence name. */
+type SpdxExpression = string;
 const RANK: Record<LicenseClass, number> = {
 	permissive: 0,
 	weak: 1,
 	strong: 2,
 };
 
-const classifyLicense = (id: string): LicenseClass => {
+const classifyLicense = (id: SpdxExpression): LicenseClass => {
 	const s = id.trim();
 	if (/^(A?GPL|SSPL|EUPL|OSL)\b/i.test(s)) return "strong";
 	if (/^(LGPL|MPL|EPL|CDDL)\b/i.test(s)) return "weak";
@@ -171,12 +197,18 @@ const classifyLicense = (id: string): LicenseClass => {
 	return "permissive";
 };
 
+/** Free-form text ("GNU General Public License v3") does not tokenise usefully. */
+const isFreeForm = (expr: SpdxExpression, tokens: ReadonlyArray<string>) =>
+	tokens.length > 1 && !/\b(AND|OR)\b/i.test(expr);
+
 /**
  * Worst-case class of an SPDX expression: `OR` lets the consumer pick the
  * least restrictive alternative, `AND` takes the most restrictive, and `WITH`
  * exceptions are ignored.
  */
-export const classifyLicenseExpression = (expr: string): LicenseClass => {
+export const classifyLicenseExpression = (
+	expr: SpdxExpression,
+): LicenseClass => {
 	const tokens = expr.match(/\(|\)|[^\s()]+/g) ?? [];
 	let i = 0;
 	const atom = (): LicenseClass => {
@@ -209,10 +241,7 @@ export const classifyLicenseExpression = (expr: string): LicenseClass => {
 		return v;
 	};
 	const result = tokens.length ? or() : "permissive";
-	// Free-form text ("GNU General Public License v3") does not tokenise usefully.
-	return result === "permissive" &&
-		tokens.length > 1 &&
-		!/\b(AND|OR)\b/i.test(expr)
+	return result === "permissive" && isFreeForm(expr, tokens)
 		? classifyLicense(expr)
 		: result;
 };
@@ -225,92 +254,124 @@ const licenseValues = (art: Record<string, unknown>): string[] =>
 		return v ? [v] : [];
 	});
 
+/** The project's own lockfile entry (no source, no integrity) is not a dependency. */
+const isOwnLockEntry = (art: Json): boolean => {
+	if (str(art.metadataType) !== "javascript-npm-package-lock-entry")
+		return false;
+	const meta = isRecord(art.metadata) ? art.metadata : {};
+	return !str(meta.resolved) && !str(meta.integrity);
+};
+
+interface SyftPackage {
+	readonly name: PackageName;
+	/** `name@version`, or the name alone. */
+	readonly at: string;
+	readonly file?: FilePath;
+	/** Packages with the same key are cataloged once. */
+	readonly key: string;
+}
+
+const syftPackage = (art: Json, root: RootPath): SyftPackage => {
+	const name = str(art.name) ?? "unknown";
+	const version = str(art.version);
+	const at = version ? `${name}@${version}` : name;
+	const loc = arr(art.locations).find(isRecord);
+	return {
+		name,
+		at,
+		file: scanPath(root, loc ? str(loc.path) : undefined),
+		key: `${str(art.type)}|${at}`,
+	};
+};
+
+const copyleftFinding = (
+	{ name, at, file }: SyftPackage,
+	license: SpdxExpression,
+	strong: boolean,
+): FindingInput => ({
+	ruleId: `code.syft-licenses/${strong ? "strong-copyleft" : "weak-copyleft"}`,
+	title: `${at}: ${license} (${strong ? "strong" : "weak"} copyleft)`,
+	severity: strong ? "medium" : "low",
+	category: "compliance",
+	message: `${at} is licensed under ${license}, a ${strong ? "strong" : "weak"} copyleft licence${strong ? " whose terms can extend to software that links or distributes it" : " that applies to modifications of the component itself"}.`,
+	location: { file },
+	evidence: `${at} ${license}`,
+	remediation: `Whether this is a problem depends on how the project is distributed (SaaS, shipped binary, internal tool, library). Review ${license} with legal counsel, and replace ${name} or seek a commercial licence if it conflicts with your distribution model.`,
+	references: [
+		"https://spdx.org/licenses/",
+		"https://choosealicense.com/licenses/",
+	],
+	confidence: "high",
+	tags: ["licence", strong ? "strong-copyleft" : "weak-copyleft"],
+});
+
+const copyleftFindings = (
+	pkg: SyftPackage,
+	licenses: ReadonlyArray<SpdxExpression>,
+): FindingInput[] =>
+	licenses.flatMap((license) => {
+		const cls = classifyLicenseExpression(license);
+		return cls === "permissive"
+			? []
+			: [copyleftFinding(pkg, license, cls === "strong")];
+	});
+
+const missingLicenseFinding = (
+	unlicensed: ReadonlyArray<string>,
+	total: number,
+): FindingInput => {
+	const shown = unlicensed.slice(0, 10).join(", ");
+	return {
+		ruleId: "code.syft-licenses/missing-license",
+		title: `${unlicensed.length} of ${total} packages have no licence information`,
+		severity: "info",
+		category: "compliance",
+		message: `syft found no licence for ${unlicensed.length} of ${total} cataloged packages: ${shown}${unlicensed.length > 10 ? ", ..." : ""}.`,
+		evidence: `${unlicensed.length}/${total} packages without licence`,
+		remediation:
+			"Check these packages' repositories for a licence before redistributing them. Lockfiles often omit licence metadata, so a clean result needs the installed packages or an SBOM from a build; what is acceptable depends on how the project is distributed.",
+		references: ["https://spdx.org/licenses/"],
+		confidence: "medium",
+		tags: ["licence", "unknown-license"],
+	};
+};
+
 /** Turns `syft -o syft-json` into licence-policy findings. */
 export const parseSyftLicenses = (
 	json: unknown,
-	root: string,
+	root: RootPath,
 ): FindingInput[] => {
 	if (!isRecord(json)) return [];
 	const findings: FindingInput[] = [];
 	const seen = new Set<string>();
 	const unlicensed: string[] = [];
-	let total = 0;
 	for (const art of arr(json.artifacts)) {
-		if (!isRecord(art)) continue;
-		// The project's own lockfile entry (no source, no integrity) is not a dependency.
-		const meta = isRecord(art.metadata) ? art.metadata : {};
-		if (
-			str(art.metadataType) === "javascript-npm-package-lock-entry" &&
-			!str(meta.resolved) &&
-			!str(meta.integrity)
-		)
-			continue;
-		const name = str(art.name) ?? "unknown";
-		const version = str(art.version);
-		const at = version ? `${name}@${version}` : name;
-		const loc = arr(art.locations).find(isRecord);
-		const file = scanPath(root, loc ? str(loc.path) : undefined);
-		const key = `${str(art.type)}|${at}`;
-		if (seen.has(key)) continue;
-		seen.add(key);
-		total++;
+		if (!isRecord(art) || isOwnLockEntry(art)) continue;
+		const pkg = syftPackage(art, root);
+		if (seen.has(pkg.key)) continue;
+		seen.add(pkg.key);
 		const licenses = licenseValues(art);
-		if (!licenses.length) {
-			unlicensed.push(at);
-			continue;
-		}
-		for (const license of licenses) {
-			const cls = classifyLicenseExpression(license);
-			if (cls === "permissive") continue;
-			const strong = cls === "strong";
-			findings.push({
-				ruleId: `code.syft-licenses/${strong ? "strong-copyleft" : "weak-copyleft"}`,
-				title: `${at}: ${license} (${strong ? "strong" : "weak"} copyleft)`,
-				severity: strong ? "medium" : "low",
-				category: "compliance",
-				message: `${at} is licensed under ${license}, a ${strong ? "strong" : "weak"} copyleft licence${strong ? " whose terms can extend to software that links or distributes it" : " that applies to modifications of the component itself"}.`,
-				location: { file },
-				evidence: `${at} ${license}`,
-				remediation: `Whether this is a problem depends on how the project is distributed (SaaS, shipped binary, internal tool, library). Review ${license} with legal counsel, and replace ${name} or seek a commercial licence if it conflicts with your distribution model.`,
-				references: [
-					"https://spdx.org/licenses/",
-					"https://choosealicense.com/licenses/",
-				],
-				confidence: "high",
-				tags: ["licence", strong ? "strong-copyleft" : "weak-copyleft"],
-			});
-		}
+		if (licenses.length) findings.push(...copyleftFindings(pkg, licenses));
+		else unlicensed.push(pkg.at);
 	}
-	if (unlicensed.length) {
-		const shown = unlicensed.slice(0, 10).join(", ");
-		findings.push({
-			ruleId: "code.syft-licenses/missing-license",
-			title: `${unlicensed.length} of ${total} packages have no licence information`,
-			severity: "info",
-			category: "compliance",
-			message: `syft found no licence for ${unlicensed.length} of ${total} cataloged packages: ${shown}${unlicensed.length > 10 ? ", ..." : ""}.`,
-			evidence: `${unlicensed.length}/${total} packages without licence`,
-			remediation:
-				"Check these packages' repositories for a licence before redistributing them. Lockfiles often omit licence metadata, so a clean result needs the installed packages or an SBOM from a build; what is acceptable depends on how the project is distributed.",
-			references: ["https://spdx.org/licenses/"],
-			confidence: "medium",
-			tags: ["licence", "unknown-license"],
-		});
-	}
+	if (unlicensed.length)
+		findings.push(missingLicenseFinding(unlicensed, seen.size));
 	return findings;
 };
 
-/** `sbomOut` must be a plain, non-empty path string. */
-export const validSbomPath = (value: unknown): string | undefined =>
-	typeof value === "string" &&
+// biome-ignore lint/suspicious/noControlCharactersInRegex: rejecting control characters is the point
+const CONTROL_CHARACTERS = /[\u0000-\u001f]/;
+
+const isPlainPath = (value: string) =>
 	value.length > 0 &&
 	value.length <= 1024 &&
-	// biome-ignore lint/suspicious/noControlCharactersInRegex: rejecting control characters is the point
-	!/[\u0000-\u001f]/.test(value) &&
+	!CONTROL_CHARACTERS.test(value) &&
 	!value.includes(",") &&
-	!value.startsWith("-")
-		? value
-		: undefined;
+	!value.startsWith("-");
+
+/** `sbomOut` must be a plain, non-empty path string. */
+export const validSbomPath = (value: unknown): string | undefined =>
+	typeof value === "string" && isPlainPath(value) ? value : undefined;
 
 export const syftLicenses = defineAuditor({
 	id: "code.syft-licenses",

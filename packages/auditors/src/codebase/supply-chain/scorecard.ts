@@ -10,6 +10,7 @@ import { Effect } from "effect";
 
 import { arr, num, parseJson, str } from "../../tool";
 import { isRecord, kebab, truncate } from "../util";
+import { type Json, strings } from "./report";
 import { lower, run } from "./shared";
 
 /* -------------------------------------------------------------------------- */
@@ -43,54 +44,67 @@ const SCORECARD_RISK: Record<string, Severity> = {
 export const scorecardSeverity = (risk: Severity, score: number): Severity =>
 	lower(risk, score <= 3 ? 0 : score <= 6 ? 1 : 2);
 
+/** Inconclusive (-1) and perfect scores need no attention. */
+const needsAttention = (score: number | undefined): score is number =>
+	score !== undefined && score >= 0 && score < 10;
+
+/** `--show-details` lists passing "Info:" lines too; the problems are the "Warn:" ones. */
+const checkDetails = (check: Json) => {
+	const lines = strings(check.details);
+	const warnings = lines.filter((d) => d.startsWith("Warn:"));
+	return warnings.length > 0 ? warnings : lines;
+};
+
+const checkFinding = (
+	c: Json,
+	{ name, score }: { readonly name: string; readonly score: number },
+	repo: string | undefined,
+): FindingInput => {
+	const doc = isRecord(c.documentation) ? c.documentation : {};
+	const url =
+		str(doc.url) ??
+		`https://github.com/ossf/scorecard/blob/main/docs/checks.md#${kebab(name)}`;
+	const details = checkDetails(c);
+	return {
+		ruleId: `code.scorecard/${kebab(name)}`,
+		title: `OpenSSF Scorecard ${name}: ${score}/10`,
+		severity: scorecardSeverity(SCORECARD_RISK[name] ?? "medium", score),
+		category: "supply-chain",
+		message: `${repo ? `${repo}: ` : ""}${str(c.reason) ?? `${name} scored ${score}/10`}${str(doc.short) ? ` (${str(doc.short)})` : ""}`,
+		evidence: details.length
+			? truncate(details.slice(0, 3).join(" | "), 240)
+			: undefined,
+		remediation: `Follow the Scorecard guidance for ${name} to raise the score: ${url}`,
+		references: [url],
+		confidence: "high",
+		tags: ["openssf-scorecard"],
+	};
+};
+
 /** Parses `scorecard --format json`. Inconclusive (-1) and perfect scores are skipped. */
 export const parseScorecardReport = (json: unknown): FindingInput[] => {
 	if (!isRecord(json)) return [];
 	const repo = isRecord(json.repo) ? str(json.repo.name) : undefined;
 	const findings: FindingInput[] = [];
-	for (const c of arr(json.checks)) {
-		if (!isRecord(c)) continue;
+	for (const c of arr(json.checks).filter(isRecord)) {
 		const name = str(c.name);
 		const score = num(c.score);
-		if (!name || score === undefined || score < 0 || score >= 10) continue;
-		const doc = isRecord(c.documentation) ? c.documentation : {};
-		const url =
-			str(doc.url) ??
-			`https://github.com/ossf/scorecard/blob/main/docs/checks.md#${kebab(name)}`;
-		const lines = arr(c.details).filter(
-			(d): d is string => typeof d === "string",
-		);
-		// `--show-details` lists passing "Info:" lines too; the problems are the "Warn:" ones.
-		const warnings = lines.filter((d) => d.startsWith("Warn:"));
-		const details = warnings.length > 0 ? warnings : lines;
-		findings.push({
-			ruleId: `code.scorecard/${kebab(name)}`,
-			title: `OpenSSF Scorecard ${name}: ${score}/10`,
-			severity: scorecardSeverity(SCORECARD_RISK[name] ?? "medium", score),
-			category: "supply-chain",
-			message: `${repo ? `${repo}: ` : ""}${str(c.reason) ?? `${name} scored ${score}/10`}${str(doc.short) ? ` (${str(doc.short)})` : ""}`,
-			evidence: details.length
-				? truncate(details.slice(0, 3).join(" | "), 240)
-				: undefined,
-			remediation: `Follow the Scorecard guidance for ${name} to raise the score: ${url}`,
-			references: [url],
-			confidence: "high",
-			tags: ["openssf-scorecard"],
-		});
+		if (name && needsAttention(score))
+			findings.push(checkFinding(c, { name, score }, repo));
 	}
 	return findings;
 };
+
+const GITHUB_REMOTE = /github\.com[:/]+([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/;
 
 /** `owner/repo` of the `origin` remote when it points at GitHub. */
 export const githubRepoFromGitConfig = (
 	config: string,
 ): { owner: string; repo: string } | undefined => {
-	const section = /\[remote "origin"\]([^[]*)/.exec(config)?.[1];
-	const url = section ? /^\s*url\s*=\s*(\S+)/m.exec(section)?.[1] : undefined;
-	const m = url
-		? /github\.com[:/]+([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(url)
-		: null;
-	return m?.[1] && m[2] ? { owner: m[1], repo: m[2] } : undefined;
+	const section = /\[remote "origin"\]([^[]*)/.exec(config)?.[1] ?? "";
+	const url = /^\s*url\s*=\s*(\S+)/m.exec(section)?.[1] ?? "";
+	const [, owner, repo] = GITHUB_REMOTE.exec(url) ?? [];
+	return owner && repo ? { owner, repo } : undefined;
 };
 
 export const scorecard = defineAuditor({
