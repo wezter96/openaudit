@@ -91,25 +91,30 @@ export const run = <A, E extends { readonly message: string }>(
 			: { ok: false as const, error: r.failure.message },
 	);
 
-/** ±5 lines around a file finding, confined to the target root. */
-export const sourceContext = async (
-	report: Report,
-	loc: { file?: string; line?: number } | undefined,
-) => {
-	if (!report.target.root || !loc?.file) return undefined;
-	// Findings come from untrusted targets: never follow paths or symlinks out of the root.
-	const root = await realpath(report.target.root).catch(() => undefined);
-	const abs = root
-		? await realpath(resolve(root, loc.file)).catch(() => undefined)
+/** Real path of `file` when it resolves inside `rootInput`, else undefined. */
+const confinedPath = async (
+	rootInput: string,
+	file: string,
+): Promise<string | undefined> => {
+	const root = await realpath(rootInput).catch(() => undefined);
+	if (!root) return undefined;
+	const abs = await realpath(resolve(root, file)).catch(() => undefined);
+	return abs?.startsWith(root.endsWith(sep) ? root : root + sep)
+		? abs
 		: undefined;
-	if (!root || !abs?.startsWith(root.endsWith(sep) ? root : root + sep))
-		return undefined;
-	// Regular files only: a FIFO or device planted in the target would hang the read.
-	const info = await stat(abs).catch(() => undefined);
-	if (!info?.isFile() || info.size > 2 * 1024 * 1024) return undefined;
-	const file = Bun.file(abs);
-	const lines = (await file.text()).split(/\r?\n/);
-	const line = Math.max(1, loc.line ?? 1);
+};
+
+const MAX_SOURCE_BYTES = 2 * 1024 * 1024;
+
+/** Regular files only: a FIFO or device planted in the target would hang the read. */
+const isReadableFile = async (path: string): Promise<boolean> => {
+	const info = await stat(path).catch(() => undefined);
+	return info?.isFile() === true && info.size <= MAX_SOURCE_BYTES;
+};
+
+/** ±5 numbered lines around `at`, with that line marked by `>`. */
+const excerpt = (lines: ReadonlyArray<string>, at: number | undefined) => {
+	const line = Math.max(1, at ?? 1);
 	const startLine = Math.max(1, line - 5);
 	const endLine = Math.min(lines.length, line + 5);
 	const width = String(endLine).length;
@@ -117,8 +122,21 @@ export const sourceContext = async (
 		.slice(startLine - 1, endLine)
 		.map(
 			(l, i) =>
-				`${startLine + i === loc.line ? ">" : " "} ${String(startLine + i).padStart(width)} | ${l}`,
+				`${startLine + i === at ? ">" : " "} ${String(startLine + i).padStart(width)} | ${l}`,
 		)
 		.join("\n");
-	return { file: loc.file, startLine, endLine, text };
+	return { startLine, endLine, text };
+};
+
+/** ±5 lines around a file finding, confined to the target root. */
+export const sourceContext = async (
+	report: Report,
+	loc: { file?: string; line?: number } | undefined,
+) => {
+	if (!report.target.root || !loc?.file) return undefined;
+	// Findings come from untrusted targets: never follow paths or symlinks out of the root.
+	const abs = await confinedPath(report.target.root, loc.file);
+	if (!abs || !(await isReadableFile(abs))) return undefined;
+	const lines = (await Bun.file(abs).text()).split(/\r?\n/);
+	return { file: loc.file, ...excerpt(lines, loc.line) };
 };

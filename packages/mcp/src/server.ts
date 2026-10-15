@@ -9,28 +9,18 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import * as Agent from "@openaudit/agent";
 import { builtinAuditors } from "@openaudit/auditors";
 import {
-	type AuditEvent,
 	type AuditOptions,
 	type Auditor,
-	AuditorError,
 	type Category,
 	CoreLive,
-	changedFilesSince,
-	DEFAULT_GUARDED_LIMITS,
-	Exec,
+	type Finding,
 	type FindingInput,
 	type GuardOptions,
-	guardedHttpLayer,
-	type Http,
-	isPinnableUrlAuditor,
-	limitToChangedFiles,
 	makeWorkspace,
 	type Report,
-	resolvePublicUrl,
 	resolveTarget,
 	runAudit,
 	type Severity,
-	SsrfError,
 	selectAuditors,
 	type TargetKind,
 	toCsv,
@@ -39,10 +29,17 @@ import {
 	toMarkdown,
 	toSarif,
 	VERSION,
-	Workspaces,
 } from "@openaudit/core";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { z } from "zod";
+import {
+	auditResult,
+	planAudit,
+	progressReporter,
+	RUN_AUDIT_TOOL,
+	scopedReport,
+	selectionOf,
+} from "./audit";
 import {
 	auditorInfo,
 	errorResult,
@@ -59,16 +56,18 @@ import {
 	SERVER_INSTRUCTIONS,
 } from "./instructions";
 import {
-	breaches,
 	diffReports,
 	isReportId,
 	mergeAgentFindings,
 	persist,
+	type ReportId,
 	ReportStore,
+	type SaveResult,
+	saveFields,
 	saveNote,
 } from "./reports";
 import * as S from "./schemas";
-import { countsText, findingLine, reportSummaryText } from "./text";
+import { countsText, findingLine } from "./text";
 
 type Playbook = Agent.Playbook;
 
@@ -100,6 +99,96 @@ export interface ServerOptions {
 	readonly persistReports?: boolean;
 }
 
+const RENDERERS: Record<
+	"json" | "markdown" | "sarif" | "csv" | "html",
+	(report: Report) => string
+> = {
+	json: toJson,
+	markdown: toMarkdown,
+	sarif: toSarif,
+	csv: toCsv,
+	html: toHtml,
+};
+
+/** Saves the HTML report under the target, or else in a private temp directory. */
+const writeHtml = async (
+	reportId: ReportId,
+	report: Report,
+): Promise<string> => {
+	const html = toHtml(report);
+	const saved = await persist(reportId, report, "html", html);
+	if (saved.saved) return saved.path;
+	// A private, freshly created directory: nothing to follow or race.
+	const dir = await mkdtemp(join(tmpdir(), "openaudit-"));
+	const path = join(dir, `${reportId}.html`);
+	await writeFile(path, html, { flag: "wx", mode: 0o600 });
+	return path;
+};
+
+/** get_finding's text: the finding in full, with its source excerpt. */
+const findingDetail = (
+	finding: Finding,
+	source: Awaited<ReturnType<typeof sourceContext>>,
+): string => {
+	const lines = [
+		`# ${finding.title}`,
+		`${finding.severity} · ${finding.category} · ${finding.ruleId} · auditor ${finding.auditor}${finding.confidence ? ` · confidence ${finding.confidence}` : ""}`,
+		"",
+		finding.message,
+	];
+	if (finding.location)
+		lines.push("", `Location: ${JSON.stringify(finding.location)}`);
+	if (finding.evidence)
+		lines.push("", "Evidence:", "```", finding.evidence, "```");
+	if (source)
+		lines.push(
+			"",
+			`Source ${source.file}:${source.startLine}-${source.endLine}:`,
+			"```",
+			source.text,
+			"```",
+		);
+	if (finding.remediation)
+		lines.push("", `Remediation: ${finding.remediation}`);
+	if (finding.references?.length)
+		lines.push("", "References:", ...finding.references.map((r) => `- ${r}`));
+	return lines.join("\n");
+};
+
+interface Submission {
+	readonly playbookId: string;
+	readonly id: ReportId;
+	readonly report: Report;
+	readonly added: ReadonlyArray<Finding>;
+	readonly saved: SaveResult | undefined;
+}
+
+/** The submit_findings tool result: what was merged and the new score. */
+const submissionResult = ({
+	playbookId,
+	id,
+	report,
+	added,
+	saved,
+}: Submission) => {
+	const note = saveNote(saved);
+	return textResult(
+		[
+			`Merged ${added.length} finding(s) from ${playbookId} into report ${id}.`,
+			...(note ? [note] : []),
+			`Score: ${report.summary.score}/100 (${report.summary.grade}) | ${countsText(report.summary.counts)}`,
+			...added.map(findingLine),
+		].join("\n"),
+		{
+			reportId: id,
+			...saveFields(saved),
+			accepted: added.length,
+			fingerprints: added.map((f) => f.fingerprint),
+			summary: report.summary,
+		},
+	);
+};
+
 export const createServer = (options: ServerOptions = {}): McpServer => {
 	const allowAgentic = options.allowAgentic ?? true;
 	const auditors = (
@@ -113,7 +202,6 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 	};
 	const guard = options.urlGuard;
 	const registryOnly = options.registryImagesOnly ?? false;
-	const isUrl = (t: string) => /^https?:\/\//i.test(t);
 	const playbooks = [
 		...(options.playbooks ?? Agent.playbooks),
 		MANUAL_PLAYBOOK,
@@ -133,7 +221,7 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 		{ instructions: SERVER_INSTRUCTIONS },
 	);
 
-	const getReport = (id: string) => {
+	const getReport = (id: ReportId) => {
 		if (!isReportId(id)) throw new Error("reportId must match ^[a-z0-9-]+$");
 		const report = store.get(id);
 		if (!report)
@@ -231,218 +319,42 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 
 	/* --------------------------------- audit -------------------------------- */
 
-	server.registerTool(
-		"run_audit",
-		{
-			title: "Run audit",
-			description:
-				"Audit a directory, file, http(s) URL, image:<ref> or cloud:<provider>. Returns a summary with the most severe findings (text) and the full report (structuredContent), plus a reportId for get_report, get_finding, submit_findings and compare_reports. Directory targets also get .openaudit/reports/<reportId>.json.",
-			inputSchema: {
-				target: z
-					.string()
-					.describe(
-						"Absolute path, http(s) URL or image:<ref>. Relative paths resolve against the server's cwd.",
-					),
-				only: z
-					.array(z.string())
-					.optional()
-					.describe("Auditor ids or patterns: web.headers, web.*, code"),
-				exclude: z.array(z.string()).optional(),
-				categories: z.array(S.category).optional(),
-				offline: z
-					.boolean()
-					.optional()
-					.describe("No network except to the target"),
-				browser: z
-					.boolean()
-					.optional()
-					.describe("Drive a real browser for URL targets"),
-				maxPages: z.number().int().min(1).max(500).optional(),
-				headers: z
-					.record(z.string(), z.string())
-					.optional()
-					.describe("Extra headers sent only to the target origin"),
-				agentic: z
-					.boolean()
-					.optional()
-					.describe("Run built-in agentic auditors (needs ANTHROPIC_API_KEY)"),
-				model: z.string().optional(),
-				failOn: S.severity
-					.optional()
-					.describe(
-						"Gate: gatePassed is false when any finding is at least this severe",
-					),
-				concurrency: z.number().int().min(1).max(32).optional(),
-				diffBase: z
-					.string()
-					.optional()
-					.describe(
-						"Git ref (e.g. origin/main): keep only findings in files changed since it. Directory targets in a git repo only.",
-					),
-			},
-			outputSchema: {
-				reportId: S.reportId,
-				reportPath: z.string().optional(),
-				notSaved: z
-					.string()
-					.optional()
-					.describe("Why the report is kept in memory only"),
-				gatePassed: z.boolean(),
-				failOn: S.severity.optional(),
-				summary: S.summary,
-				report: S.report,
-			},
-			annotations: {
-				readOnlyHint: false,
-				destructiveHint: false,
-				idempotentHint: false,
-				openWorldHint: true,
-			},
-		},
-		async (args, extra) => {
-			refuseAgentic(args.agentic);
-			const progressToken = extra._meta?.progressToken;
-			let runAuditors: ReadonlyArray<Auditor> = auditors;
-			let total = 0;
-			let done = 0;
-			const notify = (message: string) => {
-				if (progressToken === undefined) return;
-				extra
-					.sendNotification({
-						method: "notifications/progress",
-						params: { progressToken, progress: done, total, message },
-					})
-					.catch(() => {});
-			};
-			let options: AuditOptions = {
-				offline: args.offline,
-				browser: args.browser,
-				maxPages: args.maxPages,
-				headers: args.headers,
-				agentic: args.agentic,
-				model: args.model,
-				diffBase: args.diffBase,
-			};
-			const selection = {
-				only: args.only,
-				exclude: args.exclude,
-				categories: args.categories as Category[] | undefined,
-			};
-			const onEvent = (event: AuditEvent) => {
-				if (event.type === "target") {
-					total = selectAuditors(
-						runAuditors,
-						event.target.kinds,
-						selection,
-						options,
-					).length;
-					notify(`Auditing ${event.target.input} with ${total} auditors`);
-				} else if (event.type === "finish") {
-					done++;
-					notify(
-						`${event.result.auditor}: ${event.result.status} (${event.result.findings.length} findings)`,
-					);
-				}
-			};
-			const target = await resolveInput(args.target);
-			// Guarded URL audits: validate and pin the target, run only auditors whose
-			// traffic goes through the guarded Http service, and allow no subprocesses.
-			if (registryOnly && /^image:/i.test(target))
-				options = {
-					...options,
-					settings: {
-						...options.settings,
-						"container.image": { registryOnly: true },
-					},
-				};
-			let infra: Layer.Layer<Http | Exec | Workspaces> = CoreLive;
-			if (guard && isUrl(target)) {
-				if (args.browser)
-					return errorResult(
-						"browser audits are disabled for URL targets on this server (start it with --allow-private-targets to lift URL restrictions)",
-					);
-				try {
-					const { address } = await resolvePublicUrl(target, guard);
-					options = {
-						...options,
-						browser: false,
-						settings: address
-							? { "web.tls": { connectHost: address } }
-							: undefined,
-					};
-				} catch (error) {
-					if (error instanceof SsrfError) return errorResult(error.message);
-					throw error;
-				}
-				runAuditors = auditors.filter(isPinnableUrlAuditor);
-				infra = Layer.mergeAll(
-					guardedHttpLayer(guard, DEFAULT_GUARDED_LIMITS),
-					Layer.succeed(Exec, {
-						which: () => Effect.succeed(undefined),
-						run: () =>
-							Effect.fail(
-								new AuditorError({
-									message:
-										"External tools are disabled for guarded URL targets",
-								}),
-							),
-					}),
-					Workspaces.layer,
-				);
-			}
-			let changed: string[] | undefined;
-			if (args.diffBase !== undefined) {
-				try {
-					changed = await changedFilesSince(target, args.diffBase);
-				} catch (error) {
-					return errorResult(
-						error instanceof Error ? error.message : String(error),
-					);
-				}
-			}
-			const res = await run(
-				runAudit({
-					target,
-					auditors: runAuditors,
-					options,
-					selection,
-					// Our own saved reports must not be audited on the next run.
-					suppress: { paths: [".openaudit/**"] },
-					concurrency: args.concurrency,
-					onEvent,
-				}).pipe(Effect.provide(infra)),
-			);
-			if (!res.ok) return errorResult(res.error);
-			const report =
-				changed && args.diffBase !== undefined
-					? limitToChangedFiles(res.value, args.diffBase, changed)
-					: res.value;
-			const reportId = ReportStore.newId();
-			const saved = await store.put(reportId, report);
-			const reportPath = saved?.saved ? saved.path : undefined;
-			const failOn = args.failOn as Severity | undefined;
-			const gatePassed = failOn ? !breaches(report, failOn) : true;
-			let text = reportSummaryText(report, reportId, {
-				saveNote: saveNote(saved),
-			});
-			if (failOn)
-				text += `\n\nGate (fail on ${failOn}): ${gatePassed ? "PASSED" : "FAILED"}`;
-			const books = playbooks.filter((p) =>
-				p.targets.some((k) => report.target.kinds.includes(k)),
-			);
-			if (books.length)
-				text += `\n\nPlaybooks for this target: ${books.map((p) => p.id).join(", ")} (get_playbook → submit_findings with reportId ${reportId}).`;
-			return textResult(text, {
-				reportId,
-				...(reportPath ? { reportPath } : {}),
-				...(saved && !saved.saved ? { notSaved: saved.reason } : {}),
-				gatePassed,
-				...(failOn ? { failOn } : {}),
-				summary: report.summary,
-				report: JSON.parse(toJson(report)),
-			});
-		},
-	);
+	server.registerTool("run_audit", RUN_AUDIT_TOOL, async (args, extra) => {
+		refuseAgentic(args.agentic);
+		const target = await resolveInput(args.target);
+		const plan = await planAudit({
+			target,
+			args,
+			auditors,
+			guard,
+			registryOnly,
+		});
+		if ("refused" in plan) return errorResult(plan.refused);
+		const selection = selectionOf(args);
+		const res = await run(
+			runAudit({
+				target,
+				auditors: plan.auditors,
+				options: plan.options,
+				selection,
+				// Our own saved reports must not be audited on the next run.
+				suppress: { paths: [".openaudit/**"] },
+				concurrency: args.concurrency,
+				onEvent: progressReporter(extra, plan, selection),
+			}).pipe(Effect.provide(plan.infra)),
+		);
+		if (!res.ok) return errorResult(res.error);
+		const report = scopedReport(res.value, plan);
+		const reportId = ReportStore.newId();
+		const saved = await store.put(reportId, report);
+		return auditResult({
+			report,
+			reportId,
+			saved,
+			failOn: args.failOn as Severity | undefined,
+			playbooks,
+		});
+	});
 
 	server.registerTool(
 		"get_report",
@@ -466,36 +378,16 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 		},
 		async ({ reportId, format }) => {
 			const report = getReport(reportId);
-			if (format === "html" && !persistReports) {
-				// No server-side files: hand the document to the client.
-				const content = toHtml(report);
-				return textResult(content, { reportId, format, content });
-			}
-			if (format === "html") {
-				const html = toHtml(report);
-				const saved = await persist(reportId, report, "html", html);
-				let path: string;
-				if (saved.saved) path = saved.path;
-				else {
-					// A private, freshly created directory: nothing to follow or race.
-					const dir = await mkdtemp(join(tmpdir(), "openaudit-"));
-					path = join(dir, `${reportId}.html`);
-					await writeFile(path, html, { flag: "wx", mode: 0o600 });
-				}
+			// Without server-side files, HTML is handed to the client like the rest.
+			if (format === "html" && persistReports) {
+				const path = await writeHtml(reportId, report);
 				return textResult(`HTML report written to ${path}`, {
 					reportId,
 					format,
 					path,
 				});
 			}
-			const content =
-				format === "json"
-					? toJson(report)
-					: format === "sarif"
-						? toSarif(report)
-						: format === "csv"
-							? toCsv(report)
-							: toMarkdown(report);
+			const content = RENDERERS[format](report);
 			return textResult(content, { reportId, format, content });
 		},
 	);
@@ -530,33 +422,7 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 					`No finding with fingerprint ${fingerprint} in report ${reportId}.`,
 				);
 			const source = await sourceContext(report, finding.location);
-			const lines = [
-				`# ${finding.title}`,
-				`${finding.severity} · ${finding.category} · ${finding.ruleId} · auditor ${finding.auditor}${finding.confidence ? ` · confidence ${finding.confidence}` : ""}`,
-				"",
-				finding.message,
-			];
-			if (finding.location)
-				lines.push("", `Location: ${JSON.stringify(finding.location)}`);
-			if (finding.evidence)
-				lines.push("", "Evidence:", "```", finding.evidence, "```");
-			if (source)
-				lines.push(
-					"",
-					`Source ${source.file}:${source.startLine}-${source.endLine}:`,
-					"```",
-					source.text,
-					"```",
-				);
-			if (finding.remediation)
-				lines.push("", `Remediation: ${finding.remediation}`);
-			if (finding.references?.length)
-				lines.push(
-					"",
-					"References:",
-					...finding.references.map((r) => `- ${r}`),
-				);
-			return textResult(lines.join("\n"), {
+			return textResult(findingDetail(finding, source), {
 				finding,
 				...(source ? { source } : {}),
 			});
@@ -617,6 +483,22 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 				`Unknown playbook "${id}". Available: ${playbooks.map((b) => b.id).join(", ")}`,
 			);
 		return p;
+	};
+
+	/** The report findings are merged into: a stored one, or a new one for `target`. */
+	const submissionBase = async (
+		reportId: ReportId | undefined,
+		target: string | undefined,
+	): Promise<{ id: ReportId; base: Report } | { error: string }> => {
+		if (reportId) return { id: reportId, base: getReport(reportId) };
+		if (!target) return { error: "Pass reportId (from run_audit) or target." };
+		const res = await run(
+			runAudit({ target: await resolveInput(target), auditors: [] }).pipe(
+				Effect.provide(CoreLive),
+			),
+		);
+		if (!res.ok) return { error: res.error };
+		return { id: ReportStore.newId(), base: res.value };
 	};
 
 	server.registerTool(
@@ -729,45 +611,21 @@ export const createServer = (options: ServerOptions = {}): McpServer => {
 		},
 		async ({ playbookId, reportId, target, findings }) => {
 			const p = findPlaybook(playbookId);
-			let id = reportId;
-			let base: Report | undefined;
-			if (id) base = getReport(id);
-			else if (target) {
-				const res = await run(
-					runAudit({ target: await resolveInput(target), auditors: [] }).pipe(
-						Effect.provide(CoreLive),
-					),
-				);
-				if (!res.ok) return errorResult(res.error);
-				base = res.value;
-				id = ReportStore.newId();
-			} else {
-				return errorResult("Pass reportId (from run_audit) or target.");
-			}
+			const start = await submissionBase(reportId, target);
+			if ("error" in start) return errorResult(start.error);
 			const { report, added } = mergeAgentFindings(
-				base,
+				start.base,
 				p,
 				findings as ReadonlyArray<FindingInput>,
 			);
-			const saved = await store.put(id, report);
-			const reportPath = saved?.saved ? saved.path : undefined;
-			const note = saveNote(saved);
-			return textResult(
-				[
-					`Merged ${added.length} finding(s) from ${p.id} into report ${id}.`,
-					...(note ? [note] : []),
-					`Score: ${report.summary.score}/100 (${report.summary.grade}) | ${countsText(report.summary.counts)}`,
-					...added.map(findingLine),
-				].join("\n"),
-				{
-					reportId: id,
-					...(reportPath ? { reportPath } : {}),
-					...(saved && !saved.saved ? { notSaved: saved.reason } : {}),
-					accepted: added.length,
-					fingerprints: added.map((f) => f.fingerprint),
-					summary: report.summary,
-				},
-			);
+			const saved = await store.put(start.id, report);
+			return submissionResult({
+				playbookId: p.id,
+				id: start.id,
+				report,
+				added,
+				saved,
+			});
 		},
 	);
 
