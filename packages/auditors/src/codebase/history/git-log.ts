@@ -6,6 +6,15 @@ import { Effect } from "effect";
 import { withTempDir } from "../../tool";
 import { confineGitDir, gitHardeningEnv } from "../secrets-history";
 
+/** A path on disk: the target root, a git directory or the git binary. */
+type Dir = string;
+/** A commit id, 40 or 64 hex characters. */
+type ObjectId = string;
+/** A full ref name such as `refs/heads/main`. */
+type RefName = string;
+type GitOutput = string;
+type EpochSeconds = number;
+
 /** One commit and the files it touched. */
 export interface Commit {
 	readonly hash: string;
@@ -26,7 +35,7 @@ const RECORD = "\u001e";
 const FIELD = "\u001f";
 
 /** Parses `git log --format=%x1e%H%x1f%aN%x1f%at --name-only` output. */
-export const parseGitLog = (stdout: string): Commit[] =>
+export const parseGitLog = (stdout: GitOutput): Commit[] =>
 	stdout
 		.split(RECORD)
 		.slice(1)
@@ -49,7 +58,7 @@ const LOG_HARDENING: ReadonlyArray<readonly [string, string]> = [
 	["log.mailmap", "false"],
 ];
 
-const commonDirOf = async (gitDir: string) => {
+const commonDirOf = async (gitDir: Dir) => {
 	const common = await readFile(join(gitDir, "commondir"), "utf8").catch(
 		() => undefined,
 	);
@@ -61,14 +70,14 @@ const commonDirOf = async (gitDir: string) => {
 const OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const REF = /^refs\/[\w./-]+$/;
 
-const readTrimmed = (path: string) =>
+const readTrimmed = (path: Dir) =>
 	readFile(path, "utf8").then(
 		(text) => text.trim(),
 		() => undefined,
 	);
 
 /** A branch's commit, from its loose ref file or from `packed-refs`. */
-const refCommit = async (common: string, ref: string) => {
+const refCommit = async (common: Dir, ref: RefName) => {
 	if (!REF.test(ref) || ref.includes("..")) return undefined;
 	const loose = await readTrimmed(join(common, ref));
 	if (loose !== undefined) return loose;
@@ -82,9 +91,9 @@ const refCommit = async (common: string, ref: string) => {
  * so git never loads the target's configuration.
  */
 export const headCommit = async (
-	gitDir: string,
-	common: string,
-): Promise<string | undefined> => {
+	gitDir: Dir,
+	common: Dir,
+): Promise<ObjectId | undefined> => {
 	const head = (await readTrimmed(join(gitDir, "HEAD"))) ?? "";
 	const ref = /^ref: (.+)$/.exec(head)?.[1];
 	const id = ref === undefined ? head : await refCommit(common, ref);
@@ -95,7 +104,7 @@ export const headCommit = async (
  * A throwaway git directory that borrows only the target's objects: an empty
  * config, HEAD at the commit to read, and the target's shallow list.
  */
-const scratchGitDir = async (dir: string, common: string, head: string) => {
+const scratchGitDir = async (dir: Dir, common: Dir, head: ObjectId) => {
 	await mkdir(join(dir, "refs"), { recursive: true });
 	const format =
 		head.length === 64
@@ -109,7 +118,7 @@ const scratchGitDir = async (dir: string, common: string, head: string) => {
 	if (shallow) await writeFile(join(dir, "shallow"), shallow);
 };
 
-const logArgs = (git: string, since: number, head: string) => [
+const logArgs = (git: Dir, since: EpochSeconds, head: ObjectId) => [
 	git,
 	"log",
 	"--no-merges",
@@ -126,7 +135,7 @@ const logArgs = (git: string, since: number, head: string) => [
 	"--",
 ];
 
-const runLog = (ctx: AuditContext, git: string, common: string, head: string) =>
+const runLog = (ctx: AuditContext, git: Dir, common: Dir, head: ObjectId) =>
 	withTempDir("openaudit-history-", (tmp) =>
 		Effect.gen(function* () {
 			const dir = join(tmp, "git");
@@ -156,7 +165,7 @@ const runLog = (ctx: AuditContext, git: string, common: string, head: string) =>
  */
 export const readHistory = (
 	ctx: AuditContext,
-	root: string,
+	root: Dir,
 ): Effect.Effect<History, AuditorError> =>
 	Effect.gen(function* () {
 		const git = yield* ctx.exec.which("git");
