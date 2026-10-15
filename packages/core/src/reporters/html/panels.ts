@@ -6,6 +6,7 @@ import {
 } from "../../compliance";
 import { CATEGORY_LABEL } from "../../labels";
 import {
+	type AiInsights,
 	type AuditorResult,
 	CATEGORIES,
 	type Category,
@@ -139,23 +140,26 @@ const empty = (title: string, body: string, clean = true): string =>
 
 /* ---------- findings ---------- */
 
+/** `file:line:column`, as far as the location knows them. */
+const filePosition = (file: string, loc: Location): string => {
+	if (loc.line === undefined) return file;
+	return loc.column === undefined
+		? `${file}:${loc.line}`
+		: `${file}:${loc.line}:${loc.column}`;
+};
+
+const urlFact = (url: string): string =>
+	isWebUrl(url)
+		? `<a href="${e(url)}" rel="noopener noreferrer" target="_blank">${t(url)}<span class="sr-only"> (opens in a new tab)</span></a>`
+		: t(url);
+
 const locationFacts = (loc: Location | undefined): string => {
 	if (!loc) return "";
-	const lines: string[] = [];
-	if (loc.file) {
-		let file = loc.file;
-		if (loc.line !== undefined) file += `:${loc.line}`;
-		if (loc.line !== undefined && loc.column !== undefined)
-			file += `:${loc.column}`;
-		lines.push(`<code>${t(file)}</code>`);
-	}
-	if (loc.url)
-		lines.push(
-			isWebUrl(loc.url)
-				? `<a href="${e(loc.url)}" rel="noopener noreferrer" target="_blank">${t(loc.url)}<span class="sr-only"> (opens in a new tab)</span></a>`
-				: t(loc.url),
-		);
-	if (loc.selector) lines.push(`<code>${t(loc.selector)}</code>`);
+	const lines = [
+		...(loc.file ? [`<code>${t(filePosition(loc.file, loc))}</code>`] : []),
+		...(loc.url ? [urlFact(loc.url)] : []),
+		...(loc.selector ? [`<code>${t(loc.selector)}</code>`] : []),
+	];
 	return lines.length ? `<dt>Location</dt><dd>${lines.join("<br>")}</dd>` : "";
 };
 
@@ -261,14 +265,23 @@ const ruleItem = (g: RuleGroup, view: View, open: boolean): string => {
 
 /* ---------- panels ---------- */
 
-const panel = (
-	id: string,
-	title: string,
-	lede: string,
-	body: string,
+interface PanelParts {
+	readonly id: string;
+	readonly title: string;
+	readonly lede: string;
+	readonly body: string;
+	readonly aside?: string;
+	readonly headExtra?: string;
+}
+
+const panel = ({
+	id,
+	title,
+	lede,
+	body,
 	aside = "",
 	headExtra = "",
-) =>
+}: PanelParts) =>
 	`<section class="panel" id="${id}" aria-labelledby="${id}-h">
 <div class="panel-head"><div><h2 id="${id}-h">${title}</h2>${lede ? `<p class="lede">${lede}</p>` : ""}${headExtra}</div>${aside}</div>
 ${body}
@@ -373,17 +386,19 @@ const rackRow = (c: CategoryView): string => {
 </a></li>`;
 };
 
-export const overviewPanel = (view: View): string => {
-	const { report } = view;
-	const { summary } = report;
-	const n = view.findings.length;
-	const catCount = view.categories.length;
-
-	const dialLabel = `Overall score ${summary.score} out of 100, grade ${summary.grade}.${
-		catCount
+const dialLabelOf = (view: View): string => {
+	const { summary } = view.report;
+	return `Overall score ${summary.score} out of 100, grade ${summary.grade}.${
+		view.categories.length
 			? ` Category scores: ${view.categories.map((c) => `${CATEGORY_LABEL[c.category]} ${c.summary.score}`).join(", ")}.`
 			: ""
 	}`;
+};
+
+const heroOf = (view: View): string => {
+	const { report } = view;
+	const { summary } = report;
+	const catCount = view.categories.length;
 
 	const legend = SEVERITIES.map(
 		(s) =>
@@ -394,7 +409,7 @@ export const overviewPanel = (view: View): string => {
 		? `<p class="diffnote">${ICON.branch}<span>Changes since <code>${t(report.diff.base)}</code>, ${plural(report.diff.changedFiles, "file")}</span></p>`
 		: "";
 
-	const hero = `<div class="hero" data-hero>
+	return `<div class="hero" data-hero>
 ${dial(
 	summary.score,
 	summary.grade,
@@ -403,45 +418,51 @@ ${dial(
 		score: c.summary.score,
 		grade: c.summary.grade,
 	})),
-	dialLabel,
+	dialLabelOf(view),
 )}
 <div class="readout">
 <p class="verdict">${verdict(summary.counts, catCount)}</p>
 <p class="verdict-sub">Grade ${summary.grade}, score ${summary.score} of 100: the average of ${plural(catCount, "category score")}. The outer ring is one arc per category; the inner ring is the overall score.</p>
 ${diff}
 <dl class="spec">
-<div><dt>Severity<span>${plural(n, "finding")}</span></dt><dd>${spectrum(summary.counts)}<ul class="legend">${legend}</ul></dd></div>
+<div><dt>Severity<span>${plural(view.findings.length, "finding")}</span></dt><dd>${spectrum(summary.counts)}<ul class="legend">${legend}</ul></dd></div>
 <div><dt>Auditors<span>${report.results.length} in ${e(formatDuration(report.durationMs))}</span></dt><dd>${runtimeStrip(report.results)}<p class="strip-key">${auditorsKey(summary.auditors)}<a href="#auditors">Details</a></p></dd></div>
 </dl>
 </div>
 </div>`;
+};
 
-	const ai = report.ai
-		? `<div class="section"><div class="ai"><div class="ai-head">${ICON.sparkle}<h3>AI insights</h3></div>
-<p class="ai-sum msg-text">${tm(report.ai.summary)}</p>
+type Priority = AiInsights["priorities"][number];
+
+const priorityItem = (p: Priority, view: View): string => {
+	const linked = view.findings.filter((f) =>
+		p.fingerprints.includes(f.fingerprint),
+	);
+	return `<li><strong>${t(p.title)}</strong><p>${t(p.why)}</p><p><b>Fix:</b> ${t(p.fix)}</p>${
+		linked.length
+			? `<p>Related: ${linked
+					.slice(0, 5)
+					.map((f) => `<a href="#${view.ids.get(f)}">${t(f.title)}</a>`)
+					.join(", ")}</p>`
+			: ""
+	}</li>`;
+};
+
+const aiSection = (view: View): string => {
+	const { ai } = view.report;
+	if (!ai) return "";
+	return `<div class="section"><div class="ai"><div class="ai-head">${ICON.sparkle}<h3>AI insights</h3></div>
+<p class="ai-sum msg-text">${tm(ai.summary)}</p>
 ${
-	report.ai.priorities.length
-		? `<ol>${report.ai.priorities
-				.map((p) => {
-					const linked = view.findings.filter((f) =>
-						p.fingerprints.includes(f.fingerprint),
-					);
-					return `<li><strong>${t(p.title)}</strong><p>${t(p.why)}</p><p><b>Fix:</b> ${t(p.fix)}</p>${
-						linked.length
-							? `<p>Related: ${linked
-									.slice(0, 5)
-									.map((f) => `<a href="#${view.ids.get(f)}">${t(f.title)}</a>`)
-									.join(", ")}</p>`
-							: ""
-					}</li>`;
-				})
-				.join("")}</ol>`
+	ai.priorities.length
+		? `<ol>${ai.priorities.map((p) => priorityItem(p, view)).join("")}</ol>`
 		: ""
 }
-<p class="model">Written by ${t(report.ai.model)}. AI output can be wrong; check it against the findings before acting.</p></div></div>`
-		: "";
+<p class="model">Written by ${t(ai.model)}. AI output can be wrong; check it against the findings before acting.</p></div></div>`;
+};
 
-	const rack = catCount
+const rackOf = (view: View): string =>
+	view.categories.length
 		? `<div class="rack-head" aria-hidden="true"><span>Grade</span><span>Category</span><span>Score</span><span>Findings</span><span>Coverage</span></div><ul class="rack">${view.categories.map(rackRow).join("")}</ul>`
 		: empty(
 				"No categories were examined",
@@ -449,6 +470,8 @@ ${
 				false,
 			);
 
+const topFindings = (view: View): string => {
+	const n = view.findings.length;
 	const top = view.findings.slice(0, 10);
 	const topList = top.length
 		? `<ol class="flist">${top.map((f) => findingRow(f, view)).join("")}</ol>`
@@ -456,16 +479,18 @@ ${
 				"No findings",
 				"The auditors that ran reported nothing. The coverage notes below say what was not examined.",
 			);
+	return `<div class="section"><div class="sh"><h3>Most severe findings</h3>${n > top.length ? `<p>Top ${top.length} of ${n}</p>` : ""}</div>${topList}</div>`;
+};
 
-	return `<section class="panel" id="overview" aria-labelledby="overview-h">
+export const overviewPanel = (view: View): string =>
+	`<section class="panel" id="overview" aria-labelledby="overview-h">
 <h2 id="overview-h" class="sr-only">Overview</h2>
-${hero}
-${ai}
-<div class="section"><div class="sh"><h3>Categories</h3><p>Open a category for its findings</p></div>${rack}</div>
-<div class="section"><div class="sh"><h3>Most severe findings</h3>${n > top.length ? `<p>Top ${top.length} of ${n}</p>` : ""}</div>${topList}</div>
+${heroOf(view)}
+${aiSection(view)}
+<div class="section"><div class="sh"><h3>Categories</h3><p>Open a category for its findings</p></div>${rackOf(view)}</div>
+${topFindings(view)}
 <div class="section">${coverage(view)}</div>
 </section>`;
-};
 
 const filterForm = (
 	id: string,
@@ -525,14 +550,14 @@ export const categoryPanel = (c: CategoryView, view: View): string => {
 				ranList.length > 0,
 			);
 
-	return panel(
+	return panel({
 		id,
-		e(label),
-		e(CATEGORY_LEDE[c.category] ?? ""),
+		title: e(label),
+		lede: e(CATEGORY_LEDE[c.category] ?? ""),
 		body,
 		aside,
-		contributors,
-	);
+		headExtra: contributors,
+	});
 };
 
 const MAX_LISTED = 200;
@@ -559,10 +584,15 @@ const matchList = (
 	return `<ol class="flist">${rows}</ol>${more > 0 ? `<p class="small muted">And ${plural(more, "more finding")}.</p>` : ""}`;
 };
 
+/** A control's number, title and an optional subtitle, as HTML. */
+interface ControlHead {
+	readonly code: string;
+	readonly title: string;
+	readonly sub: string;
+}
+
 const control = (
-	code: string,
-	title: string,
-	sub: string,
+	{ code, title, sub }: ControlHead,
 	matches: ReadonlyArray<ComplianceMatch>,
 	view: View,
 ): string => {
@@ -591,31 +621,37 @@ ${callout(`Findings are grouped by their <code>owasp-a01</code> to <code>owasp-a
 
 	const owaspList = `<ol class="controls">${owasp
 		.map((g) =>
-			control(g.category.id, e(g.category.title), "", g.matches, view),
+			control(
+				{ code: g.category.id, title: e(g.category.title), sub: "" },
+				g.matches,
+				view,
+			),
 		)
 		.join("")}</ol>`;
 	const cweList = `<ol class="controls">${cwe
 		.map((g) =>
 			control(
-				`#${g.entry.rank}`,
-				e(g.entry.name),
-				`<small>CWE-${g.entry.cwe}</small>`,
+				{
+					code: `#${g.entry.rank}`,
+					title: e(g.entry.name),
+					sub: `<small>CWE-${g.entry.cwe}</small>`,
+				},
 				g.matches,
 				view,
 			),
 		)
 		.join("")}</ol>`;
 
-	return panel(
-		"standards",
-		"OWASP and CWE",
-		"Findings mapped to the OWASP Top 10 (2021) and the 2024 CWE Top 25 Most Dangerous Software Weaknesses.",
-		`${intro}
+	return panel({
+		id: "standards",
+		title: "OWASP and CWE",
+		lede: "Findings mapped to the OWASP Top 10 (2021) and the 2024 CWE Top 25 Most Dangerous Software Weaknesses.",
+		body: `${intro}
 <div class="two section">
 <div><div class="sh"><h3>OWASP Top 10 (2021)</h3><p>${hits(owasp)} of 10 with findings</p></div>${owaspList}</div>
 <div><div class="sh"><h3>CWE Top 25 (2024)</h3><p>${hits(cwe)} of 25 with findings</p></div>${cweList}</div>
 </div>`,
-	);
+	});
 };
 
 const STATUS_ORDER = { error: 0, failed: 1, skipped: 2, passed: 3 } as const;
@@ -643,11 +679,11 @@ export const auditorsPanel = (view: View): string => {
 	const sortTh = (label: string, key: string, num = false, cls = "") =>
 		`<th scope="col"${cls ? ` class="${cls}"` : ""}><button type="button" data-action="sort" data-key="${key}"${num ? " data-num" : ""}>${label}</button></th>`;
 
-	return panel(
-		"auditors",
-		"Auditors",
-		`${plural(report.results.length, "auditor")}: ${a.passed} passed, ${a.failed} failed, ${a.skipped} skipped and ${a.error} errored. Skipped auditors give the reason, often with an install hint.`,
-		`<div class="runtime"><h3>Runtime <span>longest first, skipped at the end</span></h3>${runtimeStrip(report.results)}<p class="strip-key">${auditorsKey(a)}</p></div>
+	return panel({
+		id: "auditors",
+		title: "Auditors",
+		lede: `${plural(report.results.length, "auditor")}: ${a.passed} passed, ${a.failed} failed, ${a.skipped} skipped and ${a.error} errored. Skipped auditors give the reason, often with an install hint.`,
+		body: `<div class="runtime"><h3>Runtime <span>longest first, skipped at the end</span></h3>${runtimeStrip(report.results)}<p class="strip-key">${auditorsKey(a)}</p></div>
 <form class="filters" role="search" aria-label="Filter auditors" data-kind="auditors" data-js hidden>
 <div class="field"><label for="auditors-status">Status</label><select id="auditors-status" name="status"><option value="">All statuses</option>${(["failed", "passed", "skipped", "error"] as const).map((s) => `<option value="${s}">${s} (${a[s]})</option>`).join("")}</select></div>
 <div class="field grow"><label for="auditors-q">Search</label><input id="auditors-q" name="q" type="search" placeholder="Auditor, engine or message" autocomplete="off"></div>
@@ -657,7 +693,7 @@ export const auditorsPanel = (view: View): string => {
 <div class="table-wrap" role="region" aria-label="Auditor results" tabindex="0">
 <table><thead><tr>${sortTh("Auditor", "id")}<th scope="col" class="plain">Engine</th><th scope="col" class="plain">Categories</th>${sortTh("Status", "st", true)}${sortTh("Findings", "n", true, "n")}${sortTh("Duration", "dur", true, "n")}<th scope="col" class="plain">Notes</th></tr></thead>
 <tbody>${rows}</tbody></table></div>`,
-	);
+	});
 };
 
 /** Category views for the tabs, in model order, falling back to computed scores. */
