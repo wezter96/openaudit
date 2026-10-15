@@ -13,11 +13,17 @@ import {
 import { Effect } from "effect";
 
 import { arr, parseJson, relPath, runTool, str } from "../tool";
+import { recordOf } from "./report-fields";
 import { isRecord, kebab, truncate } from "./util";
 
 /* -------------------------------------------------------------------------- */
 /*                                  mobsfscan                                 */
 /* -------------------------------------------------------------------------- */
+
+/** A workspace-relative or absolute file path. */
+type FilePath = string;
+/** A mobsfscan rule id, such as `android_root_detection`. */
+type RuleName = string;
 
 const MOBSFSCAN_SEVERITY: Record<string, Severity> = {
 	ERROR: "high",
@@ -51,7 +57,7 @@ export const appAnchor = (files: ReadonlyArray<string>): string | undefined =>
  * example `scan-1234/…/app/AndroidManifest.xml` for `/tmp/scan-1234/…`),
  * so try the root and each of its trailing segments before giving up.
  */
-const relativeToRoot = (root: string, file: string): string => {
+const relativeToRoot = (root: FilePath, file: FilePath): FilePath => {
 	const posix = file.split("\\").join("/");
 	if (posix.startsWith("/")) return relPath(root, posix) ?? posix;
 	const segments = root.split("/").filter(Boolean);
@@ -81,75 +87,97 @@ const masvsTag = (value: string | undefined): string[] =>
 const cweNumber = (value: string | undefined) =>
 	/cwe-(\d+)/i.exec(value ?? "")?.[1];
 
+const mobsfscanRemediation = (
+	reference: string | undefined,
+	masvs: string | undefined,
+): string =>
+	reference
+		? `See the referenced OWASP MASTG guidance${masvs ? ` (${masvs})` : ""} for the recommended fix.`
+		: "Review the code against the OWASP MASVS requirement for this check.";
+
+/** The finding fields shared by every match of one mobsfscan rule. */
+const mobsfscanBase = (rule: RuleName, meta: Record<string, unknown>) => {
+	const severityLabel = (str(meta.severity) ?? "WARNING").toUpperCase();
+	const severity = MOBSFSCAN_SEVERITY[severityLabel] ?? "medium";
+	const cwe = str(meta.cwe);
+	const masvs = str(meta.masvs);
+	const reference = str(meta.reference);
+	const cweId = cweNumber(cwe);
+	return {
+		ruleId: `code.mobsfscan/${kebab(rule)}`,
+		title: truncate(rule.replace(/_/g, " "), 100),
+		severity,
+		category: "security" as const,
+		message: str(meta.description) ?? rule,
+		remediation: mobsfscanRemediation(reference, masvs),
+		references: [
+			...(reference ? [reference] : []),
+			...(cweId
+				? [`https://cwe.mitre.org/data/definitions/${cweId}.html`]
+				: []),
+		],
+		confidence: severity === "info" ? ("low" as const) : ("medium" as const),
+		tags: [
+			...cweTag(cwe),
+			...owaspMobileTag(str(meta["owasp-mobile"])),
+			...masvsTag(masvs),
+		],
+	};
+};
+
+const firstNumber = (v: unknown): number | undefined => {
+	const first = arr(v)[0];
+	return typeof first === "number" ? first : undefined;
+};
+
+/** Where a file match points, leaving out what mobsfscan did not report. */
+const matchLocation = (f: Record<string, unknown>, root: FilePath) => {
+	const path = str(f.file_path);
+	const line = firstNumber(f.match_lines);
+	const column = line === undefined ? undefined : firstNumber(f.match_position);
+	return {
+		...(path ? { file: relativeToRoot(root, path) } : {}),
+		...(line !== undefined ? { line } : {}),
+		...(column !== undefined ? { column } : {}),
+	};
+};
+
+const mobsfscanRuleFindings = (
+	rule: RuleName,
+	entry: unknown,
+	root: FilePath,
+	anchor: FilePath | undefined,
+): FindingInput[] => {
+	if (!isRecord(entry)) return [];
+	const base = mobsfscanBase(rule, recordOf(entry.metadata));
+	const files = arr(entry.files).filter(isRecord);
+	// App-level rules (the app lacks a hardening measure) have no file
+	// match; they surface once, on the anchor file when there is one.
+	if (files.length === 0)
+		return [anchor ? { ...base, location: { file: anchor } } : base];
+	return files.slice(0, MAX_PER_RULE).map((f) => {
+		const match = str(f.match_string)?.trim();
+		return {
+			...base,
+			location: matchLocation(f, root),
+			...(match ? { evidence: truncate(match) } : {}),
+		};
+	});
+};
+
 /**
  * Parses `mobsfscan --json` output. `root` is the scanned directory; `anchor`
  * is the workspace file that findings without a file match are attached to.
  */
 export const parseMobsfscanReport = (
 	json: unknown,
-	root: string,
-	anchor?: string,
+	root: FilePath,
+	anchor?: FilePath,
 ): FindingInput[] => {
 	if (!isRecord(json) || !isRecord(json.results)) return [];
-	const findings: FindingInput[] = [];
-	for (const [rule, entry] of Object.entries(json.results)) {
-		if (!isRecord(entry)) continue;
-		const meta = isRecord(entry.metadata) ? entry.metadata : {};
-		const severityLabel = (str(meta.severity) ?? "WARNING").toUpperCase();
-		const severity = MOBSFSCAN_SEVERITY[severityLabel] ?? "medium";
-		const description = str(meta.description) ?? rule;
-		const cwe = str(meta.cwe);
-		const owasp = str(meta["owasp-mobile"]);
-		const masvs = str(meta.masvs);
-		const reference = str(meta.reference);
-		const cweId = cweNumber(cwe);
-		const base = {
-			ruleId: `code.mobsfscan/${kebab(rule)}`,
-			title: truncate(rule.replace(/_/g, " "), 100),
-			severity,
-			category: "security" as const,
-			message: description,
-			remediation: reference
-				? `See the referenced OWASP MASTG guidance${masvs ? ` (${masvs})` : ""} for the recommended fix.`
-				: "Review the code against the OWASP MASVS requirement for this check.",
-			references: [
-				...(reference ? [reference] : []),
-				...(cweId
-					? [`https://cwe.mitre.org/data/definitions/${cweId}.html`]
-					: []),
-			],
-			confidence: severity === "info" ? ("low" as const) : ("medium" as const),
-			tags: [...cweTag(cwe), ...owaspMobileTag(owasp), ...masvsTag(masvs)],
-		};
-		const files = arr(entry.files).filter(isRecord);
-		// App-level rules (the app lacks a hardening measure) have no file
-		// match; they surface once, on the anchor file when there is one.
-		if (files.length === 0) {
-			findings.push(anchor ? { ...base, location: { file: anchor } } : base);
-			continue;
-		}
-		for (const f of files.slice(0, MAX_PER_RULE)) {
-			const path = str(f.file_path);
-			const lines = arr(f.match_lines);
-			const line = typeof lines[0] === "number" ? lines[0] : undefined;
-			const position = arr(f.match_position);
-			const column =
-				typeof position[0] === "number" && line !== undefined
-					? position[0]
-					: undefined;
-			const match = str(f.match_string)?.trim();
-			findings.push({
-				...base,
-				location: {
-					...(path ? { file: relativeToRoot(root, path) } : {}),
-					...(line !== undefined ? { line } : {}),
-					...(column !== undefined ? { column } : {}),
-				},
-				...(match ? { evidence: truncate(match) } : {}),
-			});
-		}
-	}
-	return findings;
+	return Object.entries(json.results).flatMap(([rule, entry]) =>
+		mobsfscanRuleFindings(rule, entry, root, anchor),
+	);
 };
 
 export const mobsfscan = defineAuditor({

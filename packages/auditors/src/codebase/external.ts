@@ -3,12 +3,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	AuditorError,
+	type Category,
+	type Confidence,
 	DEFAULT_IGNORES,
 	defineAuditor,
 	type FindingInput,
 	redact,
 	requireTool,
 	requireWorkspace,
+	type Severity,
 	skip,
 } from "@openaudit/core";
 import { Effect } from "effect";
@@ -28,6 +31,7 @@ import {
 	withTempDir,
 } from "../tool";
 import { type OsvVuln, osvSeverity, severityFromScore } from "./dependencies";
+import { listOf, oneOrMany, recordOf, stringsOf } from "./report-fields";
 import { cweUrl, isRecord, kebab, scrubLine, truncate } from "./util";
 
 /* -------------------------------------------------------------------------- */
@@ -44,10 +48,10 @@ export const parseGitleaksReport = (
 		const rule = str(item.RuleID) ?? "secret";
 		const secret = str(item.Secret) ?? "";
 		const match = str(item.Match) ?? "";
-		const evidence =
-			secret && secret !== "REDACTED"
-				? match.split(secret).join(redact(secret))
-				: match;
+		const hasSecret = secret !== "" && secret !== "REDACTED";
+		const evidence = hasSecret
+			? match.split(secret).join(redact(secret))
+			: match;
 		return [
 			{
 				ruleId: `code.gitleaks/${kebab(rule)}`,
@@ -60,19 +64,12 @@ export const parseGitleaksReport = (
 					line: num(item.StartLine),
 					column: num(item.StartColumn),
 				},
-				evidence: truncate(
-					scrubLine(evidence, secret && secret !== "REDACTED" ? [secret] : []),
-				),
+				evidence: truncate(scrubLine(evidence, hasSecret ? [secret] : [])),
 				remediation:
 					"Revoke and rotate the credential, purge it from git history, and load it from a secret manager or environment variable.",
 				references: [cweUrl(798), "https://github.com/gitleaks/gitleaks"],
 				confidence: "medium",
-				tags: [
-					"cwe-798",
-					"owasp-a07",
-					"secrets",
-					...arr(item.Tags).filter((t): t is string => typeof t === "string"),
-				],
+				tags: ["cwe-798", "owasp-a07", "secrets", ...stringsOf(item.Tags)],
 			},
 		];
 	});
@@ -144,73 +141,74 @@ export const gitleaks = defineAuditor({
 /*                                   semgrep                                  */
 /* -------------------------------------------------------------------------- */
 
+/** Semgrep `metadata.category` values that are not security findings. */
+const SEMGREP_CATEGORIES = new Map<string, Category>([
+	["performance", "performance"],
+	["best-practice", "best-practices"],
+]);
+
+/** Secret rules are always security, whatever category their metadata gives. */
+const semgrepCategory = (checkId: string, category: unknown): Category =>
+	/secret/i.test(checkId)
+		? "security"
+		: (SEMGREP_CATEGORIES.get(str(category) ?? "") ?? "security");
+
+const semgrepConfidence = (value: unknown): Confidence => {
+	const level = str(value)?.toLowerCase();
+	return level === "high" || level === "low" ? level : "medium";
+};
+
+/** The matched lines, unless semgrep withheld them behind a login. */
+const semgrepEvidence = (lines: string | undefined): string | undefined =>
+	lines && lines !== "requires login" ? truncate(scrubLine(lines)) : undefined;
+
+const semgrepFinding = (r: unknown, root: string): FindingInput[] => {
+	if (!isRecord(r)) return [];
+	const extra = recordOf(r.extra);
+	const meta = recordOf(extra.metadata);
+	const start = recordOf(r.start);
+	const checkId = str(r.check_id) ?? "unknown";
+	const fix = str(extra.fix);
+	return [
+		{
+			ruleId: `code.semgrep/${checkId}`,
+			title: truncate(
+				checkId.split(".").pop()?.replace(/[-_]/g, " ") ?? checkId,
+				100,
+			),
+			severity: severityOf(meta.impact ?? extra.severity),
+			category: semgrepCategory(checkId, meta.category),
+			message: str(extra.message) ?? checkId,
+			location: {
+				file: relPath(root, str(r.path)),
+				line: num(start.line),
+				column: num(start.col),
+			},
+			evidence: semgrepEvidence(str(extra.lines)),
+			remediation: fix
+				? `Suggested fix: ${fix}`
+				: "See the rule documentation for the recommended fix.",
+			references: [
+				...stringsOf(meta.references).slice(0, 3),
+				...listOf(meta.source),
+			],
+			confidence: semgrepConfidence(meta.confidence),
+			tags: [
+				...cweTags(oneOrMany(meta.cwe)),
+				...owaspTags(oneOrMany(meta.owasp)),
+			],
+		},
+	];
+};
+
 /** Parses `semgrep scan --json` output. */
 export const parseSemgrepReport = (
 	json: unknown,
 	root: string,
-): FindingInput[] => {
-	if (!isRecord(json)) return [];
-	return arr(json.results).flatMap((r) => {
-		if (!isRecord(r)) return [];
-		const extra = isRecord(r.extra) ? r.extra : {};
-		const meta = isRecord(extra.metadata) ? extra.metadata : {};
-		const start = isRecord(r.start) ? r.start : {};
-		const checkId = str(r.check_id) ?? "unknown";
-		const cwe = arr(meta.cwe)
-			.concat(str(meta.cwe) ?? [])
-			.filter((c): c is string => typeof c === "string");
-		const owasp = arr(meta.owasp)
-			.concat(str(meta.owasp) ?? [])
-			.filter((c): c is string => typeof c === "string");
-		const refs = arr(meta.references).filter(
-			(u): u is string => typeof u === "string",
-		);
-		const lines = str(extra.lines);
-		const message = str(extra.message) ?? checkId;
-		const category = /secret/i.test(checkId)
-			? "security"
-			: str(meta.category) === "performance"
-				? "performance"
-				: str(meta.category) === "best-practice"
-					? "best-practices"
-					: "security";
-		return [
-			{
-				ruleId: `code.semgrep/${checkId}`,
-				title: truncate(
-					checkId.split(".").pop()?.replace(/[-_]/g, " ") ?? checkId,
-					100,
-				),
-				severity: severityOf(meta.impact ?? extra.severity),
-				category,
-				message,
-				location: {
-					file: relPath(root, str(r.path)),
-					line: num(start.line),
-					column: num(start.col),
-				},
-				evidence:
-					lines && lines !== "requires login"
-						? truncate(scrubLine(lines))
-						: undefined,
-				remediation: str(extra.fix)
-					? `Suggested fix: ${str(extra.fix)}`
-					: "See the rule documentation for the recommended fix.",
-				references: [
-					...refs.slice(0, 3),
-					...(str(meta.source) ? [str(meta.source) as string] : []),
-				],
-				confidence:
-					str(meta.confidence)?.toLowerCase() === "high"
-						? "high"
-						: str(meta.confidence)?.toLowerCase() === "low"
-							? "low"
-							: "medium",
-				tags: [...cweTags(cwe), ...owaspTags(owasp)],
-			},
-		];
-	});
-};
+): FindingInput[] =>
+	isRecord(json)
+		? arr(json.results).flatMap((r) => semgrepFinding(r, root))
+		: [];
 
 export const semgrep = defineAuditor({
 	id: "code.semgrep",
@@ -248,80 +246,121 @@ export const semgrep = defineAuditor({
 /*                                 osv-scanner                                */
 /* -------------------------------------------------------------------------- */
 
+/** One reported vulnerability: a group of alias ids, or a single id. */
+interface OsvUnit {
+	readonly ids: string[];
+	readonly max: string | undefined;
+}
+
+interface OsvPackage {
+	readonly name: string;
+	readonly version: string;
+	readonly ecosystem: string;
+	readonly file: string | undefined;
+	readonly vulns: ReadonlyMap<string, OsvVuln>;
+}
+
+const osvVulnsById = (vulnerabilities: unknown): Map<string, OsvVuln> =>
+	new Map(
+		arr(vulnerabilities).flatMap((v) =>
+			isRecord(v) && typeof v.id === "string"
+				? [[v.id, v as unknown as OsvVuln] as const]
+				: [],
+		),
+	);
+
+/** v2 groups aliases with a max severity; v1 lists each vulnerability alone. */
+const osvUnits = (
+	groups: unknown,
+	vulns: ReadonlyMap<string, OsvVuln>,
+): OsvUnit[] => {
+	const records = arr(groups).filter(isRecord);
+	return records.length
+		? records.map((g) => ({ ids: stringsOf(g.ids), max: str(g.max_severity) }))
+		: [...vulns.keys()].map((id) => ({ ids: [id], max: undefined }));
+};
+
+const osvUnitSeverity = (
+	max: string | undefined,
+	vuln: OsvVuln | undefined,
+): Severity => {
+	const score = max ? Number(max) : Number.NaN;
+	if (Number.isFinite(score) && score > 0) return severityFromScore(score);
+	return vuln ? osvSeverity(vuln) : "medium";
+};
+
+const osvFixedVersions = (vuln: OsvVuln | undefined): Set<string> =>
+	new Set(
+		(vuln?.affected ?? []).flatMap((a) =>
+			(a.ranges ?? []).flatMap((r) =>
+				(r.events ?? []).flatMap((e) => (e.fixed ? [e.fixed] : [])),
+			),
+		),
+	);
+
+const osvFinding = (pkg: OsvPackage, unit: OsvUnit): FindingInput[] => {
+	const { name, version, ecosystem, vulns } = pkg;
+	const id = unit.ids.find((i) => i.startsWith("GHSA-")) ?? unit.ids[0];
+	if (!id) return [];
+	const vuln = vulns.get(id) ?? unit.ids.map((i) => vulns.get(i)).find(Boolean);
+	const fixed = osvFixedVersions(vuln);
+	const aliases = [...new Set([...unit.ids, ...(vuln?.aliases ?? [])])].filter(
+		(a) => a !== id,
+	);
+	return [
+		{
+			ruleId: "code.osv-scanner/vulnerable-dependency",
+			title: `${name}@${version}: ${vuln?.summary ?? id}`,
+			severity: osvUnitSeverity(unit.max, vuln),
+			category: "supply-chain",
+			message: `${name} ${version}${ecosystem ? ` (${ecosystem})` : ""} is affected by ${id}${aliases.length ? ` (${aliases.slice(0, 3).join(", ")})` : ""}.`,
+			location: { file: pkg.file },
+			evidence: `${name}@${version} ${id}`,
+			remediation: fixed.size
+				? `Upgrade ${name} to ${[...fixed].join(" or ")} or later.`
+				: `No fixed version is published for ${name}; consider replacing it or mitigating per the advisory.`,
+			references: [`https://osv.dev/vulnerability/${id}`],
+			confidence: "high",
+			tags: [
+				"owasp-a06",
+				...[id, ...aliases]
+					.filter((a) => /^(CVE|GHSA)-/.test(a))
+					.map((a) => a.toLowerCase()),
+			],
+		},
+	];
+};
+
+const osvPackageFindings = (
+	p: unknown,
+	file: string | undefined,
+): FindingInput[] => {
+	if (!isRecord(p) || !isRecord(p.package)) return [];
+	const vulns = osvVulnsById(p.vulnerabilities);
+	const pkg: OsvPackage = {
+		name: str(p.package.name) ?? "unknown",
+		version: str(p.package.version) ?? "",
+		ecosystem: str(p.package.ecosystem) ?? "",
+		file,
+		vulns,
+	};
+	return osvUnits(p.groups, vulns).flatMap((unit) => osvFinding(pkg, unit));
+};
+
+const osvResultFindings = (result: unknown, root: string): FindingInput[] => {
+	if (!isRecord(result)) return [];
+	const file = relPath(root, str(recordOf(result.source).path));
+	return arr(result.packages).flatMap((p) => osvPackageFindings(p, file));
+};
+
 /** Parses `osv-scanner --format json` output (v1 and v2). */
 export const parseOsvScannerReport = (
 	json: unknown,
 	root: string,
-): FindingInput[] => {
-	if (!isRecord(json)) return [];
-	const findings: FindingInput[] = [];
-	for (const result of arr(json.results)) {
-		if (!isRecord(result)) continue;
-		const source = isRecord(result.source) ? result.source : {};
-		const file = relPath(root, str(source.path));
-		for (const p of arr(result.packages)) {
-			if (!isRecord(p) || !isRecord(p.package)) continue;
-			const name = str(p.package.name) ?? "unknown";
-			const version = str(p.package.version) ?? "";
-			const ecosystem = str(p.package.ecosystem) ?? "";
-			const vulns = new Map(
-				arr(p.vulnerabilities).flatMap((v) =>
-					isRecord(v) && typeof v.id === "string"
-						? [[v.id, v as unknown as OsvVuln] as const]
-						: [],
-				),
-			);
-			const groups = arr(p.groups).filter(isRecord);
-			const units = groups.length
-				? groups.map((g) => ({
-						ids: arr(g.ids).filter((i): i is string => typeof i === "string"),
-						max: str(g.max_severity),
-					}))
-				: [...vulns.keys()].map((id) => ({ ids: [id], max: undefined }));
-			for (const unit of units) {
-				const id = unit.ids.find((i) => i.startsWith("GHSA-")) ?? unit.ids[0];
-				if (!id) continue;
-				const vuln =
-					vulns.get(id) ?? unit.ids.map((i) => vulns.get(i)).find(Boolean);
-				const score = unit.max ? Number(unit.max) : Number.NaN;
-				const severity =
-					Number.isFinite(score) && score > 0
-						? severityFromScore(score)
-						: vuln
-							? osvSeverity(vuln)
-							: "medium";
-				const fixed = new Set<string>();
-				for (const a of vuln?.affected ?? [])
-					for (const r of a.ranges ?? [])
-						for (const e of r.events ?? []) if (e.fixed) fixed.add(e.fixed);
-				const aliases = [
-					...new Set([...unit.ids, ...(vuln?.aliases ?? [])]),
-				].filter((a) => a !== id);
-				findings.push({
-					ruleId: "code.osv-scanner/vulnerable-dependency",
-					title: `${name}@${version}: ${vuln?.summary ?? id}`,
-					severity,
-					category: "supply-chain",
-					message: `${name} ${version}${ecosystem ? ` (${ecosystem})` : ""} is affected by ${id}${aliases.length ? ` (${aliases.slice(0, 3).join(", ")})` : ""}.`,
-					location: { file },
-					evidence: `${name}@${version} ${id}`,
-					remediation: fixed.size
-						? `Upgrade ${name} to ${[...fixed].join(" or ")} or later.`
-						: `No fixed version is published for ${name}; consider replacing it or mitigating per the advisory.`,
-					references: [`https://osv.dev/vulnerability/${id}`],
-					confidence: "high",
-					tags: [
-						"owasp-a06",
-						...[id, ...aliases]
-							.filter((a) => /^(CVE|GHSA)-/.test(a))
-							.map((a) => a.toLowerCase()),
-					],
-				});
-			}
-		}
-	}
-	return findings;
-};
+): FindingInput[] =>
+	isRecord(json)
+		? arr(json.results).flatMap((result) => osvResultFindings(result, root))
+		: [];
 
 export const osvScanner = defineAuditor({
 	id: "code.osv-scanner",
@@ -362,87 +401,105 @@ export const osvScanner = defineAuditor({
 /*                                  trivy fs                                  */
 /* -------------------------------------------------------------------------- */
 
+const trivyVulnFinding = (
+	v: unknown,
+	file: string | undefined,
+): FindingInput[] => {
+	if (!isRecord(v)) return [];
+	const id = str(v.VulnerabilityID) ?? "unknown";
+	const pkg = str(v.PkgName) ?? "unknown";
+	const installed = str(v.InstalledVersion) ?? "";
+	const fixed = str(v.FixedVersion);
+	return [
+		{
+			ruleId: "code.trivy-fs/vulnerable-dependency",
+			title: `${pkg}@${installed}: ${str(v.Title) ?? id}`,
+			severity: severityOf(v.Severity),
+			category: "supply-chain",
+			message: `${pkg} ${installed} is affected by ${id}${str(v.Title) ? `: ${str(v.Title)}` : "."}`,
+			location: { file },
+			evidence: `${pkg}@${installed} ${id}`,
+			remediation: fixed
+				? `Upgrade ${pkg} to ${fixed}.`
+				: `No fixed version is available for ${pkg}; consider replacing it.`,
+			references: listOf(v.PrimaryURL),
+			confidence: "high",
+			tags: ["owasp-a06", ...cweTags(stringsOf(v.CweIDs)), id.toLowerCase()],
+		},
+	];
+};
+
+const trivySecretFinding = (
+	s: unknown,
+	file: string | undefined,
+): FindingInput[] => {
+	if (!isRecord(s)) return [];
+	const rule = str(s.RuleID) ?? "secret";
+	const match = str(s.Match);
+	return [
+		{
+			ruleId: `code.trivy-fs/secret-${kebab(rule)}`,
+			title: str(s.Title) ?? `Secret detected (${rule})`,
+			severity: severityOf(s.Severity, "high"),
+			category: "security",
+			message: `trivy secret rule \`${rule}\` matched in ${file ?? "a file"}.`,
+			location: { file, line: num(s.StartLine) },
+			// Trivy masks secrets with `*`; scrub defensively anyway.
+			evidence: match ? truncate(scrubLine(match), 120) : undefined,
+			remediation:
+				"Revoke and rotate the credential, remove it from the repository and history, and load it from a secret manager.",
+			references: [cweUrl(798)],
+			confidence: "medium",
+			tags: ["cwe-798", "owasp-a07", "secrets"],
+		},
+	];
+};
+
+const trivyMisconfigFinding = (
+	m: unknown,
+	file: string | undefined,
+): FindingInput[] => {
+	if (!isRecord(m)) return [];
+	const id = str(m.AVDID) ?? str(m.ID) ?? "misconfig";
+	return [
+		{
+			ruleId: `code.trivy-fs/misconfig-${kebab(id)}`,
+			title: str(m.Title) ?? id,
+			severity: severityOf(m.Severity),
+			category: "security",
+			message: str(m.Message) ?? str(m.Description) ?? id,
+			location: { file, line: num(recordOf(m.CauseMetadata).StartLine) },
+			remediation: str(m.Resolution) ?? "See the referenced documentation.",
+			references: [
+				...listOf(m.PrimaryURL),
+				...stringsOf(m.References).slice(0, 2),
+			],
+			confidence: "high",
+			tags: ["owasp-a05"],
+		},
+	];
+};
+
+const trivyResultFindings = (result: unknown, root: string): FindingInput[] => {
+	if (!isRecord(result)) return [];
+	const file = relPath(root, str(result.Target));
+	return [
+		...arr(result.Vulnerabilities).flatMap((v) => trivyVulnFinding(v, file)),
+		...arr(result.Secrets).flatMap((s) => trivySecretFinding(s, file)),
+		...arr(result.Misconfigurations).flatMap((m) =>
+			trivyMisconfigFinding(m, file),
+		),
+	];
+};
+
 /** Parses `trivy fs --format json` output (vulnerabilities, secrets, misconfigurations). */
 export const parseTrivyReport = (
 	json: unknown,
 	root: string,
-): FindingInput[] => {
-	if (!isRecord(json)) return [];
-	const findings: FindingInput[] = [];
-	for (const result of arr(json.Results)) {
-		if (!isRecord(result)) continue;
-		const file = relPath(root, str(result.Target));
-		for (const v of arr(result.Vulnerabilities)) {
-			if (!isRecord(v)) continue;
-			const id = str(v.VulnerabilityID) ?? "unknown";
-			const pkg = str(v.PkgName) ?? "unknown";
-			const installed = str(v.InstalledVersion) ?? "";
-			const fixed = str(v.FixedVersion);
-			const cwes = arr(v.CweIDs).filter(
-				(c): c is string => typeof c === "string",
-			);
-			findings.push({
-				ruleId: "code.trivy-fs/vulnerable-dependency",
-				title: `${pkg}@${installed}: ${str(v.Title) ?? id}`,
-				severity: severityOf(v.Severity),
-				category: "supply-chain",
-				message: `${pkg} ${installed} is affected by ${id}${str(v.Title) ? `: ${str(v.Title)}` : "."}`,
-				location: { file },
-				evidence: `${pkg}@${installed} ${id}`,
-				remediation: fixed
-					? `Upgrade ${pkg} to ${fixed}.`
-					: `No fixed version is available for ${pkg}; consider replacing it.`,
-				references: str(v.PrimaryURL) ? [str(v.PrimaryURL) as string] : [],
-				confidence: "high",
-				tags: ["owasp-a06", ...cweTags(cwes), id.toLowerCase()],
-			});
-		}
-		for (const s of arr(result.Secrets)) {
-			if (!isRecord(s)) continue;
-			const rule = str(s.RuleID) ?? "secret";
-			findings.push({
-				ruleId: `code.trivy-fs/secret-${kebab(rule)}`,
-				title: str(s.Title) ?? `Secret detected (${rule})`,
-				severity: severityOf(s.Severity, "high"),
-				category: "security",
-				message: `trivy secret rule \`${rule}\` matched in ${file ?? "a file"}.`,
-				location: { file, line: num(s.StartLine) },
-				// Trivy masks secrets with `*`; scrub defensively anyway.
-				evidence: str(s.Match)
-					? truncate(scrubLine(str(s.Match) as string), 120)
-					: undefined,
-				remediation:
-					"Revoke and rotate the credential, remove it from the repository and history, and load it from a secret manager.",
-				references: [cweUrl(798)],
-				confidence: "medium",
-				tags: ["cwe-798", "owasp-a07", "secrets"],
-			});
-		}
-		for (const m of arr(result.Misconfigurations)) {
-			if (!isRecord(m)) continue;
-			const id = str(m.AVDID) ?? str(m.ID) ?? "misconfig";
-			const cause = isRecord(m.CauseMetadata) ? m.CauseMetadata : {};
-			findings.push({
-				ruleId: `code.trivy-fs/misconfig-${kebab(id)}`,
-				title: str(m.Title) ?? id,
-				severity: severityOf(m.Severity),
-				category: "security",
-				message: str(m.Message) ?? str(m.Description) ?? id,
-				location: { file, line: num(cause.StartLine) },
-				remediation: str(m.Resolution) ?? "See the referenced documentation.",
-				references: [
-					...(str(m.PrimaryURL) ? [str(m.PrimaryURL) as string] : []),
-					...arr(m.References)
-						.filter((u): u is string => typeof u === "string")
-						.slice(0, 2),
-				],
-				confidence: "high",
-				tags: ["owasp-a05"],
-			});
-		}
-	}
-	return findings;
-};
+): FindingInput[] =>
+	isRecord(json)
+		? arr(json.Results).flatMap((result) => trivyResultFindings(result, root))
+		: [];
 
 /**
  * trivy's misconfig scanners minus `terraform`, which clones remote modules

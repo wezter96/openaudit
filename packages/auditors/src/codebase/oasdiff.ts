@@ -91,6 +91,16 @@ const indexFrom = (re: RegExp, text: string, from: number) => {
 	return m ? { start: m.index, end: m.index + m[0].length } : undefined;
 };
 
+const lineAt = (text: string, i: number) =>
+	lineOf(text, text[i] === "\n" ? i + 1 : i);
+
+/** Start of the `method` key after a path key ending at `from`, before the next path. */
+const methodStart = (text: string, from: number, method: string) => {
+	const bound = indexFrom(PATH_KEY, text, from)?.start ?? text.length;
+	const op = indexFrom(keyAt(method.toLowerCase()), text, from);
+	return op && op.start < bound ? op.start : undefined;
+};
+
 /**
  * Line of `method` under `path` in a YAML or JSON spec, else the path's line.
  * A cheap text search, not a parse: good enough to point a reviewer at it.
@@ -104,13 +114,8 @@ export const operationLine = (
 	const paths = indexFrom(keyAt("paths"), text, 0);
 	const at = indexFrom(keyAt(path), text, paths?.end ?? 0);
 	if (!at) return undefined;
-	const line = (i: number) => lineOf(text, text[i] === "\n" ? i + 1 : i);
-	if (method) {
-		const bound = indexFrom(PATH_KEY, text, at.end)?.start ?? text.length;
-		const op = indexFrom(keyAt(method.toLowerCase()), text, at.end);
-		if (op && op.start < bound) return line(op.start);
-	}
-	return line(at.start);
+	const op = method ? methodStart(text, at.end, method) : undefined;
+	return lineAt(text, op ?? at.start);
 };
 
 export interface CompareContext {
@@ -124,40 +129,66 @@ export interface CompareContext {
 	readonly base: string;
 }
 
+/** One reported change, once it has the fields a finding needs. */
+interface Change {
+	readonly item: Record<string, unknown>;
+	readonly id: string;
+	readonly text: string;
+	readonly severity: Severity;
+}
+
+const changeOf = (item: unknown): Change | undefined => {
+	if (!isRecord(item)) return undefined;
+	const id = str(item.id);
+	const text = str(item.text);
+	const severity = LEVELS[String(item.level).toLowerCase()];
+	if (!severity) return undefined;
+	return id && text ? { item, id, text, severity } : undefined;
+};
+
+/** The line oasdiff reported in the revision, else a text search for the operation. */
+const changeLine = (
+	{ item }: Change,
+	ctx: CompareContext,
+	path: string | undefined,
+	method: string | undefined,
+) => {
+	const rev = isRecord(item.revisionSource) ? item.revisionSource : {};
+	const reported =
+		str(rev.file) === ctx.revisionFile ? num(rev.line) : undefined;
+	return reported ?? operationLine(ctx.text, path, method);
+};
+
+const changeFinding = (change: Change, ctx: CompareContext): FindingInput => {
+	const { item, id, text, severity } = change;
+	const method = str(item.operation);
+	const path = str(item.path);
+	const where = [method, path].filter(Boolean).join(" ");
+	const line = changeLine(change, ctx, path, method);
+	const comment = str(item.comment);
+	return {
+		ruleId: `${ID}/${kebab(id)}`,
+		title: truncate(text, 120),
+		severity,
+		category: "reliability",
+		message: `${where ? `${where}: ` : ""}${text} (compared with ${ctx.base}).${comment ? ` ${comment}` : ""}`,
+		location: { file: ctx.file, ...(line ? { line } : {}) },
+		evidence: truncate(scrubLine(where ? `${where}: ${text}` : text), 200),
+		remediation: REMEDIATION[severity],
+		references: REFERENCES,
+		confidence: severity === "high" ? "high" : "medium",
+		tags: ["openapi", "breaking-change"],
+	};
+};
+
 /** Maps `oasdiff breaking --format json` output (an array of changes). */
 export const parseOasdiffOutput = (
 	json: unknown,
 	ctx: CompareContext,
 ): FindingInput[] =>
 	arr(json).flatMap((item): FindingInput[] => {
-		if (!isRecord(item)) return [];
-		const id = str(item.id);
-		const text = str(item.text);
-		const severity = LEVELS[String(item.level).toLowerCase()];
-		if (!id || !text || !severity) return [];
-		const method = str(item.operation);
-		const path = str(item.path);
-		const where = [method, path].filter(Boolean).join(" ");
-		const rev = isRecord(item.revisionSource) ? item.revisionSource : {};
-		const line =
-			(str(rev.file) === ctx.revisionFile ? num(rev.line) : undefined) ??
-			operationLine(ctx.text, path, method);
-		const comment = str(item.comment);
-		return [
-			{
-				ruleId: `${ID}/${kebab(id)}`,
-				title: truncate(text, 120),
-				severity,
-				category: "reliability",
-				message: `${where ? `${where}: ` : ""}${text} (compared with ${ctx.base}).${comment ? ` ${comment}` : ""}`,
-				location: { file: ctx.file, ...(line ? { line } : {}) },
-				evidence: truncate(scrubLine(where ? `${where}: ${text}` : text), 200),
-				remediation: REMEDIATION[severity],
-				references: REFERENCES,
-				confidence: severity === "high" ? "high" : "medium",
-				tags: ["openapi", "breaking-change"],
-			},
-		];
+		const change = changeOf(item);
+		return change ? [changeFinding(change, ctx)] : [];
 	});
 
 const notCompared = (file: string, why: string): FindingInput => ({
@@ -180,13 +211,20 @@ interface TreeEntry {
 	readonly size: number;
 }
 
+/** One `ls-tree -l` record as `[path, entry]`; every group is non-empty when it matches. */
+const lsTreeRecord = (record: string): [string, TreeEntry] | undefined => {
+	const m = /^\d+ (\w+) ([0-9a-f]+) +(\d+|-)\t(.+)$/s.exec(record);
+	if (!m) return undefined;
+	const [, type = "", oid = "", size = "", path = ""] = m;
+	return [path, { type, oid, size: Number(size) }];
+};
+
 /** Parses `git ls-tree -l -z` output, keyed by path. */
 export const parseLsTree = (stdout: string): Map<string, TreeEntry> => {
 	const out = new Map<string, TreeEntry>();
 	for (const record of stdout.split("\0")) {
-		const m = /^\d+ (\w+) ([0-9a-f]+) +(\d+|-)\t(.+)$/s.exec(record);
-		if (m?.[1] && m[2] && m[3] && m[4])
-			out.set(m[4], { type: m[1], oid: m[2], size: Number(m[3]) });
+		const entry = lsTreeRecord(record);
+		if (entry) out.set(...entry);
 	}
 	return out;
 };
@@ -214,6 +252,137 @@ const fail = (what: string, res: { code: number; stderr: string }) =>
 		}),
 	);
 
+/** One comparison run: the tools, the temp dir and the hardened git env. */
+interface Session {
+	readonly ctx: AuditContext;
+	readonly root: string;
+	readonly base: string;
+	readonly bin: string;
+	readonly git: string;
+	readonly tmp: string;
+	readonly config: string;
+	readonly env: Record<string, string>;
+}
+
+/** A spec's base and revision files, relative to the temp dir. */
+interface Pair {
+	readonly spec: SpecFile;
+	readonly baseFile: string;
+	readonly revisionFile: string;
+}
+
+const runGit = (s: Session, args: ReadonlyArray<string>) =>
+	s.ctx.exec.run([s.git, "-C", s.root, ...args], {
+		cwd: s.tmp,
+		env: s.env,
+		timeoutMs: 60_000,
+	});
+
+/** The specs' entries in the merge base's tree. */
+const baseTree = (s: Session, specs: ReadonlyArray<SpecFile>) =>
+	Effect.gen(function* () {
+		// Like `--diff` itself (`base...HEAD`), compare with the merge base.
+		const mb = yield* runGit(s, [
+			"merge-base",
+			"--end-of-options",
+			s.base,
+			"HEAD",
+		]);
+		const sha = mb.stdout.trim();
+		if (mb.code !== 0 || !OID.test(sha))
+			return yield* fail(`git merge-base ${s.base} HEAD`, mb);
+		const tree = yield* runGit(s, [
+			"ls-tree",
+			"-l",
+			"-z",
+			sha,
+			"--",
+			...specs.map((spec) => spec.path),
+		]);
+		if (tree.code !== 0) return yield* fail("git ls-tree", tree);
+		return parseLsTree(tree.stdout);
+	});
+
+const isBaseBlob = (entry: TreeEntry | undefined): entry is TreeEntry =>
+	entry?.type === "blob" && OID.test(entry.oid);
+
+const notLoadedReason = (s: Session, pair: Pair, stderr: string) =>
+	/disallowed external ref/i.test(stderr)
+		? "it uses external $refs, which oasdiff is not allowed to follow (they could make it fetch URLs chosen by the repository)."
+		: truncate(
+				scrubLine(
+					(stderr.trim().split("\n")[0] ?? "")
+						.replace(/^Error:\s*/, "")
+						.replaceAll(pair.baseFile, `${pair.spec.path} at ${s.base}`)
+						.replaceAll(pair.revisionFile, pair.spec.path),
+				),
+				300,
+			);
+
+const runOasdiff = (s: Session, pair: Pair) =>
+	Effect.gen(function* () {
+		const res = yield* s.ctx.exec.run(
+			[
+				s.bin,
+				"breaking",
+				pair.baseFile,
+				pair.revisionFile,
+				"--format",
+				"json",
+				"--allow-external-refs=false",
+				"--config",
+				s.config,
+			],
+			{ cwd: s.tmp, timeoutMs: 5 * 60_000 },
+		);
+		if (NOT_LOADED.has(res.code))
+			return [
+				notCompared(pair.spec.path, notLoadedReason(s, pair, res.stderr)),
+			];
+		if (res.code !== 0) return yield* fail("oasdiff", res);
+		const json = yield* parseJson(res.stdout, "oasdiff");
+		return parseOasdiffOutput(json, {
+			file: pair.spec.path,
+			text: pair.spec.text,
+			revisionFile: pair.revisionFile,
+			base: s.base,
+		});
+	});
+
+/** Writes both versions of the `i`th spec to the temp dir and compares them. */
+const comparePair = (s: Session, spec: SpecFile, i: number, baseText: string) =>
+	Effect.gen(function* () {
+		const ext = extOf(spec.path) === "json" ? ".json" : ".yaml";
+		const pair: Pair = {
+			spec,
+			baseFile: `${i}/base${ext}`,
+			revisionFile: `${i}/revision${ext}`,
+		};
+		yield* Effect.promise(async () => {
+			await mkdir(join(s.tmp, String(i)));
+			await writeFile(join(s.tmp, pair.baseFile), baseText);
+			await writeFile(join(s.tmp, pair.revisionFile), spec.text);
+		});
+		return yield* runOasdiff(s, pair);
+	});
+
+const compareSpec = (
+	s: Session,
+	entry: TreeEntry | undefined,
+	spec: SpecFile,
+	i: number,
+) =>
+	Effect.gen(function* () {
+		// Missing at the base: a new API, nothing to break.
+		if (!isBaseBlob(entry)) return [];
+		if (!(entry.size <= MAX_SPEC_BYTES))
+			return [notCompared(spec.path, `its version at ${s.base} is too large.`)];
+		const blob = yield* runGit(s, ["cat-file", "blob", entry.oid]);
+		if (blob.code !== 0) return yield* fail("git cat-file", blob);
+		if (blob.stdout === spec.text) return [];
+		return yield* comparePair(s, spec, i, blob.stdout);
+	});
+
 const compare = (
 	ctx: AuditContext,
 	root: string,
@@ -231,97 +400,13 @@ const compare = (
 					Promise.all([mkdir(home), writeFile(config, "")]),
 				);
 				const env = oasdiffGitEnv(home);
-				const runGit = (args: ReadonlyArray<string>) =>
-					ctx.exec.run([git, "-C", root, ...args], {
-						cwd: tmp,
-						env,
-						timeoutMs: 60_000,
-					});
-
-				// Like `--diff` itself (`base...HEAD`), compare with the merge base.
-				const mb = yield* runGit([
-					"merge-base",
-					"--end-of-options",
-					base,
-					"HEAD",
-				]);
-				const sha = mb.stdout.trim();
-				if (mb.code !== 0 || !OID.test(sha))
-					return yield* fail(`git merge-base ${base} HEAD`, mb);
-				const tree = yield* runGit([
-					"ls-tree",
-					"-l",
-					"-z",
-					sha,
-					"--",
-					...specs.map((s) => s.path),
-				]);
-				if (tree.code !== 0) return yield* fail("git ls-tree", tree);
-				const entries = parseLsTree(tree.stdout);
-
+				const s: Session = { ctx, root, base, bin, git, tmp, config, env };
+				const entries = yield* baseTree(s, specs);
 				const findings: FindingInput[] = [];
-				for (const [i, spec] of specs.entries()) {
-					const entry = entries.get(spec.path);
-					// Missing at the base: a new API, nothing to break.
-					if (entry?.type !== "blob" || !OID.test(entry.oid)) continue;
-					if (!(entry.size <= MAX_SPEC_BYTES)) {
-						findings.push(
-							notCompared(spec.path, `its version at ${base} is too large.`),
-						);
-						continue;
-					}
-					const blob = yield* runGit(["cat-file", "blob", entry.oid]);
-					if (blob.code !== 0) return yield* fail("git cat-file", blob);
-					if (blob.stdout === spec.text) continue;
-
-					const ext = extOf(spec.path) === "json" ? ".json" : ".yaml";
-					const baseFile = `${i}/base${ext}`;
-					const revisionFile = `${i}/revision${ext}`;
-					yield* Effect.promise(async () => {
-						await mkdir(join(tmp, String(i)));
-						await writeFile(join(tmp, baseFile), blob.stdout);
-						await writeFile(join(tmp, revisionFile), spec.text);
-					});
-					const res = yield* ctx.exec.run(
-						[
-							bin,
-							"breaking",
-							baseFile,
-							revisionFile,
-							"--format",
-							"json",
-							"--allow-external-refs=false",
-							"--config",
-							config,
-						],
-						{ cwd: tmp, timeoutMs: 5 * 60_000 },
-					);
-					if (NOT_LOADED.has(res.code)) {
-						const why = /disallowed external ref/i.test(res.stderr)
-							? "it uses external $refs, which oasdiff is not allowed to follow (they could make it fetch URLs chosen by the repository)."
-							: truncate(
-									scrubLine(
-										(res.stderr.trim().split("\n")[0] ?? "")
-											.replace(/^Error:\s*/, "")
-											.replaceAll(baseFile, `${spec.path} at ${base}`)
-											.replaceAll(revisionFile, spec.path),
-									),
-									300,
-								);
-						findings.push(notCompared(spec.path, why));
-						continue;
-					}
-					if (res.code !== 0) return yield* fail("oasdiff", res);
-					const json = yield* parseJson(res.stdout, "oasdiff");
+				for (const [i, spec] of specs.entries())
 					findings.push(
-						...parseOasdiffOutput(json, {
-							file: spec.path,
-							text: spec.text,
-							revisionFile,
-							base,
-						}),
+						...(yield* compareSpec(s, entries.get(spec.path), spec, i)),
 					);
-				}
 				return findings;
 			}),
 		);

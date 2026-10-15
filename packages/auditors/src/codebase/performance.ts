@@ -69,79 +69,114 @@ const PERF_REFS = {
 		"https://web.dev/articles/reduce-javascript-payloads-with-tree-shaking",
 };
 
+/** A media file and its size in bytes. */
+interface Asset {
+	readonly path: string;
+	readonly size: number;
+	readonly ext: string;
+}
+
+const assetBase = (asset: Asset) => ({
+	category: "performance" as const,
+	location: { file: asset.path },
+	evidence: `${baseName(asset.path)} (${fmt(asset.size)})`,
+});
+
+const isLargeImage = (asset: Asset) =>
+	IMAGE_EXT.has(asset.ext) && asset.size > IMAGE_LIMIT;
+
+const imageRemediation = (ext: string) => {
+	if (LEGACY_IMAGE_EXT.has(ext))
+		return "Resize to the displayed dimensions and convert to WebP or AVIF (e.g. with sharp/squoosh); serve responsive sizes via srcset.";
+	if (ext === "svg")
+		return "Optimize the SVG with SVGO, or rasterize very complex vectors.";
+	return "Resize to the displayed dimensions and serve responsive sizes via srcset.";
+};
+
+const largeImage = (asset: Asset): FindingInput | undefined => {
+	if (!isLargeImage(asset)) return undefined;
+	return {
+		...assetBase(asset),
+		ruleId: "code.performance/large-image",
+		title: `Large image (${fmt(asset.size)})`,
+		severity: asset.size > 1024 * KB ? "medium" : "low",
+		message: `${asset.path} is ${fmt(asset.size)}. Large images dominate page weight and delay Largest Contentful Paint.`,
+		remediation: imageRemediation(asset.ext),
+		references: [PERF_REFS.images],
+		confidence: "high",
+	};
+};
+
+const isLegacyImage = (asset: Asset) =>
+	LEGACY_IMAGE_EXT.has(asset.ext) && asset.size > LEGACY_IMAGE_LIMIT;
+
+const legacyImage = (asset: Asset): FindingInput | undefined => {
+	if (!isLegacyImage(asset)) return undefined;
+	const { ext } = asset;
+	return {
+		...assetBase(asset),
+		ruleId: "code.performance/legacy-image-format",
+		title: `Image could use a modern format (${ext.toUpperCase()})`,
+		severity: "info",
+		message: `${asset.path} (${fmt(asset.size)}) is ${ext.toUpperCase()}; WebP/AVIF are typically 25–50% smaller at equal quality.`,
+		remediation:
+			ext === "gif"
+				? "Replace animated GIFs with muted, looping <video> (MP4/WebM); convert static GIFs to WebP."
+				: "Convert to WebP or AVIF, or let your framework's image component do it (next/image, @astrojs/image).",
+		references: [PERF_REFS.images],
+		confidence: "high",
+	};
+};
+
+const isLargeVideo = (asset: Asset) =>
+	VIDEO_EXT.has(asset.ext) && asset.size > VIDEO_LIMIT;
+
+const largeVideo = (asset: Asset): FindingInput | undefined => {
+	if (!isLargeVideo(asset)) return undefined;
+	return {
+		...assetBase(asset),
+		ruleId: "code.performance/large-video",
+		title: `Large video committed (${fmt(asset.size)})`,
+		severity: asset.size > 10 * 1024 * KB ? "medium" : "low",
+		message: `${asset.path} is ${fmt(asset.size)}. Videos bloat the repository and are expensive to serve from the app origin.`,
+		remediation:
+			'Compress (H.264/VP9/AV1 at an appropriate bitrate), use preload="none" or a poster, and host large media on a CDN or video platform.',
+		references: [PERF_REFS.video],
+		confidence: "high",
+	};
+};
+
+const heavyFont = (asset: Asset): FindingInput | undefined => {
+	const { ext, size } = asset;
+	if (!FONT_EXT.has(ext)) return undefined;
+	const large = size > FONT_LIMIT;
+	if (!large && !LEGACY_FONT_EXT.has(ext)) return undefined;
+	return {
+		...assetBase(asset),
+		ruleId: "code.performance/heavy-font",
+		title: large
+			? `Large font file (${fmt(size)})`
+			: `Legacy font format (${ext.toUpperCase()})`,
+		severity: large ? "low" : "info",
+		message: `${asset.path} is a ${fmt(size)} ${ext.toUpperCase()} font. Fonts block text rendering until loaded.`,
+		remediation:
+			"Serve WOFF2 only, subset to the glyphs you use (e.g. glyphhanger, fonttools pyftsubset), and use font-display: swap.",
+		references: [PERF_REFS.fonts],
+		confidence: "high",
+	};
+};
+
+/** Asset checks in priority order: an asset gets at most one finding. */
+const ASSET_CHECKS = [largeImage, legacyImage, largeVideo, heavyFont];
+
 /** Large images, videos and fonts committed to web-served directories. */
 export const assetFindings = (path: string, size: number): FindingInput[] => {
-	const ext = extOf(path);
 	if (!WEB_ASSET_DIR.test(path) || isFixturePath(path)) return [];
-	const base = {
-		category: "performance" as const,
-		location: { file: path },
-		evidence: `${baseName(path)} (${fmt(size)})`,
-	};
-	if (IMAGE_EXT.has(ext) && size > IMAGE_LIMIT)
-		return [
-			{
-				...base,
-				ruleId: "code.performance/large-image",
-				title: `Large image (${fmt(size)})`,
-				severity: size > 1024 * KB ? "medium" : "low",
-				message: `${path} is ${fmt(size)}. Large images dominate page weight and delay Largest Contentful Paint.`,
-				remediation: LEGACY_IMAGE_EXT.has(ext)
-					? "Resize to the displayed dimensions and convert to WebP or AVIF (e.g. with sharp/squoosh); serve responsive sizes via srcset."
-					: ext === "svg"
-						? "Optimize the SVG with SVGO, or rasterize very complex vectors."
-						: "Resize to the displayed dimensions and serve responsive sizes via srcset.",
-				references: [PERF_REFS.images],
-				confidence: "high",
-			},
-		];
-	if (LEGACY_IMAGE_EXT.has(ext) && size > LEGACY_IMAGE_LIMIT)
-		return [
-			{
-				...base,
-				ruleId: "code.performance/legacy-image-format",
-				title: `Image could use a modern format (${ext.toUpperCase()})`,
-				severity: "info",
-				message: `${path} (${fmt(size)}) is ${ext.toUpperCase()}; WebP/AVIF are typically 25–50% smaller at equal quality.`,
-				remediation:
-					ext === "gif"
-						? "Replace animated GIFs with muted, looping <video> (MP4/WebM); convert static GIFs to WebP."
-						: "Convert to WebP or AVIF, or let your framework's image component do it (next/image, @astrojs/image).",
-				references: [PERF_REFS.images],
-				confidence: "high",
-			},
-		];
-	if (VIDEO_EXT.has(ext) && size > VIDEO_LIMIT)
-		return [
-			{
-				...base,
-				ruleId: "code.performance/large-video",
-				title: `Large video committed (${fmt(size)})`,
-				severity: size > 10 * 1024 * KB ? "medium" : "low",
-				message: `${path} is ${fmt(size)}. Videos bloat the repository and are expensive to serve from the app origin.`,
-				remediation:
-					'Compress (H.264/VP9/AV1 at an appropriate bitrate), use preload="none" or a poster, and host large media on a CDN or video platform.',
-				references: [PERF_REFS.video],
-				confidence: "high",
-			},
-		];
-	if (FONT_EXT.has(ext) && (size > FONT_LIMIT || LEGACY_FONT_EXT.has(ext)))
-		return [
-			{
-				...base,
-				ruleId: "code.performance/heavy-font",
-				title:
-					size > FONT_LIMIT
-						? `Large font file (${fmt(size)})`
-						: `Legacy font format (${ext.toUpperCase()})`,
-				severity: size > FONT_LIMIT ? "low" : "info",
-				message: `${path} is a ${fmt(size)} ${ext.toUpperCase()} font. Fonts block text rendering until loaded.`,
-				remediation:
-					"Serve WOFF2 only, subset to the glyphs you use (e.g. glyphhanger, fonttools pyftsubset), and use font-display: swap.",
-				references: [PERF_REFS.fonts],
-				confidence: "high",
-			},
-		];
+	const asset: Asset = { path, size, ext: extOf(path) };
+	for (const check of ASSET_CHECKS) {
+		const finding = check(asset);
+		if (finding) return [finding];
+	}
 	return [];
 };
 
@@ -269,67 +304,86 @@ export interface ConsoleCount {
 	readonly firstLine: number;
 }
 
-/** Per-file source checks; console.log counts are aggregated by the caller. */
-export const scanPerformanceSource = (
-	file: SourceFile,
-): { findings: FindingInput[]; console?: ConsoleCount } => {
-	const { path, text } = file;
-	const lineOf = lineLocator(text);
-	const findings: FindingInput[] = [];
-	for (const [re, remediation] of FULL_IMPORTS) {
-		for (const m of text.matchAll(re)) {
-			findings.push({
+type LineOf = (index: number) => number;
+
+const fullImportFindings = (file: SourceFile, lineOf: LineOf): FindingInput[] =>
+	FULL_IMPORTS.flatMap(([re, remediation]) =>
+		[...file.text.matchAll(re)].map(
+			(m): FindingInput => ({
 				ruleId: "code.performance/full-library-import",
 				title: "Whole-library import",
 				severity: "low",
 				category: "performance",
 				message:
 					"This import pulls in an entire library, increasing bundle size for code that is never used.",
-				location: { file: path, line: lineOf(m.index ?? 0) },
+				location: { file: file.path, line: lineOf(m.index ?? 0) },
 				evidence: truncate(m[0]),
 				remediation,
 				references: [PERF_REFS.bundle],
 				confidence: "medium",
-			});
-		}
-	}
+			}),
+		),
+	);
 
-	if (SERVER_HINT.test(text)) {
-		for (const m of text.matchAll(SYNC_CALL)) {
-			const index = m.index ?? 0;
-			const line = fullLineAt(text, index);
-			// Top-level calls run once at startup, which is fine.
-			if (!/^\s+/.test(line) || isCommentLine(line)) continue;
-			findings.push({
-				ruleId: "code.performance/sync-io-in-handler",
-				title: "Synchronous I/O in server code",
-				severity: "low",
-				category: "performance",
-				message:
-					"A blocking *Sync call appears inside a function in server code. If it runs per request it stalls the event loop for every concurrent request.",
-				location: { file: path, line: lineOf(index) },
-				evidence: truncate(line),
-				remediation:
-					"Use the async variant (fs.promises / await Bun.file().text()) inside request handlers, or hoist one-time reads to module startup.",
-				references: [
-					"https://nodejs.org/en/learn/asynchronous-work/dont-block-the-event-loop",
-				],
-				confidence: "low",
-			});
-		}
-	}
+// Top-level calls run once at startup, which is fine.
+const isNestedCode = (line: string) =>
+	/^\s+/.test(line) && !isCommentLine(line);
 
-	let count = 0;
-	let firstIndex = -1;
-	for (const m of text.matchAll(/\bconsole\.(?:log|debug|trace)\s*\(/g)) {
-		if (isCommentLine(fullLineAt(text, m.index ?? 0))) continue;
-		if (firstIndex === -1) firstIndex = m.index ?? 0;
-		count++;
+const syncIoFindings = (file: SourceFile, lineOf: LineOf): FindingInput[] => {
+	const { path, text } = file;
+	if (!SERVER_HINT.test(text)) return [];
+	const findings: FindingInput[] = [];
+	for (const m of text.matchAll(SYNC_CALL)) {
+		const index = m.index ?? 0;
+		const line = fullLineAt(text, index);
+		if (!isNestedCode(line)) continue;
+		findings.push({
+			ruleId: "code.performance/sync-io-in-handler",
+			title: "Synchronous I/O in server code",
+			severity: "low",
+			category: "performance",
+			message:
+				"A blocking *Sync call appears inside a function in server code. If it runs per request it stalls the event loop for every concurrent request.",
+			location: { file: path, line: lineOf(index) },
+			evidence: truncate(line),
+			remediation:
+				"Use the async variant (fs.promises / await Bun.file().text()) inside request handlers, or hoist one-time reads to module startup.",
+			references: [
+				"https://nodejs.org/en/learn/asynchronous-work/dont-block-the-event-loop",
+			],
+			confidence: "low",
+		});
 	}
+	return findings;
+};
+
+const CONSOLE_CALL = /\bconsole\.(?:log|debug|trace)\s*\(/g;
+
+const consoleCount = (
+	file: SourceFile,
+	lineOf: LineOf,
+): ConsoleCount | undefined => {
+	const { path, text } = file;
+	const calls = [...text.matchAll(CONSOLE_CALL)]
+		.map((m) => m.index ?? 0)
+		.filter((index) => !isCommentLine(fullLineAt(text, index)));
+	const first = calls[0];
+	return first === undefined
+		? undefined
+		: { path, count: calls.length, firstLine: lineOf(first) };
+};
+
+/** Per-file source checks; console.log counts are aggregated by the caller. */
+export const scanPerformanceSource = (
+	file: SourceFile,
+): { findings: FindingInput[]; console?: ConsoleCount } => {
+	const lineOf = lineLocator(file.text);
 	return {
-		findings,
-		console:
-			count > 0 ? { path, count, firstLine: lineOf(firstIndex) } : undefined,
+		findings: [
+			...fullImportFindings(file, lineOf),
+			...syncIoFindings(file, lineOf),
+		],
+		console: consoleCount(file, lineOf),
 	};
 };
 
@@ -367,6 +421,14 @@ const isProductionSource = (path: string) =>
 	!isGeneratedPath(path) &&
 	!NON_PRODUCTION.test(path);
 
+const isMediaPath = (path: string) => {
+	const ext = extOf(path);
+	return IMAGE_EXT.has(ext) || VIDEO_EXT.has(ext) || FONT_EXT.has(ext);
+};
+
+const isPackageJson = (path: string) =>
+	baseName(path) === "package.json" && !isFixturePath(path);
+
 export const performanceAuditor = defineAuditor({
 	id: "code.performance",
 	title: "Performance (static)",
@@ -381,12 +443,7 @@ export const performanceAuditor = defineAuditor({
 			const all = yield* ws.files;
 			const findings: FindingInput[] = [];
 
-			const assets = all
-				.filter((f) => {
-					const ext = extOf(f);
-					return IMAGE_EXT.has(ext) || VIDEO_EXT.has(ext) || FONT_EXT.has(ext);
-				})
-				.slice(0, 5000);
+			const assets = all.filter(isMediaPath).slice(0, 5000);
 			const sizes = yield* Effect.forEach(
 				assets,
 				(path) =>
@@ -398,10 +455,7 @@ export const performanceAuditor = defineAuditor({
 			for (const [path, size] of sizes)
 				findings.push(...assetFindings(path, size));
 
-			const manifests = yield* readTextFiles(
-				ws,
-				(p) => baseName(p) === "package.json" && !isFixturePath(p),
-			);
+			const manifests = yield* readTextFiles(ws, isPackageJson);
 			findings.push(...manifests.flatMap(checkPackageJsonDeps));
 
 			const sources = yield* readTextFiles(ws, isProductionSource);

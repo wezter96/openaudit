@@ -15,7 +15,13 @@ import {
 import { Effect } from "effect";
 
 import { arr, num, parseJson, relPath, runTool, str } from "../tool";
+import { recordOf } from "./report-fields";
 import { isRecord, truncate } from "./util";
+
+/** A workspace-relative or absolute file path. */
+type FilePath = string;
+/** An SPDX licence expression, such as `MIT OR Apache-2.0`. */
+type LicenseExpression = string;
 
 /* -------------------------------------------------------------------------- */
 /*                                    jscpd                                   */
@@ -26,44 +32,47 @@ const JSCPD_LOW_LINES = 20;
 /** Project-wide duplication above this percentage gets an aggregate finding. */
 const JSCPD_MAX_PERCENT = 5;
 
-/** Parses the `jscpd-report.json` written by `jscpd --reporters json`. */
-export const parseJscpdReport = (
-	json: unknown,
-	root: string,
+/** `path:start-end` of one side of a jscpd duplicate. */
+const jscpdSpan = (root: FilePath, f: Record<string, unknown>) =>
+	`${relPath(root, str(f.name)) ?? "unknown"}:${num(f.start) ?? "?"}-${num(f.end) ?? "?"}`;
+
+const jscpdDuplicateFinding = (
+	dup: unknown,
+	root: FilePath,
 ): FindingInput[] => {
-	if (!isRecord(json)) return [];
-	const findings: FindingInput[] = [];
-	for (const dup of arr(json.duplicates)) {
-		if (!isRecord(dup)) continue;
-		const first = isRecord(dup.firstFile) ? dup.firstFile : {};
-		const second = isRecord(dup.secondFile) ? dup.secondFile : {};
-		const fileA = relPath(root, str(first.name));
-		const fileB = relPath(root, str(second.name));
-		const lines = num(dup.lines) ?? 0;
-		const span = (f: Record<string, unknown>) =>
-			`${relPath(root, str(f.name)) ?? "unknown"}:${num(f.start) ?? "?"}-${num(f.end) ?? "?"}`;
-		findings.push({
+	if (!isRecord(dup)) return [];
+	const first = recordOf(dup.firstFile);
+	const second = recordOf(dup.secondFile);
+	const fileA = relPath(root, str(first.name));
+	const fileB = relPath(root, str(second.name));
+	const lines = num(dup.lines) ?? 0;
+	return [
+		{
 			ruleId: "code.jscpd/duplicate-block",
 			title: truncate(`Duplicated code between ${fileA} and ${fileB}`, 120),
 			severity: lines < JSCPD_LOW_LINES ? "info" : "low",
 			category: "maintainability",
-			message: `${lines} lines (${num(dup.tokens) ?? 0} tokens) are copy-pasted between ${span(first)} and ${span(second)}.`,
+			message: `${lines} lines (${num(dup.tokens) ?? 0} tokens) are copy-pasted between ${jscpdSpan(root, first)} and ${jscpdSpan(root, second)}.`,
 			location: { file: fileA, line: num(first.start) },
-			evidence: `${span(first)} <-> ${span(second)}`,
+			evidence: `${jscpdSpan(root, first)} <-> ${jscpdSpan(root, second)}`,
 			remediation:
 				"Extract the shared logic into one function or module and call it from both places.",
 			references: ["https://github.com/kucherenko/jscpd"],
 			confidence: "high",
 			tags: ["duplication"],
-		});
-	}
-	const total =
-		isRecord(json.statistics) && isRecord(json.statistics.total)
-			? json.statistics.total
-			: undefined;
-	const percentage = num(total?.percentage);
-	if (total && percentage !== undefined && percentage > JSCPD_MAX_PERCENT) {
-		findings.push({
+		},
+	];
+};
+
+/** The aggregate finding when project-wide duplication exceeds the threshold. */
+const jscpdRatioFinding = (statistics: unknown): FindingInput[] => {
+	if (!isRecord(statistics) || !isRecord(statistics.total)) return [];
+	const total = statistics.total;
+	const percentage = num(total.percentage);
+	const exceeded = percentage !== undefined && percentage > JSCPD_MAX_PERCENT;
+	if (!exceeded) return [];
+	return [
+		{
 			ruleId: "code.jscpd/duplication-ratio",
 			title: `${percentage.toFixed(1)}% of scanned lines are duplicated`,
 			severity: "medium",
@@ -74,9 +83,20 @@ export const parseJscpdReport = (
 			references: ["https://github.com/kucherenko/jscpd"],
 			confidence: "high",
 			tags: ["duplication"],
-		});
-	}
-	return findings;
+		},
+	];
+};
+
+/** Parses the `jscpd-report.json` written by `jscpd --reporters json`. */
+export const parseJscpdReport = (
+	json: unknown,
+	root: FilePath,
+): FindingInput[] => {
+	if (!isRecord(json)) return [];
+	return [
+		...arr(json.duplicates).flatMap((dup) => jscpdDuplicateFinding(dup, root)),
+		...jscpdRatioFinding(json.statistics),
+	];
 };
 
 /** Directories and files jscpd never scans. */
@@ -307,45 +327,61 @@ const KNIP_KINDS: Readonly<Record<string, KnipKind>> = {
 
 const KNIP_REFERENCE = "https://knip.dev/reference/issue-types";
 
+/** Where a knip issue item was reported. */
+interface KnipSite {
+	readonly root: FilePath;
+	/** The file of the knip issue the item belongs to. */
+	readonly file: FilePath | undefined;
+	readonly group: string;
+	readonly kind: KnipKind;
+}
+
+const knipFinding = (item: unknown, site: KnipSite): FindingInput[] => {
+	if (!isRecord(item)) return [];
+	const name = str(item.name);
+	if (!name) return [];
+	const { kind } = site;
+	// For `files` the item name is the unused file itself.
+	const isFile = site.group === "files";
+	return [
+		{
+			ruleId: `code.knip/${kind.rule}`,
+			title: truncate(`${kind.rule.replace(/-/g, " ")}: ${name}`, 120),
+			severity: kind.severity,
+			category: kind.category,
+			message: kind.message(name),
+			location: {
+				file: isFile ? relPath(site.root, name) : site.file,
+				line: isFile ? undefined : num(item.line),
+				column: isFile ? undefined : num(item.col),
+			},
+			evidence: truncate(name, 120),
+			remediation: kind.remediation,
+			references: [KNIP_REFERENCE],
+			confidence: kind.confidence,
+			tags: ["dead-code"],
+		},
+	];
+};
+
+const knipIssueFindings = (issue: unknown, root: FilePath): FindingInput[] => {
+	if (!isRecord(issue)) return [];
+	const file = relPath(root, str(issue.file));
+	return Object.entries(KNIP_KINDS).flatMap(([group, kind]) =>
+		arr(issue[group]).flatMap((item) =>
+			knipFinding(item, { root, file, group, kind }),
+		),
+	);
+};
+
 /** Parses `knip --reporter json` output. */
 export const parseKnipReport = (
 	json: unknown,
-	root: string,
-): FindingInput[] => {
-	if (!isRecord(json)) return [];
-	const findings: FindingInput[] = [];
-	for (const issue of arr(json.issues)) {
-		if (!isRecord(issue)) continue;
-		const issueFile = relPath(root, str(issue.file));
-		for (const [group, kind] of Object.entries(KNIP_KINDS)) {
-			for (const item of arr(issue[group])) {
-				if (!isRecord(item)) continue;
-				const name = str(item.name);
-				if (!name) continue;
-				// For `files` the item name is the unused file itself.
-				const file = group === "files" ? relPath(root, name) : issueFile;
-				findings.push({
-					ruleId: `code.knip/${kind.rule}`,
-					title: truncate(`${kind.rule.replace(/-/g, " ")}: ${name}`, 120),
-					severity: kind.severity,
-					category: kind.category,
-					message: kind.message(name),
-					location: {
-						file,
-						line: group === "files" ? undefined : num(item.line),
-						column: group === "files" ? undefined : num(item.col),
-					},
-					evidence: truncate(name, 120),
-					remediation: kind.remediation,
-					references: [KNIP_REFERENCE],
-					confidence: kind.confidence,
-					tags: ["dead-code"],
-				});
-			}
-		}
-	}
-	return findings;
-};
+	root: FilePath,
+): FindingInput[] =>
+	isRecord(json)
+		? arr(json.issues).flatMap((issue) => knipIssueFindings(issue, root))
+		: [];
 
 export const knip = defineAuditor({
 	id: "code.knip",
@@ -391,14 +427,18 @@ export const knip = defineAuditor({
 /* -------------------------------------------------------------------------- */
 
 /** Licence expression families, matched per `OR` alternative. */
-const isStrongCopyleft = (alt: string) => /(^|\s)(AGPL|GPL|SSPL)-/.test(alt);
-const isWeakCopyleft = (alt: string) => /(^|\s)(LGPL|MPL|EPL)-/.test(alt);
+const isStrongCopyleft = (alt: LicenseExpression) =>
+	/(^|\s)(AGPL|GPL|SSPL)-/.test(alt);
+const isWeakCopyleft = (alt: LicenseExpression) =>
+	/(^|\s)(LGPL|MPL|EPL)-/.test(alt);
 
 /**
  * Classifies an SPDX expression. `A OR B` is strong or weak only when every
  * alternative is, since the recipient may choose a permissive alternative.
  */
-export const classifyLicense = (expr: string): "strong" | "weak" | "none" => {
+export const classifyLicense = (
+	expr: LicenseExpression,
+): "strong" | "weak" | "none" => {
 	const alts = expr.replace(/[()]/g, "").split(/\s+OR\s+/i);
 	if (alts.every(isStrongCopyleft)) return "strong";
 	if (alts.every(isWeakCopyleft)) return "weak";
@@ -406,13 +446,156 @@ export const classifyLicense = (expr: string): "strong" | "weak" | "none" => {
 };
 
 /** A declared project licence that the strong copyleft code above cannot live under. */
-const isCopyleftFreeProject = (expr: string) =>
+const isCopyleftFreeProject = (expr: LicenseExpression) =>
 	!/(^|[\s(])(AGPL|GPL|LGPL|MPL|EPL|SSPL)-/.test(expr);
 
-const firstLicenseId = (expr: string) =>
+const firstLicenseId = (expr: LicenseExpression) =>
 	expr.split(/[\s()]+/).find((t) => t && !/^(AND|OR|WITH)$/i.test(t)) ?? expr;
 
 const SCANCODE_REFERENCE = "https://github.com/nexB/scancode-toolkit";
+
+/** A file whose detected licence is copyleft, with what every finding on it shares. */
+interface ScancodeHit {
+	readonly file: FilePath;
+	readonly spdx: LicenseExpression;
+	readonly line: number | undefined;
+	readonly evidence: string;
+	readonly tags: string[];
+	readonly reference: string;
+}
+
+/** The finding fields that differ between scancode rules. */
+interface ScancodeRule {
+	readonly ruleId: string;
+	readonly title: string;
+	readonly severity: Severity;
+	readonly message: string;
+	readonly remediation: string;
+}
+
+const scancodeFinding = (
+	hit: ScancodeHit,
+	rule: ScancodeRule,
+): FindingInput => ({
+	ruleId: rule.ruleId,
+	title: rule.title,
+	severity: rule.severity,
+	category: "compliance",
+	message: rule.message,
+	location: { file: hit.file, line: hit.line },
+	evidence: hit.evidence,
+	remediation: rule.remediation,
+	references: [hit.reference, SCANCODE_REFERENCE],
+	confidence: "medium",
+	tags: hit.tags,
+});
+
+const scancodeHit = (
+	f: Record<string, unknown>,
+	file: FilePath,
+	spdx: LicenseExpression,
+): ScancodeHit => {
+	const matches = arr(f.license_detections)
+		.filter(isRecord)
+		.flatMap((d) => arr(d.matches))
+		.filter(isRecord);
+	const starts = matches.map((m) => num(m.start_line) ?? 0);
+	const ends = matches.map((m) => num(m.end_line) ?? 0);
+	const line = starts.length ? Math.min(...starts) : undefined;
+	return {
+		file,
+		spdx,
+		line,
+		evidence: line ? `${spdx} at lines ${line}-${Math.max(...ends)}` : spdx,
+		tags: [`license-${firstLicenseId(spdx).toLowerCase()}`],
+		reference: `https://spdx.org/licenses/${firstLicenseId(spdx)}.html`,
+	};
+};
+
+const strongCopyleftFindings = (
+	hit: ScancodeHit,
+	projectLicense: string | undefined,
+): FindingInput[] => {
+	const { file, spdx } = hit;
+	const findings = [
+		scancodeFinding(hit, {
+			ruleId: "code.scancode/strong-copyleft",
+			title: truncate(`${file}: ${spdx}`, 120),
+			severity: "medium",
+			message: `${spdx} is strong copyleft: distributing this file can require releasing the combined work under the same licence.`,
+			remediation:
+				"Confirm the licence is acceptable for this project. Replace the code, or obtain a licence that permits your use.",
+		}),
+	];
+	if (projectLicense && isCopyleftFreeProject(projectLicense))
+		findings.push(
+			scancodeFinding(hit, {
+				ruleId: "code.scancode/license-conflict",
+				title: truncate(`${file} conflicts with ${projectLicense}`, 120),
+				severity: "medium",
+				message: `${spdx} code cannot be distributed under the project's declared licence (${projectLicense}) without relicensing.`,
+				remediation: `Remove the ${spdx} code, or change the project licence after legal review.`,
+			}),
+		);
+	return findings;
+};
+
+const weakCopyleftFinding = (hit: ScancodeHit): FindingInput =>
+	scancodeFinding(hit, {
+		ruleId: "code.scancode/weak-copyleft",
+		title: truncate(`${hit.file}: ${hit.spdx}`, 120),
+		severity: "low",
+		message: `${hit.spdx} is weak copyleft: changes to this file may need to be shared, but the rest of the project can keep its own licence.`,
+		remediation:
+			"Keep the file unmodified or publish your changes to it, and keep its licence notice intact.",
+	});
+
+const scancodeFileFindings = (
+	f: Record<string, unknown>,
+	root: FilePath,
+	projectLicense: string | undefined,
+): FindingInput[] => {
+	const file = relPath(root, str(f.path));
+	const spdx = str(f.detected_license_expression_spdx);
+	if (!file || !spdx) return [];
+	const kind = classifyLicense(spdx);
+	if (kind === "strong")
+		return strongCopyleftFindings(scancodeHit(f, file, spdx), projectLicense);
+	if (kind === "weak") return [weakCopyleftFinding(scancodeHit(f, file, spdx))];
+	return [];
+};
+
+/** Scanned files with no detected licence. */
+const unlicensedFiles = (
+	files: ReadonlyArray<Record<string, unknown>>,
+	root: FilePath,
+): string[] =>
+	files.flatMap((f) => {
+		const file = relPath(root, str(f.path));
+		return file && !str(f.detected_license_expression_spdx) ? [file] : [];
+	});
+
+const noLicenseFinding = (
+	unlicensed: ReadonlyArray<string>,
+	total: number,
+): FindingInput[] =>
+	unlicensed.length
+		? [
+				{
+					ruleId: "code.scancode/no-license-detected",
+					title: `${unlicensed.length} ${unlicensed.length === 1 ? "file has" : "files have"} no detected licence`,
+					severity: "info",
+					category: "compliance",
+					message: `ScanCode found no licence in ${unlicensed.length} of ${total} scanned entries. They are covered only by the project licence, if any.`,
+					evidence: truncate(unlicensed.slice(0, 5).join(", "), 160),
+					remediation:
+						"Add licence headers or a licence note to third-party code, and confirm the rest falls under the project LICENSE.",
+					references: [SCANCODE_REFERENCE],
+					confidence: "medium",
+					tags: ["license"],
+				},
+			]
+		: [];
 
 /**
  * Parses `scancode --json` output (ScanCode v32+ fields). `declared` is the
@@ -421,8 +604,8 @@ const SCANCODE_REFERENCE = "https://github.com/nexB/scancode-toolkit";
  */
 export const parseScancodeReport = (
 	json: unknown,
-	root: string,
-	declared?: string,
+	root: FilePath,
+	declared?: LicenseExpression,
 ): FindingInput[] => {
 	if (!isRecord(json)) return [];
 	const files = arr(json.files)
@@ -433,96 +616,10 @@ export const parseScancodeReport = (
 	);
 	const projectLicense =
 		declared ?? str(rootLicense?.detected_license_expression_spdx);
-	const findings: FindingInput[] = [];
-	const unlicensed: string[] = [];
-
-	for (const f of files) {
-		const file = relPath(root, str(f.path));
-		if (!file) continue;
-		const spdx = str(f.detected_license_expression_spdx);
-		if (!spdx) {
-			unlicensed.push(file);
-			continue;
-		}
-		const kind = classifyLicense(spdx);
-		const matches = arr(f.license_detections)
-			.filter(isRecord)
-			.flatMap((d) => arr(d.matches))
-			.filter(isRecord);
-		const starts = matches.map((m) => num(m.start_line) ?? 0);
-		const ends = matches.map((m) => num(m.end_line) ?? 0);
-		const line = starts.length ? Math.min(...starts) : undefined;
-		const evidence = line
-			? `${spdx} at lines ${line}-${Math.max(...ends)}`
-			: spdx;
-		const tags = [`license-${firstLicenseId(spdx).toLowerCase()}`];
-		const reference = `https://spdx.org/licenses/${firstLicenseId(spdx)}.html`;
-
-		if (kind === "strong") {
-			findings.push({
-				ruleId: "code.scancode/strong-copyleft",
-				title: truncate(`${file}: ${spdx}`, 120),
-				severity: "medium",
-				category: "compliance",
-				message: `${spdx} is strong copyleft: distributing this file can require releasing the combined work under the same licence.`,
-				location: { file, line },
-				evidence,
-				remediation:
-					"Confirm the licence is acceptable for this project. Replace the code, or obtain a licence that permits your use.",
-				references: [reference, SCANCODE_REFERENCE],
-				confidence: "medium",
-				tags,
-			});
-			if (projectLicense && isCopyleftFreeProject(projectLicense)) {
-				findings.push({
-					ruleId: "code.scancode/license-conflict",
-					title: truncate(`${file} conflicts with ${projectLicense}`, 120),
-					severity: "medium",
-					category: "compliance",
-					message: `${spdx} code cannot be distributed under the project's declared licence (${projectLicense}) without relicensing.`,
-					location: { file, line },
-					evidence,
-					remediation: `Remove the ${spdx} code, or change the project licence after legal review.`,
-					references: [reference, SCANCODE_REFERENCE],
-					confidence: "medium",
-					tags,
-				});
-			}
-		} else if (kind === "weak") {
-			findings.push({
-				ruleId: "code.scancode/weak-copyleft",
-				title: truncate(`${file}: ${spdx}`, 120),
-				severity: "low",
-				category: "compliance",
-				message: `${spdx} is weak copyleft: changes to this file may need to be shared, but the rest of the project can keep its own licence.`,
-				location: { file, line },
-				evidence,
-				remediation:
-					"Keep the file unmodified or publish your changes to it, and keep its licence notice intact.",
-				references: [reference, SCANCODE_REFERENCE],
-				confidence: "medium",
-				tags,
-			});
-		}
-	}
-
-	if (unlicensed.length) {
-		const total = files.length;
-		findings.push({
-			ruleId: "code.scancode/no-license-detected",
-			title: `${unlicensed.length} ${unlicensed.length === 1 ? "file has" : "files have"} no detected licence`,
-			severity: "info",
-			category: "compliance",
-			message: `ScanCode found no licence in ${unlicensed.length} of ${total} scanned entries. They are covered only by the project licence, if any.`,
-			evidence: truncate(unlicensed.slice(0, 5).join(", "), 160),
-			remediation:
-				"Add licence headers or a licence note to third-party code, and confirm the rest falls under the project LICENSE.",
-			references: [SCANCODE_REFERENCE],
-			confidence: "medium",
-			tags: ["license"],
-		});
-	}
-	return findings;
+	return [
+		...files.flatMap((f) => scancodeFileFindings(f, root, projectLicense)),
+		...noLicenseFinding(unlicensedFiles(files, root), files.length),
+	];
 };
 
 /** Project licence from package.json, if the project declares one. */

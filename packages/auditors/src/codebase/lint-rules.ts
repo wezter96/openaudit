@@ -95,17 +95,27 @@ const TS_EXTENSION_RULES = new Set([
 	"prefer-destructuring",
 ]);
 
+/** typescript-eslint extension rules merge with the core rule they extend. */
+const eslintKey = (lower: string): string => {
+	const ts = /^@typescript-eslint\/(.+)$/.exec(lower)?.[1];
+	return ts && TS_EXTENSION_RULES.has(ts) ? ts : lower;
+};
+
+const wcagCriteria = (lower: string) => {
+	const a11y = /^jsx-a11y\/(.+)$/.exec(lower)?.[1];
+	return a11y ? JSX_A11Y_WCAG[a11y] || [] : [];
+};
+
 /**
  * Tags of an ESLint rule id: `eslint:<id>`, the key correlate merges code.eslint
  * and code.oxlint findings on, plus WCAG criteria for jsx-a11y rules.
  */
 export const lintTags = (id: string): string[] => {
 	const lower = id.toLowerCase();
-	const ts = /^@typescript-eslint\/(.+)$/.exec(lower)?.[1];
-	const tags = [`eslint:${ts && TS_EXTENSION_RULES.has(ts) ? ts : lower}`];
-	const a11y = /^jsx-a11y\/(.+)$/.exec(lower)?.[1];
-	for (const sc of (a11y && JSX_A11Y_WCAG[a11y]) || []) tags.push(`wcag-${sc}`);
-	return tags;
+	return [
+		`eslint:${eslintKey(lower)}`,
+		...wcagCriteria(lower).map((sc) => `wcag-${sc}`),
+	];
 };
 
 /**

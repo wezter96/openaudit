@@ -539,26 +539,27 @@ const rulePatterns = (rule: SastRule) =>
 		? WEAK_HASH
 		: rule.patterns;
 
+const CODE_LANGS: ReadonlySet<string> = new Set([
+	"js",
+	"python",
+	"go",
+	"php",
+	"ruby",
+	"java",
+	"csharp",
+]);
+
+const isCodeLang = (lang: string | undefined): lang is Lang =>
+	CODE_LANGS.has(lang ?? "");
+
+/** Env files, Dockerfiles, YAML, shell scripts and other config, by base name. */
+const CONFIG_FILE =
+	/^\.env(\.|$)|\.env$|^Dockerfile|\.dockerfile$|\.(ya?ml|sh|bash|zsh|toml|ini|conf)$/i;
+
 const langOf = (path: string): Lang | undefined => {
 	const lang = languageOf(path);
-	if (
-		lang === "js" ||
-		lang === "python" ||
-		lang === "go" ||
-		lang === "php" ||
-		lang === "ruby" ||
-		lang === "java" ||
-		lang === "csharp"
-	)
-		return lang;
-	const base = baseName(path);
-	if (
-		/^\.env(\.|$)|\.env$|^Dockerfile|\.dockerfile$|\.(ya?ml|sh|bash|zsh|toml|ini|conf)$/i.test(
-			base,
-		)
-	)
-		return "config";
-	return undefined;
+	if (isCodeLang(lang)) return lang;
+	return CONFIG_FILE.test(baseName(path)) ? "config" : undefined;
 };
 
 /** Text from `index` through the parenthesis that closes the first `(`. */
@@ -582,60 +583,99 @@ const windowAt = (text: string, index: number): string => {
 	);
 };
 
+/** One file being scanned, and what has been found in it so far. */
+interface Scan {
+	readonly file: SourceFile;
+	readonly lang: Lang;
+	readonly lineOf: (index: number) => number;
+	/** Characters inside strings, comments and regexes. */
+	readonly mask: ReturnType<typeof nonCodeMask>;
+	/** `rule:line` keys already reported. */
+	readonly seen: Set<string>;
+	readonly findings: FindingInput[];
+}
+
+const IGNORE_MARKER = /openaudit-ignore|nosec|NOSONAR/;
+
+const isIgnoredLine = (line: string) =>
+	isCommentLine(line) || IGNORE_MARKER.test(line);
+
+/** Whether the rule's extra condition, if it has one, holds for the match. */
+const whenHolds = (
+	rule: SastRule,
+	file: SourceFile,
+	m: RegExpMatchArray,
+	line: string,
+) => {
+	const index = m.index ?? 0;
+	return (
+		!rule.when ||
+		rule.when({
+			match: m[0],
+			args: callArgsAt(file.text, index),
+			line,
+			window: windowAt(file.text, index),
+			text: file.text,
+			path: file.path,
+		})
+	);
+};
+
+const securityFinding = (
+	rule: SastRule,
+	path: string,
+	lineNo: number,
+	line: string,
+): FindingInput => ({
+	ruleId: `code.security/${rule.id}`,
+	title: rule.title,
+	severity: rule.severity,
+	category: "security",
+	message: rule.message,
+	location: { file: path, line: lineNo },
+	evidence: truncate(scrubLine(line)),
+	remediation: rule.remediation,
+	references: [
+		cweUrl(rule.cwe),
+		owaspUrl(rule.owasp),
+		...(rule.references ?? []),
+	],
+	confidence: rule.confidence,
+	tags: [`cwe-${rule.cwe}`, `owasp-${rule.owasp}`],
+});
+
+const scanMatch = (scan: Scan, rule: SastRule, m: RegExpMatchArray) => {
+	const index = m.index ?? 0;
+	if (scan.mask[index]) return; // inside a string, comment or regex
+	const line = fullLineAt(scan.file.text, index);
+	if (isIgnoredLine(line)) return;
+	if (!whenHolds(rule, scan.file, m, line)) return;
+	const lineNo = scan.lineOf(index);
+	const key = `${rule.id}:${lineNo}`;
+	if (scan.seen.has(key)) return;
+	scan.seen.add(key);
+	scan.findings.push(securityFinding(rule, scan.file.path, lineNo, line));
+};
+
+const scanRule = (scan: Scan, rule: SastRule) => {
+	for (const re of rulePatterns(rule)[scan.lang] ?? [])
+		for (const m of scan.file.text.matchAll(re)) scanMatch(scan, rule, m);
+};
+
 /** Runs every SAST rule over one file. Exported for unit tests. */
 export const scanSecurity = (file: SourceFile): FindingInput[] => {
 	const lang = langOf(file.path);
 	if (!lang) return [];
-	const { text, path } = file;
-	const lineOf = lineLocator(text);
-	const mask = nonCodeMask(text, lang);
-	const findings: FindingInput[] = [];
-	const seen = new Set<string>();
-	for (const rule of SAST_RULES) {
-		for (const re of rulePatterns(rule)[lang] ?? []) {
-			for (const m of text.matchAll(re)) {
-				const index = m.index ?? 0;
-				if (mask[index]) continue; // inside a string, comment or regex
-				const line = fullLineAt(text, index);
-				if (isCommentLine(line) || /openaudit-ignore|nosec|NOSONAR/.test(line))
-					continue;
-				if (
-					rule.when &&
-					!rule.when({
-						match: m[0],
-						args: callArgsAt(text, index),
-						line,
-						window: windowAt(text, index),
-						text,
-						path,
-					})
-				)
-					continue;
-				const lineNo = lineOf(index);
-				const key = `${rule.id}:${lineNo}`;
-				if (seen.has(key)) continue;
-				seen.add(key);
-				findings.push({
-					ruleId: `code.security/${rule.id}`,
-					title: rule.title,
-					severity: rule.severity,
-					category: "security",
-					message: rule.message,
-					location: { file: path, line: lineNo },
-					evidence: truncate(scrubLine(line)),
-					remediation: rule.remediation,
-					references: [
-						cweUrl(rule.cwe),
-						owaspUrl(rule.owasp),
-						...(rule.references ?? []),
-					],
-					confidence: rule.confidence,
-					tags: [`cwe-${rule.cwe}`, `owasp-${rule.owasp}`],
-				});
-			}
-		}
-	}
-	return findings;
+	const scan: Scan = {
+		file,
+		lang,
+		lineOf: lineLocator(file.text),
+		mask: nonCodeMask(file.text, lang),
+		seen: new Set<string>(),
+		findings: [],
+	};
+	for (const rule of SAST_RULES) scanRule(scan, rule);
+	return scan.findings;
 };
 
 const shouldScan = (path: string) =>

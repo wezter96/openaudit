@@ -3,11 +3,18 @@
  * spellings, and evaluation against an allow/deny policy.
  */
 
+/** A licence as declared or configured, before it is parsed. */
+export type LicenseText = string;
+/** An SPDX licence id (`MIT`) or exception id (`Classpath-exception-2.0`). */
+export type LicenseId = string;
+/** A policy entry's id, where `*` is the only wildcard. */
+export type GlobPattern = string;
+
 export type LicenseExpr =
 	| {
 			readonly type: "license";
-			readonly id: string;
-			readonly exception?: string;
+			readonly id: LicenseId;
+			readonly exception?: LicenseId;
 	  }
 	| { readonly type: "and" | "or"; readonly args: ReadonlyArray<LicenseExpr> };
 
@@ -87,7 +94,10 @@ const ALIASES: Readonly<Record<string, string>> = {
 const GNU =
 	/^(?:gnu )?(?:(agpl|lgpl|gpl)|(affero |lesser |library |library or lesser )?general public)(?: ?(\d+)(?:\.(\d+))?)?( ?\+| or later| or any later)?(?: only)?$/;
 
-const aliasKey = (s: string) =>
+/** Lowercased text with punctuation and filler words removed. */
+type AliasKey = string;
+
+const aliasKey = (s: LicenseText): AliasKey =>
 	s
 		.toLowerCase()
 		.replace(/[()",]/g, " ")
@@ -98,22 +108,32 @@ const aliasKey = (s: string) =>
 		.replace(/\s+/g, " ")
 		.trim();
 
-const gnuId = (key: string): string | undefined => {
+type GnuFamily = "AGPL" | "LGPL" | "GPL";
+
+/** The GNU licence family named by `agpl`/`lgpl`/`gpl` or its long form. */
+const gnuFamily = (name: AliasKey): GnuFamily => {
+	if (/^a|affero/.test(name)) return "AGPL";
+	return /^l|lesser|library/.test(name) ? "LGPL" : "GPL";
+};
+
+/** The version an unversioned GNU licence starts from. */
+const GNU_FIRST_VERSION: Record<GnuFamily, string> = {
+	AGPL: "3.0",
+	LGPL: "2.0",
+	GPL: "1.0",
+};
+
+const gnuId = (key: AliasKey): LicenseId | undefined => {
 	const m = GNU.exec(key);
 	if (!m) return undefined;
 	const [, short, long, major, minor, later] = m;
-	const family = /^a|affero/.test(short ?? long ?? "")
-		? "AGPL"
-		: /^l|lesser|library/.test(short ?? long ?? "")
-			? "LGPL"
-			: "GPL";
+	const family = gnuFamily(short ?? long ?? "");
 	// An unversioned GPL lets the recipient pick any published version.
-	if (!major)
-		return `${family}-${{ AGPL: "3.0", LGPL: "2.0", GPL: "1.0" }[family]}-or-later`;
+	if (!major) return `${family}-${GNU_FIRST_VERSION[family]}-or-later`;
 	return `${family}-${major}.${minor ?? "0"}-${later ? "or-later" : "only"}`;
 };
 
-const lookupAlias = (raw: string): string | undefined => {
+const lookupAlias = (raw: LicenseText): LicenseId | undefined => {
 	const key = aliasKey(raw);
 	return ALIASES[key] ?? gnuId(key);
 };
@@ -122,7 +142,7 @@ const lookupAlias = (raw: string): string | undefined => {
  * Canonical SPDX id for a common spelling (`Apache 2.0`, `GPLv3`, deprecated
  * `GPL-2.0`); anything unrecognised is returned trimmed, as written.
  */
-export const normaliseLicenseId = (raw: string): string =>
+export const normaliseLicenseId = (raw: LicenseText): LicenseId =>
 	lookupAlias(raw) ?? raw.trim();
 
 /* -------------------------------------------------------------------------- */
@@ -143,60 +163,89 @@ const join = (
 	};
 };
 
+/** Tokens of an expression and the position of the next one to read. */
+interface Cursor {
+	readonly tokens: ReadonlyArray<string>;
+	i: number;
+}
+
+type Reader = (c: Cursor) => LicenseExpr | undefined;
+
+const atOperator = (c: Cursor, name: "AND" | "OR" | "WITH") =>
+	c.tokens[c.i]?.toUpperCase() === name;
+
+const isBracket = (t: LicenseText) => t === "(" || t === ")";
+
+const isIdToken = (t: LicenseText | undefined): t is LicenseText => {
+	if (!t) return false;
+	return !isBracket(t) && !OPERATORS.has(t.toUpperCase());
+};
+
+const readId = (c: Cursor): LicenseId | undefined => {
+	const t = c.tokens[c.i];
+	if (!isIdToken(t)) return undefined;
+	c.i++;
+	return t;
+};
+
+/** `id` or `id WITH exception`. */
+const readLicense: Reader = (c) => {
+	const token = readId(c);
+	if (!token) return undefined;
+	const license = normaliseLicenseId(token);
+	if (!VALID_ID.test(license)) return undefined;
+	if (!atOperator(c, "WITH")) return { type: "license", id: license };
+	c.i++;
+	const exception = readId(c);
+	return exception && VALID_ID.test(exception)
+		? { type: "license", id: license, exception }
+		: undefined;
+};
+
+/** `( expression )`, with the cursor on the opening bracket. */
+const readGroup: Reader = (c) => {
+	c.i++;
+	const inner = readOr(c);
+	if (!inner || c.tokens[c.i] !== ")") return undefined;
+	c.i++;
+	return inner;
+};
+
+const readAtom: Reader = (c) =>
+	c.tokens[c.i] === "(" ? readGroup(c) : readLicense(c);
+
+/** `next (name next)*`, joined into one `and`/`or` node. */
+const readSequence = (
+	c: Cursor,
+	name: "AND" | "OR",
+	next: Reader,
+): LicenseExpr | undefined => {
+	const first = next(c);
+	if (!first) return undefined;
+	const args = [first];
+	while (atOperator(c, name)) {
+		c.i++;
+		const more = next(c);
+		if (!more) return undefined;
+		args.push(more);
+	}
+	return join(name === "AND" ? "and" : "or", args);
+};
+
+const readAnd: Reader = (c) => readSequence(c, "AND", readAtom);
+const readOr: Reader = (c) => readSequence(c, "OR", readAnd);
+
 /** Strict SPDX syntax (operators in any case); `undefined` when malformed. */
-const parseExpression = (raw: string): LicenseExpr | undefined => {
+const parseExpression = (raw: LicenseText): LicenseExpr | undefined => {
 	const tokens = raw.match(/\(|\)|[^\s()]+/g) ?? [];
-	let i = 0;
-	const op = (name: string) => tokens[i]?.toUpperCase() === name;
-	const id = (): string | undefined => {
-		const t = tokens[i];
-		if (!t || t === "(" || t === ")" || OPERATORS.has(t.toUpperCase()))
-			return undefined;
-		i++;
-		return t;
-	};
-	const atom = (): LicenseExpr | undefined => {
-		if (tokens[i] === "(") {
-			i++;
-			const inner = or();
-			if (!inner || tokens[i] !== ")") return undefined;
-			i++;
-			return inner;
-		}
-		const token = id();
-		if (!token) return undefined;
-		const license = normaliseLicenseId(token);
-		if (!VALID_ID.test(license)) return undefined;
-		if (!op("WITH")) return { type: "license", id: license };
-		i++;
-		const exception = id();
-		return exception && VALID_ID.test(exception)
-			? { type: "license", id: license, exception }
-			: undefined;
-	};
-	const sequence =
-		(name: "AND" | "OR", next: () => LicenseExpr | undefined) =>
-		(): LicenseExpr | undefined => {
-			const first = next();
-			if (!first) return undefined;
-			const args = [first];
-			while (op(name)) {
-				i++;
-				const more = next();
-				if (!more) return undefined;
-				args.push(more);
-			}
-			return join(name === "AND" ? "and" : "or", args);
-		};
-	const and = sequence("AND", atom);
-	const or = sequence("OR", and);
 	if (!tokens.length) return undefined;
-	const expr = or();
-	return expr && i === tokens.length ? expr : undefined;
+	const cursor: Cursor = { tokens, i: 0 };
+	const expr = readOr(cursor);
+	return expr && cursor.i === tokens.length ? expr : undefined;
 };
 
 /** Free text such as a Python classifier: the whole string, then its parts. */
-const parseFreeText = (raw: string): LicenseExpr | undefined => {
+const parseFreeText = (raw: LicenseText): LicenseExpr | undefined => {
 	if (raw.split("(").length !== raw.split(")").length) return undefined;
 	const outside = raw.replace(/\([^)]*\)/g, " ");
 	const inside = [...raw.matchAll(/\(([^)]*)\)/g)].map((m) => m[1] ?? "");
@@ -213,7 +262,7 @@ const parseFreeText = (raw: string): LicenseExpr | undefined => {
  * alternatives, as npm's legacy `licenses` arrays and old crates use them).
  * `undefined` when nothing usable can be read.
  */
-export const parseLicense = (raw: string): LicenseExpr | undefined => {
+export const parseLicense = (raw: LicenseText): LicenseExpr | undefined => {
 	const text = raw.trim();
 	if (!text) return undefined;
 	const parsed = parseExpression(text) ?? parseFreeText(text);
@@ -225,17 +274,19 @@ export const parseLicense = (raw: string): LicenseExpr | undefined => {
 		: undefined;
 };
 
-export const formatLicenseExpression = (expr: LicenseExpr): string => {
+export const formatLicenseExpression = (expr: LicenseExpr): LicenseText => {
 	if (expr.type === "license")
 		return expr.exception ? `${expr.id} WITH ${expr.exception}` : expr.id;
 	return expr.args
-		.map((a) =>
-			a.type === "license"
-				? formatLicenseExpression(a)
-				: `(${formatLicenseExpression(a)})`,
-		)
+		.map(formatOperand)
 		.join(expr.type === "and" ? " AND " : " OR ");
 };
+
+/** An operand of AND/OR, bracketed unless it is a single licence. */
+const formatOperand = (a: LicenseExpr): LicenseText =>
+	a.type === "license"
+		? formatLicenseExpression(a)
+		: `(${formatLicenseExpression(a)})`;
 
 /* -------------------------------------------------------------------------- */
 /*                                   Policy                                   */
@@ -243,7 +294,7 @@ export const formatLicenseExpression = (expr: LicenseExpr): string => {
 
 /** A compiled glob; `test` mirrors RegExp so either can be passed around. */
 export interface Glob {
-	readonly test: (value: string) => boolean;
+	readonly test: (value: LicenseText) => boolean;
 }
 
 interface Matcher {
@@ -268,41 +319,41 @@ const PATTERN = /^[A-Za-z0-9*][A-Za-z0-9.+:*-]*$/;
  * O(pattern × value)), not a regex, which `*a*a*…b` would send into
  * catastrophic backtracking.
  */
-export const globMatcher = (glob: string): Glob => {
+export const globMatcher = (glob: GlobPattern): Glob => {
 	const pattern = glob.toLowerCase();
-	return {
-		test: (raw) => {
-			const value = raw.toLowerCase();
-			let p = 0;
-			let v = 0;
-			let star = -1;
-			let resume = 0;
-			while (v < value.length) {
-				if (p < pattern.length && pattern[p] === "*") {
-					star = p++;
-					resume = v;
-				} else if (p < pattern.length && pattern[p] === value[v]) {
-					p++;
-					v++;
-				} else if (star !== -1) {
-					p = star + 1;
-					v = ++resume;
-				} else return false;
-			}
-			while (pattern[p] === "*") p++;
-			return p === pattern.length;
-		},
-	};
+	return { test: (raw) => globMatches(pattern, raw.toLowerCase()) };
 };
 
-const compilePattern = (raw: string): Matcher => {
+const globMatches = (pattern: GlobPattern, value: LicenseText): boolean => {
+	let p = 0;
+	let v = 0;
+	let star = -1;
+	let resume = 0;
+	while (v < value.length) {
+		if (pattern[p] === "*") {
+			star = p++;
+			resume = v;
+		} else if (pattern[p] === value[v]) {
+			p++;
+			v++;
+		} else if (star !== -1) {
+			p = star + 1;
+			v = ++resume;
+		} else return false;
+	}
+	while (pattern[p] === "*") p++;
+	return p === pattern.length;
+};
+
+/** A policy id or exception: an SPDX-like id that may contain `*`. */
+const isPattern = (s: GlobPattern | undefined) =>
+	s === undefined || PATTERN.test(s);
+
+const compilePattern = (raw: LicenseText): Matcher => {
 	const [license = "", exception, ...rest] = raw.trim().split(/\s+WITH\s+/i);
 	const id = license.includes("*") ? license : normaliseLicenseId(license);
-	if (
-		rest.length ||
-		!PATTERN.test(id) ||
-		(exception !== undefined && !PATTERN.test(exception))
-	)
+	const wellFormed = isPattern(id) && isPattern(exception);
+	if (rest.length || !wellFormed)
 		throw new Error(
 			`Licence policy entry "${raw}" must be a single licence id or glob (MIT, GPL-*), optionally with "WITH <exception>"`,
 		);
@@ -337,70 +388,109 @@ const RANK: Record<LicenseStatus, number> = {
 export interface LicenseVerdict {
 	readonly status: LicenseStatus;
 	/** The licences that caused a non-`ok` status. */
-	readonly culprits: ReadonlyArray<string>;
+	readonly culprits: ReadonlyArray<LicenseText>;
 }
 
 /** Placeholders and proprietary markers that grant nothing on their own. */
-const isUnknownId = (id: string) =>
+const isUnknownId = (id: LicenseId) =>
 	/^(NOASSERTION|NONE|UNLICENSED|UNKNOWN|PROPRIETARY|CUSTOM|OTHER|COMMERCIAL)$/i.test(
 		id,
 	) || /^(LicenseRef|DocumentRef)-/i.test(id);
 
 /** An `-or-later` / `+` licence also matches entries for its base version. */
-const idCandidates = (id: string) =>
+const idCandidates = (id: LicenseId) =>
 	id.endsWith("-or-later")
 		? [id, id.replace(/-or-later$/, "-only")]
 		: id.endsWith("+")
 			? [id, id.slice(0, -1)]
 			: [id];
 
-const leafStatus = (
-	id: string,
-	exception: string | undefined,
-	unknown: boolean,
+/** One licence of an expression, as the policy sees it. */
+interface Leaf {
+	/** The id, plus its base version for an `-or-later` / `+` licence. */
+	readonly ids: ReadonlyArray<LicenseId>;
+	readonly exception: LicenseId | undefined;
+	/** A placeholder or unreadable licence: broad entries do not apply. */
+	readonly unknown: boolean;
+}
+
+/** Whether an entry's exception part fits: named exactly, or absent. */
+const exceptionFits = (m: Matcher, leaf: Leaf, withException: boolean) => {
+	if (!withException) return m.exception === undefined;
+	if (m.exception === undefined || leaf.exception === undefined) return false;
+	return m.exception.test(leaf.exception);
+};
+
+const entryMatches = (m: Matcher, leaf: Leaf, withException: boolean) => {
+	if (leaf.unknown && m.broad) return false;
+	if (!exceptionFits(m, leaf, withException)) return false;
+	return leaf.ids.some((x) => m.id.test(x));
+};
+
+const anyMatches = (
+	list: ReadonlyArray<Matcher>,
+	leaf: Leaf,
+	withException: boolean,
+) => list.some((m) => entryMatches(m, leaf, withException));
+
+/** An entry naming the exact exception wins over one for the bare licence. */
+const exceptionStatus = (
+	leaf: Leaf,
 	policy: LicensePolicy,
-): LicenseStatus => {
-	const ids = idCandidates(id);
-	const matches = (list: ReadonlyArray<Matcher>, withException: boolean) =>
-		list.some(
-			(m) =>
-				!(unknown && m.broad) &&
-				(withException
-					? m.exception !== undefined &&
-						exception !== undefined &&
-						m.exception.test(exception)
-					: m.exception === undefined) &&
-				ids.some((x) => m.id.test(x)),
-		);
-	// An entry naming the exact exception wins over one for the bare licence.
-	if (exception) {
-		if (matches(policy.deny, true)) return "denied";
-		if (policy.allow && matches(policy.allow, true)) return "ok";
-	}
-	if (matches(policy.deny, false)) return "denied";
-	if (policy.allow && matches(policy.allow, false)) return "ok";
-	if (unknown) return "unknown";
+): LicenseStatus | undefined => {
+	if (!leaf.exception) return undefined;
+	if (anyMatches(policy.deny, leaf, true)) return "denied";
+	if (policy.allow && anyMatches(policy.allow, leaf, true)) return "ok";
+	return undefined;
+};
+
+const bareStatus = (leaf: Leaf, policy: LicensePolicy): LicenseStatus => {
+	if (anyMatches(policy.deny, leaf, false)) return "denied";
+	if (policy.allow && anyMatches(policy.allow, leaf, false)) return "ok";
+	if (leaf.unknown) return "unknown";
 	return policy.allow ? "not-allowed" : "ok";
 };
 
-const evaluate = (expr: LicenseExpr, policy: LicensePolicy): LicenseVerdict => {
-	if (expr.type === "license") {
-		const status = leafStatus(
-			expr.id,
-			expr.exception,
-			isUnknownId(expr.id),
-			policy,
-		);
-		return {
-			status,
-			culprits: status === "ok" ? [] : [formatLicenseExpression(expr)],
-		};
-	}
-	const parts = expr.args.map((a) => evaluate(a, policy));
+const leafStatus = (
+	id: LicenseId,
+	exception: LicenseId | undefined,
+	unknown: boolean,
+	policy: LicensePolicy,
+): LicenseStatus => {
+	const leaf: Leaf = { ids: idCandidates(id), exception, unknown };
+	return exceptionStatus(leaf, policy) ?? bareStatus(leaf, policy);
+};
+
+const evaluateLicenseLeaf = (
+	expr: Extract<LicenseExpr, { type: "license" }>,
+	policy: LicensePolicy,
+): LicenseVerdict => {
+	const status = leafStatus(
+		expr.id,
+		expr.exception,
+		isUnknownId(expr.id),
+		policy,
+	);
+	return {
+		status,
+		culprits: status === "ok" ? [] : [formatLicenseExpression(expr)],
+	};
+};
+
+/** OR: the consumer may pick the best alternative. AND: every term applies. */
+const combinedStatus = (
+	type: "and" | "or",
+	parts: ReadonlyArray<LicenseVerdict>,
+): LicenseStatus => {
 	const ranks = parts.map((p) => RANK[p.status]);
-	// OR: the consumer may pick the best alternative. AND: every term applies.
-	const rank = expr.type === "or" ? Math.min(...ranks) : Math.max(...ranks);
-	const status = parts.find((p) => RANK[p.status] === rank)?.status ?? "ok";
+	const rank = type === "or" ? Math.min(...ranks) : Math.max(...ranks);
+	return parts.find((p) => RANK[p.status] === rank)?.status ?? "ok";
+};
+
+const evaluate = (expr: LicenseExpr, policy: LicensePolicy): LicenseVerdict => {
+	if (expr.type === "license") return evaluateLicenseLeaf(expr, policy);
+	const parts = expr.args.map((a) => evaluate(a, policy));
+	const status = combinedStatus(expr.type, parts);
 	if (status === "ok") return { status, culprits: [] };
 	const culprits = parts.flatMap((p) =>
 		expr.type === "or" || p.status === status ? p.culprits : [],
@@ -414,7 +504,7 @@ const evaluate = (expr: LicenseExpr, policy: LicensePolicy): LicenseVerdict => {
  * and unreadable licences are `unknown` unless the policy names them.
  */
 export const evaluateLicense = (
-	raw: string,
+	raw: LicenseText,
 	policy: LicensePolicy,
 ): LicenseVerdict => {
 	const expr = parseLicense(raw);

@@ -40,14 +40,14 @@ const ROTATE =
 
 type RuleInfo = Pick<SecretRule, "id" | "title" | "severity" | "remediation">;
 
-/** Adds a finding for `rule` at a character index of the scanned file. */
-type Push = (
-	rule: RuleInfo,
-	index: number,
-	evidence: string,
-	message: string,
-	confidence?: "high" | "medium" | "low",
-) => void;
+/** A likely secret at a character index of the scanned file. */
+interface Hit {
+	readonly rule: RuleInfo;
+	readonly index: number;
+	readonly evidence: string;
+	readonly message: string;
+	readonly confidence?: "high" | "medium" | "low";
+}
 
 /** High-entropy literals assigned to credential-like names. */
 const GENERIC_SECRET: RuleInfo = {
@@ -243,119 +243,155 @@ export const secretEvidence = (
 	return truncate(`${clipped}${redact(secret)}`);
 };
 
-/** Scans one file. Exported for unit tests. */
-export const scanSecrets = (file: SourceFile): FindingInput[] => {
-	const { path, text } = file;
-	const findings: FindingInput[] = [];
-	const lineOf = lineLocator(text);
-	const flaggedLines = new Set<number>();
-	const inTests = isTestPath(path);
-	const push: Push = (rule, index, evidence, message, confidence = "high") => {
-		const lineText = fullLineAt(text, index);
-		if (ALLOW_MARKER.test(lineText)) return;
-		const line = lineOf(index);
-		flaggedLines.add(line);
-		findings.push({
-			ruleId: `code.secrets/${rule.id}`,
-			title: rule.title,
-			severity: rule.severity,
-			category: "security",
-			message,
-			location: { file: path, line },
-			evidence,
-			remediation: rule.remediation,
-			references: REFERENCES,
-			confidence: inTests ? "low" : confidence,
-			tags: TAGS,
-		});
-	};
+/** One file being scanned, and what has been found in it so far. */
+interface Scan {
+	readonly file: SourceFile;
+	readonly lineOf: (index: number) => number;
+	readonly flaggedLines: Set<number>;
+	readonly inTests: boolean;
+	readonly findings: FindingInput[];
+}
 
-	for (const rule of SECRET_RULES) {
-		for (const m of text.matchAll(rule.pattern)) {
-			const secret = m.groups?.secret ?? m.groups?.auth ?? m[0];
-			if (rule.id !== "private-key" && isPlaceholder(secret)) continue;
-			if (rule.minEntropy && shannonEntropy(secret) < rule.minEntropy) continue;
-			if (rule.id === "database-url-password" && /^\$|^:|^%/.test(secret))
-				continue;
-			const index = (m.index ?? 0) + Math.max(0, m[0].indexOf(secret));
-			if (flaggedLines.has(lineOf(index))) continue;
-			push(
-				rule,
-				index,
-				// Only the PEM header, never key material.
-				rule.id === "private-key"
-					? `-----BEGIN ${secret}-----****`
-					: secretEvidence(text, index, secret),
-				`${rule.title} found in ${path}. Anyone with read access to the repository (or its history) can use it.`,
-				rule.confidence,
-			);
-		}
-	}
+const isFlagged = (scan: Scan, index: number) =>
+	scan.flaggedLines.has(scan.lineOf(index));
 
-	const isEnv = ENV_FILE.test(path) && !ENV_TEMPLATE.test(baseName(path));
-	if (isEnv) scanEnvAssignments(text, lineOf, flaggedLines, push);
-
-	for (const m of text.matchAll(GENERIC_ASSIGNMENT)) {
-		const key = m.groups?.key ?? "";
-		const secret = m.groups?.secret ?? "";
-		if (
-			!SECRET_KEY_NAME.test(key) ||
-			/(?:_|-|^)(?:url|path|file|name|id|type|field|label|header|length|min|max|policy|regex|pattern|hash)$/i.test(
-				key,
-			)
-		)
-			continue;
-		if (isPlaceholder(secret) || shannonEntropy(secret) < 3.5) continue;
-		// Identifiers, URLs without credentials, and i18n keys are not secrets.
-		if (
-			/^[a-z]+(?:[._-][a-z]+)+$|^https?:\/\/|^[A-Z_]+$|^[a-z]+[A-Z][A-Za-z]+$/.test(
-				secret,
-			)
-		)
-			continue;
-		const index = (m.index ?? 0) + m[0].lastIndexOf(secret);
-		if (flaggedLines.has(lineOf(index))) continue;
-		push(
-			GENERIC_SECRET,
-			index,
-			secretEvidence(text, index, secret),
-			`\`${key}\` is assigned a high-entropy literal that looks like a credential.`,
-			"medium",
-		);
-	}
-
-	return findings;
+/** Adds a finding for `hit`, unless its line is intentionally ignored. */
+const push = (scan: Scan, hit: Hit) => {
+	const lineText = fullLineAt(scan.file.text, hit.index);
+	if (ALLOW_MARKER.test(lineText)) return;
+	const line = scan.lineOf(hit.index);
+	scan.flaggedLines.add(line);
+	scan.findings.push({
+		ruleId: `code.secrets/${hit.rule.id}`,
+		title: hit.rule.title,
+		severity: hit.rule.severity,
+		category: "security",
+		message: hit.message,
+		location: { file: scan.file.path, line },
+		evidence: hit.evidence,
+		remediation: hit.rule.remediation,
+		references: REFERENCES,
+		confidence: scan.inTests ? "low" : (hit.confidence ?? "high"),
+		tags: TAGS,
+	});
 };
 
-const scanEnvAssignments = (
-	text: string,
-	lineOf: (index: number) => number,
-	flaggedLines: Set<number>,
-	push: Push,
-) => {
-	const re =
-		/^[ \t]*(?:export[ \t]+)?(?<key>[A-Za-z_][\w.]*)[ \t]*=[ \t]*["']?(?<secret>[^"'\s#]{8,})/gm;
-	for (const m of text.matchAll(re)) {
-		const key = m.groups?.key ?? "";
-		const secret = m.groups?.secret ?? "";
-		if (!SECRET_KEY_NAME.test(key)) continue;
-		if (isPlaceholder(secret) || shannonEntropy(secret) < 3) continue;
-		const index = (m.index ?? 0) + m[0].lastIndexOf(secret);
-		if (flaggedLines.has(lineOf(index))) continue;
-		push(
-			GENERIC_SECRET,
-			index,
-			secretEvidence(text, index, secret),
-			`\`${key}\` in a committed environment file holds what looks like a real credential.`,
-			"medium",
-		);
-	}
+/** False for placeholders, low-entropy lookalikes and connection-string variables. */
+const isLikelySecret = (rule: SecretRule, secret: string): boolean => {
+	if (rule.id !== "private-key" && isPlaceholder(secret)) return false;
+	if (rule.minEntropy && shannonEntropy(secret) < rule.minEntropy) return false;
+	if (rule.id === "database-url-password" && /^\$|^:|^%/.test(secret))
+		return false;
+	return true;
+};
+
+const scanRuleMatch = (scan: Scan, rule: SecretRule, m: RegExpMatchArray) => {
+	const groups = m.groups ?? {};
+	const secret = groups.secret ?? groups.auth ?? m[0];
+	if (!isLikelySecret(rule, secret)) return;
+	const index = (m.index ?? 0) + Math.max(0, m[0].indexOf(secret));
+	if (isFlagged(scan, index)) return;
+	push(scan, {
+		rule,
+		index,
+		// Only the PEM header, never key material.
+		evidence:
+			rule.id === "private-key"
+				? `-----BEGIN ${secret}-----****`
+				: secretEvidence(scan.file.text, index, secret),
+		message: `${rule.title} found in ${scan.file.path}. Anyone with read access to the repository (or its history) can use it.`,
+		confidence: rule.confidence,
+	});
+};
+
+/** Flags the generic secret a `key = secret` match assigns. */
+const pushAssignment = (scan: Scan, m: RegExpMatchArray, message: string) => {
+	const { secret = "" } = m.groups ?? {};
+	const index = (m.index ?? 0) + m[0].lastIndexOf(secret);
+	if (isFlagged(scan, index)) return;
+	push(scan, {
+		rule: GENERIC_SECRET,
+		index,
+		evidence: secretEvidence(scan.file.text, index, secret),
+		message,
+		confidence: "medium",
+	});
+};
+
+/** Credential-like names that rather hold a reference to one, or metadata. */
+const NOT_A_SECRET_KEY =
+	/(?:_|-|^)(?:url|path|file|name|id|type|field|label|header|length|min|max|policy|regex|pattern|hash)$/i;
+
+/** Identifiers, URLs without credentials, and i18n keys are not secrets. */
+const NOT_A_SECRET_VALUE =
+	/^[a-z]+(?:[._-][a-z]+)+$|^https?:\/\/|^[A-Z_]+$|^[a-z]+[A-Z][A-Za-z]+$/;
+
+const isCredentialKey = (key: string) =>
+	SECRET_KEY_NAME.test(key) && !NOT_A_SECRET_KEY.test(key);
+
+const scanAssignmentMatch = (scan: Scan, m: RegExpMatchArray) => {
+	const { key = "", secret = "" } = m.groups ?? {};
+	if (!isCredentialKey(key)) return;
+	if (isPlaceholder(secret) || shannonEntropy(secret) < 3.5) return;
+	if (NOT_A_SECRET_VALUE.test(secret)) return;
+	pushAssignment(
+		scan,
+		m,
+		`\`${key}\` is assigned a high-entropy literal that looks like a credential.`,
+	);
+};
+
+const ENV_ASSIGNMENT =
+	/^[ \t]*(?:export[ \t]+)?(?<key>[A-Za-z_][\w.]*)[ \t]*=[ \t]*["']?(?<secret>[^"'\s#]{8,})/gm;
+
+const scanEnvMatch = (scan: Scan, m: RegExpMatchArray) => {
+	const { key = "", secret = "" } = m.groups ?? {};
+	if (!SECRET_KEY_NAME.test(key)) return;
+	if (isPlaceholder(secret) || shannonEntropy(secret) < 3) return;
+	pushAssignment(
+		scan,
+		m,
+		`\`${key}\` in a committed environment file holds what looks like a real credential.`,
+	);
+};
+
+const scanRules = (scan: Scan) => {
+	for (const rule of SECRET_RULES)
+		for (const m of scan.file.text.matchAll(rule.pattern))
+			scanRuleMatch(scan, rule, m);
+};
+
+const scanEnvAssignments = (scan: Scan) => {
+	for (const m of scan.file.text.matchAll(ENV_ASSIGNMENT))
+		scanEnvMatch(scan, m);
+};
+
+const scanAssignments = (scan: Scan) => {
+	for (const m of scan.file.text.matchAll(GENERIC_ASSIGNMENT))
+		scanAssignmentMatch(scan, m);
+};
+
+const isEnvFile = (path: string) =>
+	ENV_FILE.test(path) && !ENV_TEMPLATE.test(baseName(path));
+
+/** Scans one file. Exported for unit tests. */
+export const scanSecrets = (file: SourceFile): FindingInput[] => {
+	const scan: Scan = {
+		file,
+		lineOf: lineLocator(file.text),
+		flaggedLines: new Set<number>(),
+		inTests: isTestPath(file.path),
+		findings: [],
+	};
+	scanRules(scan);
+	if (isEnvFile(file.path)) scanEnvAssignments(scan);
+	scanAssignments(scan);
+	return scan.findings;
 };
 
 /** Committed `.env` files that contain at least one real assignment. */
 const envFileFinding = (file: SourceFile): FindingInput | undefined => {
-	if (!ENV_FILE.test(file.path) || ENV_TEMPLATE.test(baseName(file.path)))
-		return undefined;
+	if (!isEnvFile(file.path)) return undefined;
 	const assignment = /^[ \t]*(?:export[ \t]+)?[A-Za-z_][\w.]*[ \t]*=[ \t]*\S/m;
 	if (!assignment.test(file.text)) return undefined;
 	return {
