@@ -40,8 +40,18 @@ export const parseSiteUrl = (input: string): URL => {
 
 /**
  * Checks the site and resolves its host, refusing it unless every address is
- * public: private, loopback, link-local, CGNAT (100.64.0.0/10, Tailscale),
- * ULA and metadata addresses are all rejected. Returns the URL to audit.
+ * public. `isPrivateAddress` from core rejects private, loopback, link-local
+ * (incl. metadata 169.254.169.254), CGNAT (100.64.0.0/10, Tailscale), 0/8,
+ * multicast and reserved IPv4, and in IPv6 everything outside 2000::/3 (ULA
+ * fc00::/7, link-local, loopback) plus IPv4 embedded in mapped (::ffff:),
+ * NAT64 and 6to4 addresses. Returns the URL to audit, rebuilt from the
+ * checked hostname and path only: no credentials, no port.
+ *
+ * This is defence in depth, not a guarantee: openaudit resolves the host
+ * again and follows redirects, so DNS rebinding or a redirect could still
+ * reach another address. The mini PC firewall is the real boundary: it drops
+ * traffic from the scanner network (172.30.77.0/24) to the LAN, the tailnet
+ * and the host itself.
  */
 export const assertPublicSite = async (
 	input: string,
@@ -55,5 +65,5 @@ export const assertPublicSite = async (
 		throw new ScanError(
 			`refusing to scan ${host}: it resolves to a private or reserved address`,
 		);
-	return url.toString();
+	return `https://${host}${url.pathname}${url.search}`;
 };

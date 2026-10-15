@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { ProcessRunner, RunOptions, RunResult } from "../src/types";
@@ -13,6 +13,8 @@ export interface FakeRepo {
 	readonly auditCode?: number;
 	/** Audits whose target matches this write no reports. */
 	readonly brokenTarget?: RegExp;
+	/** A report a hostile or broken run might leave instead of the real one. */
+	readonly badReport?: "wrong-target" | "not-json" | "symlink";
 }
 
 export interface Call {
@@ -41,10 +43,31 @@ const fakeAudit = (cmd: ReadonlyArray<string>, repo: FakeRepo): RunResult => {
 	const out = cmd[cmd.indexOf("--out") + 1] as string;
 	const target = cmd[cmd.indexOf("--format") - 1] as string;
 	if (!repo.brokenTarget?.test(target)) {
-		writeFileSync(join(out, "openaudit-report.json"), `{"target":"${target}"}`);
+		writeReport(out, target, repo.badReport);
 		writeFileSync(join(out, "openaudit-report.html"), "<html></html>");
 	}
 	return { ...ok(), code: repo.auditCode ?? 1 };
+};
+
+const reportJson = (input: string) =>
+	JSON.stringify({
+		tool: { name: "openaudit", version: "9.8.7" },
+		target: { input, type: input.startsWith("https://") ? "url" : "directory" },
+	});
+
+const writeReport = (
+	out: string,
+	target: string,
+	bad: FakeRepo["badReport"],
+) => {
+	const path = join(out, "openaudit-report.json");
+	if (bad === "not-json") return writeFileSync(path, "{ nope");
+	if (bad === "wrong-target")
+		return writeFileSync(path, reportJson("/elsewhere"));
+	if (bad !== "symlink") return writeFileSync(path, reportJson(target));
+	const planted = join(out, "..", "planted.json");
+	writeFileSync(planted, reportJson(target));
+	symlinkSync(planted, path);
 };
 
 /** A runner that fakes git and openaudit, and records every call. */

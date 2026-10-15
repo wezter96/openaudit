@@ -13,9 +13,12 @@ export interface ScannerClient {
 	readonly report: (scanId: string, result: JobResult) => Promise<void>;
 }
 
+/** A child process environment: built by `childEnv`, never `process.env`. */
+export type ChildEnv = Readonly<Record<string, string>>;
+
 export interface RunOptions {
 	readonly cwd?: string;
-	readonly env?: Record<string, string | undefined>;
+	readonly env: ChildEnv;
 	readonly timeoutMs: number;
 }
 
@@ -31,3 +34,9 @@ export type ProcessRunner = (
 	cmd: ReadonlyArray<string>,
 	options: RunOptions,
 ) => Promise<RunResult>;
+
+/** How one job runs commands: the runner and the job's minimal environment. */
+export interface Exec {
+	readonly run: ProcessRunner;
+	readonly env: ChildEnv;
+}

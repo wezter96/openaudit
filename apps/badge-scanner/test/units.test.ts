@@ -9,7 +9,12 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { auditArgs, parseCommand, parseVersion } from "../src/audit";
+import {
+	auditArgs,
+	isReportOf,
+	parseCommand,
+	parseVersion,
+} from "../src/audit";
 import { readConfig } from "../src/config";
 import { publicError, ScanError } from "../src/errors";
 import { bunRunner } from "../src/process";
@@ -23,6 +28,34 @@ describe("openaudit command", () => {
 			"bun",
 			"apps/cli/src/bin.ts",
 		]);
+	});
+
+	test("a site scan never reads a config", () => {
+		expect(auditArgs(["openaudit"], "https://example.com/", "/w/out")).toEqual([
+			"openaudit",
+			"https://example.com/",
+			"--format",
+			"json,html",
+			"--out",
+			"/w/out",
+			"--no-config",
+		]);
+	});
+
+	test("accepts only a report of the exact target", () => {
+		const report = (input: string, type: string, name = "openaudit") =>
+			JSON.stringify({ tool: { name }, target: { input, type } });
+		expect(isReportOf(report("/w/repo", "directory"), "/w/repo")).toBe(true);
+		expect(isReportOf(report("https://a.se/", "url"), "https://a.se/")).toBe(
+			true,
+		);
+		expect(isReportOf(report("/w/other", "directory"), "/w/repo")).toBe(false);
+		expect(isReportOf(report("/w/repo", "url"), "/w/repo")).toBe(false);
+		expect(isReportOf(report("/w/repo", "directory", "x"), "/w/repo")).toBe(
+			false,
+		);
+		expect(isReportOf("{ not json", "/w/repo")).toBe(false);
+		expect(isReportOf("null", "/w/repo")).toBe(false);
 	});
 
 	test("audits with JSON and HTML into the out dir", () => {
@@ -99,8 +132,20 @@ describe("workdir", () => {
 });
 
 describe("bunRunner", () => {
+	test("gives the child only the env it is handed", async () => {
+		const r = await bunRunner(["/usr/bin/env"], {
+			env: { PATH: "/usr/bin:/bin", TMPDIR: "/w/tmp" },
+			timeoutMs: 5_000,
+		});
+		expect(r.stdout.trim().split("\n").sort()).toEqual([
+			"PATH=/usr/bin:/bin",
+			"TMPDIR=/w/tmp",
+		]);
+	});
+
 	test("captures output and the exit code", async () => {
 		const r = await bunRunner(["sh", "-c", "echo hi; echo err >&2; exit 3"], {
+			env: { PATH: process.env.PATH ?? "" },
 			timeoutMs: 5_000,
 		});
 		expect(r).toEqual({
@@ -114,6 +159,7 @@ describe("bunRunner", () => {
 	test("kills the process group on timeout", async () => {
 		const started = Date.now();
 		const r = await bunRunner(["sh", "-c", "sleep 30 & sleep 30"], {
+			env: { PATH: process.env.PATH ?? "" },
 			timeoutMs: 200,
 		});
 		expect(r.timedOut).toBe(true);

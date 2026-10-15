@@ -35,8 +35,20 @@ const makeScannerApi = (apiUrl: string) =>
 
 type ScannerApi = Effect.Success<ReturnType<typeof makeScannerApi>>;
 
+/**
+ * Runs one API call. Redirects are never followed (a 3xx fails the call),
+ * so the bearer token only ever goes to `API_URL` itself (https, or http on
+ * localhost; see config.ts).
+ */
 const call = <A, E>(effect: Effect.Effect<A, E>): Promise<A> =>
-	Effect.runPromise(effect.pipe(Effect.timeout(REQUEST_TIMEOUT)));
+	Effect.runPromise(
+		effect.pipe(
+			Effect.timeout(REQUEST_TIMEOUT),
+			Effect.provideService(FetchHttpClient.RequestInit, {
+				redirect: "manual",
+			}),
+		),
+	);
 
 const adapt = (api: ScannerApi): ScannerClient => ({
 	claim: async () => (await call(api.claim())).job,

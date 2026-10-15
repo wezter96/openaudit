@@ -51,19 +51,29 @@ describe("cloneArgs", () => {
 
 describe("environment", () => {
 	test("git and openaudit never see secrets", () => {
-		const env = childEnv({
+		const env = childEnv("/w/tmp", {
 			PATH: "/usr/bin",
 			HOME: "/home/bun",
+			LANG: "C.UTF-8",
 			SCANNER_TOKEN: "s3cret",
 			API_URL: "https://openaudit.se",
 			ANTHROPIC_API_KEY: "sk-ant",
 			GITHUB_TOKEN: "ghp",
+			AWS_ACCESS_KEY_ID: "AKIA",
+			DATABASE_URL: "postgres://u:p@db",
+			TMPDIR: "/var/shared",
 		});
-		expect(env).toEqual({ PATH: "/usr/bin", HOME: "/home/bun" });
+		expect(env).toEqual({
+			PATH: "/usr/bin",
+			HOME: "/home/bun",
+			LANG: "C.UTF-8",
+			TMPDIR: "/w/tmp",
+		});
 	});
 
 	test("git runs without system or global config and without prompts", () => {
-		const env = gitEnv();
+		const env = gitEnv(childEnv("/w/tmp", { PATH: "/usr/bin" }));
+		expect(env.PATH).toBe("/usr/bin");
 		expect(env.GIT_CONFIG_NOSYSTEM).toBe("1");
 		expect(env.GIT_CONFIG_GLOBAL).toBe("/dev/null");
 		expect(env.GIT_TERMINAL_PROMPT).toBe("0");

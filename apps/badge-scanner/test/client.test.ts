@@ -13,6 +13,7 @@ const JOB = {
 
 const seen: Array<{ path: string; auth: string | null; body: string }> = [];
 let nextJob: typeof JOB | null = JOB;
+let redirect = false;
 
 const server = Bun.serve({
 	port: 0,
@@ -29,6 +30,8 @@ const server = Bun.serve({
 				{ _tag: "Unauthorized", message: "no" },
 				{ status: 401 },
 			);
+		if (path === "/api/scanner/claim" && redirect)
+			return Response.redirect("https://evil.example/steal", 307);
 		if (path === "/api/scanner/claim") return Response.json({ job: nextJob });
 		if (path === `/api/scanner/jobs/${SCAN_ID}`)
 			return new Response(null, { status: 204 });
@@ -67,6 +70,15 @@ describe("makeScannerClient", () => {
 			status: "failed",
 			error: "verification file missing",
 		});
+	});
+
+	test("never follows a redirect with the token", async () => {
+		redirect = true;
+		try {
+			await expect((await client()).claim()).rejects.toBeDefined();
+		} finally {
+			redirect = false;
+		}
 	});
 
 	test("rejects when the token is wrong", async () => {

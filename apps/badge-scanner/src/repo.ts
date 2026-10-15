@@ -3,8 +3,7 @@ import { join } from "node:path";
 import { GIT_HARDENING_ENV } from "@openaudit/core/git";
 
 import { lastLine, ScanError } from "./errors";
-import { childEnv } from "./process";
-import type { ProcessRunner } from "./types";
+import type { ChildEnv, Exec } from "./types";
 
 export const CLONE_TIMEOUT_MS = 5 * 60_000;
 const GIT_TIMEOUT_MS = 30_000;
@@ -19,8 +18,8 @@ const REPO_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9._-]+$/;
  * git with no system or global config, no prompts, no hooks, no fsmonitor,
  * and https as the only transport (submodules and redirects included).
  */
-export const gitEnv = (): Record<string, string> => ({
-	...childEnv(),
+export const gitEnv = (env: ChildEnv): ChildEnv => ({
+	...env,
 	...GIT_HARDENING_ENV,
 	GIT_CONFIG_NOSYSTEM: "1",
 	GIT_CONFIG_GLOBAL: "/dev/null",
@@ -56,12 +55,12 @@ export const cloneArgs = (repo: string, dir: string): string[] => {
 
 /** Shallow-clones the default branch into `dir`, which must not exist yet. */
 export const cloneRepo = async (
-	run: ProcessRunner,
+	exec: Exec,
 	repo: string,
 	dir: string,
 ): Promise<void> => {
-	const result = await run(cloneArgs(repo, dir), {
-		env: gitEnv(),
+	const result = await exec.run(cloneArgs(repo, dir), {
+		env: gitEnv(exec.env),
 		timeoutMs: CLONE_TIMEOUT_MS,
 	});
 	if (result.timedOut) throw new ScanError("git clone timed out");
@@ -70,13 +69,10 @@ export const cloneRepo = async (
 };
 
 /** The commit the clone checked out. */
-export const headCommit = async (
-	run: ProcessRunner,
-	dir: string,
-): Promise<string> => {
-	const result = await run(
+export const headCommit = async (exec: Exec, dir: string): Promise<string> => {
+	const result = await exec.run(
 		["git", ...GIT_FLAGS, "-C", dir, "rev-parse", "HEAD"],
-		{ env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS },
+		{ env: gitEnv(exec.env), timeoutMs: GIT_TIMEOUT_MS },
 	);
 	const sha = result.stdout.trim();
 	if (result.code !== 0 || !/^[0-9a-f]{40,64}$/.test(sha))

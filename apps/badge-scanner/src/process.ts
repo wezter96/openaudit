@@ -1,22 +1,40 @@
-import type { ProcessRunner, RunOptions, RunResult } from "./types";
-
-/** Environment names a scanned target must never see. */
-const SECRET_ENV =
-	/TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API_KEY|PRIVATE_KEY|^API_URL$/i;
-
-const isPassedOn = (entry: [string, string | undefined]) =>
-	entry[1] !== undefined && !SECRET_ENV.test(entry[0]);
+import type { ChildEnv, ProcessRunner, RunOptions, RunResult } from "./types";
 
 /**
- * The scanner's environment without its secrets. git and openaudit run on
- * untrusted repositories, so neither gets `SCANNER_TOKEN` or any other key.
+ * The only variables a child inherits: the basics, plus the non-secret tool
+ * settings the openaudit image sets (guarddog's cache, Go's toolchain pin,
+ * the browser path). Everything else, `SCANNER_TOKEN` included, stays here.
+ */
+export const PASSED_ENV: ReadonlyArray<string> = [
+	"PATH",
+	"HOME",
+	"LANG",
+	"LC_ALL",
+	"TZ",
+	"GUARDDOG_TOP_PACKAGES_CACHE_LOCATION",
+	"GOTOOLCHAIN",
+	"CHROME_PATH",
+	"PUPPETEER_EXECUTABLE_PATH",
+	"PUPPETEER_SKIP_DOWNLOAD",
+	"npm_config_update_notifier",
+];
+
+/**
+ * An explicit, minimal environment for git and openaudit, which run on
+ * untrusted repositories (and so does every tool openaudit starts). `tmp`
+ * becomes TMPDIR, inside the job's own temp dir.
  */
 export const childEnv = (
+	tmp: string,
 	env: Record<string, string | undefined> = process.env,
-): Record<string, string> =>
-	Object.fromEntries(
-		Object.entries(env).filter(isPassedOn) as Array<[string, string]>,
-	);
+): ChildEnv => {
+	const out: Record<string, string> = {};
+	for (const name of PASSED_ENV) {
+		const value = env[name];
+		if (value !== undefined) out[name] = value;
+	}
+	return { ...out, TMPDIR: tmp };
+};
 
 /** Kills the whole process group, so tools openaudit started die with it. */
 const killGroup = (pid: number) => {
@@ -37,7 +55,7 @@ export const bunRunner: ProcessRunner = async (
 ): Promise<RunResult> => {
 	const proc = Bun.spawn([...cmd], {
 		cwd: options.cwd,
-		env: options.env ?? childEnv(),
+		env: { ...options.env },
 		stdin: "ignore",
 		stdout: "pipe",
 		stderr: "pipe",

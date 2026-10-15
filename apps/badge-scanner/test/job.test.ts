@@ -121,6 +121,33 @@ describe("runJob", () => {
 		expect(result.error?.length).toBe(500);
 	});
 
+	test.each(["wrong-target", "not-json", "symlink"] as const)(
+		"fails on a %s report",
+		async (badReport) => {
+			const result = await runJob(
+				JOB,
+				deps({ badgeFile: "oa-code-42", badReport }),
+			);
+			expect(result.status).toBe("failed");
+			expect(result.error).toStartWith("openaudit");
+		},
+	);
+
+	test("children get a minimal env with TMPDIR in the job's dir", async () => {
+		const calls: Call[] = [];
+		process.env.SCANNER_TOKEN = "s3cret-token";
+		try {
+			await runJob(JOB, deps({ badgeFile: "oa-code-42" }, calls));
+		} finally {
+			delete process.env.SCANNER_TOKEN;
+		}
+		expect(calls.length).toBeGreaterThan(3);
+		for (const { options } of calls) {
+			expect(JSON.stringify(options.env)).not.toContain("s3cret-token");
+			expect(options.env.TMPDIR).toStartWith(join(base, "oa-badge-"));
+		}
+	});
+
 	test("always removes its temp dir", async () => {
 		await runJob(JOB, deps({ badgeFile: "oa-code-42" }));
 		await runJob(JOB, deps({ cloneFails: true }));

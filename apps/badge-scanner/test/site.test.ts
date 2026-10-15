@@ -54,10 +54,26 @@ describe("assertPublicSite", () => {
 		["IPv6 loopback", "::1"],
 		["IPv4-mapped private", "::ffff:10.0.0.1"],
 		["unspecified", "0.0.0.0"],
+		["this-network", "0.1.2.3"],
+		["IPv6 link-local", "fe80::1"],
+		["IPv6 ULA fc00::/7", "fc00::1"],
+		["NAT64 private", "64:ff9b::a00:1"],
+		["6to4 private", "2002:a00:1::1"],
+		["IPv4-mapped metadata", "::ffff:169.254.169.254"],
+		["Teredo", "2001:0:4136:e378:8000:63bf:3fff:fdd2"],
 	])("refuses a host that resolves to %s", async (_, address) => {
 		await expect(
 			assertPublicSite("https://example.com", resolvesTo(address)),
 		).rejects.toThrow("private or reserved");
+	});
+
+	test("scans the checked hostname and path only", async () => {
+		await expect(
+			assertPublicSite(
+				"https://Example.COM./docs?lang=en#top",
+				resolvesTo("93.184.215.14"),
+			),
+		).resolves.toBe("https://example.com/docs?lang=en");
 	});
 
 	test("refuses a host with one public and one private address", async () => {

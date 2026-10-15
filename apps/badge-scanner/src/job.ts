@@ -8,9 +8,10 @@ import {
 	SITE_TIMEOUT_MS,
 } from "./audit";
 import { publicError, ScanError } from "./errors";
+import { childEnv } from "./process";
 import { cloneRepo, hasVerificationFile, headCommit } from "./repo";
 import { assertPublicSite, dnsResolver, type Resolver } from "./site";
-import type { Job, JobResult, ProcessRunner, ReportPair } from "./types";
+import type { Exec, Job, JobResult, ProcessRunner, ReportPair } from "./types";
 import { type Workdir, withWorkdir } from "./workdir";
 
 /** What the Worker accepts, less room for the JSON envelope and escaping. */
@@ -25,6 +26,12 @@ export interface JobDeps {
 	readonly tmpBase?: string;
 	/** Strings that must never appear in a reported error. */
 	readonly secrets?: ReadonlyArray<string>;
+}
+
+/** One job's deps plus its workdir and the minimal env its children get. */
+interface JobRun extends JobDeps {
+	readonly exec: Exec;
+	readonly workdir: Workdir;
 }
 
 type SiteOutcome = { site?: ReportPair; error?: string };
@@ -43,59 +50,48 @@ const fitSite = (codebase: ReportPair, outcome: SiteOutcome): SiteOutcome => {
 };
 
 /** Clones the repo, checks the verification file and records the commit. */
-const checkout = async (job: Job, deps: JobDeps, workdir: Workdir) => {
-	await cloneRepo(deps.run, job.repo, workdir.repo);
+const checkout = async (job: Job, { exec, workdir }: JobRun) => {
+	await cloneRepo(exec, job.repo, workdir.repo);
 	if (!(await hasVerificationFile(workdir.repo, job.code)))
 		throw new ScanError("verification file missing");
-	return headCommit(deps.run, workdir.repo);
+	return headCommit(exec, workdir.repo);
 };
 
 /**
  * The site audit. A failure here is reported next to a good codebase scan
  * rather than failing it: the repo badge does not depend on the site.
  */
-const scanSite = async (
-	site: string,
-	deps: JobDeps,
-	workdir: Workdir,
-): Promise<SiteOutcome> => {
+const scanSite = async (site: string, ctx: JobRun): Promise<SiteOutcome> => {
 	try {
-		const target = await assertPublicSite(site, deps.resolve ?? dnsResolver);
-		const reports = await runAudit(deps.run, {
-			command: deps.openaudit,
+		const target = await assertPublicSite(site, ctx.resolve ?? dnsResolver);
+		const reports = await runAudit(ctx.exec, {
+			command: ctx.openaudit,
 			target,
-			out: workdir.siteOut,
-			cwd: workdir.root,
+			out: ctx.workdir.siteOut,
+			cwd: ctx.workdir.root,
 			timeoutMs: SITE_TIMEOUT_MS,
 			label: "site",
 		});
 		return { site: reports };
 	} catch (cause) {
 		return {
-			error: `site: ${publicError(cause, deps.secrets ?? [])}`,
+			error: `site: ${publicError(cause, ctx.secrets ?? [])}`,
 		};
 	}
 };
 
-const scan = async (
-	job: Job,
-	deps: JobDeps,
-	workdir: Workdir,
-): Promise<JobResult> => {
-	const commit = await checkout(job, deps, workdir);
-	const openauditVersionText = await openauditVersion(deps.run, deps.openaudit);
-	const codebase = await runAudit(deps.run, {
-		command: deps.openaudit,
-		target: workdir.repo,
-		out: workdir.codebaseOut,
-		cwd: workdir.root,
+const scan = async (job: Job, ctx: JobRun): Promise<JobResult> => {
+	const commit = await checkout(job, ctx);
+	const openauditVersionText = await openauditVersion(ctx.exec, ctx.openaudit);
+	const codebase = await runAudit(ctx.exec, {
+		command: ctx.openaudit,
+		target: ctx.workdir.repo,
+		out: ctx.workdir.codebaseOut,
+		cwd: ctx.workdir.root,
 		timeoutMs: CODEBASE_TIMEOUT_MS,
 		label: "codebase",
 	});
-	const site = fitSite(
-		codebase,
-		job.site ? await scanSite(job.site, deps, workdir) : {},
-	);
+	const site = fitSite(codebase, job.site ? await scanSite(job.site, ctx) : {});
 	return {
 		status: "ok",
 		commit,
@@ -112,7 +108,12 @@ const scan = async (
 export const runJob = async (job: Job, deps: JobDeps): Promise<JobResult> => {
 	try {
 		return await withWorkdir(
-			(workdir) => scan(job, deps, workdir),
+			(workdir) =>
+				scan(job, {
+					...deps,
+					workdir,
+					exec: { run: deps.run, env: childEnv(workdir.tmp) },
+				}),
 			deps.tmpBase,
 		);
 	} catch (cause) {
