@@ -11,7 +11,7 @@ import {
 } from "./xml-tree";
 
 export { decodeProtoXml } from "./axml-proto";
-export { parseXmlText, type XmlElement } from "./xml-tree";
+export { parseXmlText, type XmlElement, type XmlName } from "./xml-tree";
 
 export const ANDROID_NS = "http://schemas.android.com/apk/res/android";
 

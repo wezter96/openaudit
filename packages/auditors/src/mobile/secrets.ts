@@ -10,7 +10,11 @@ import {
 import { Effect } from "effect";
 
 import { shannonEntropy } from "../codebase/util";
-import { loadMobileTarget } from "./shared";
+import {
+	loadMobileTarget,
+	type MobileArtifact,
+	type MobileSource,
+} from "./shared";
 
 const MASVS_STORAGE = "https://mas.owasp.org/MASVS/05-MASVS-STORAGE/";
 const CWE_798 = "https://cwe.mitre.org/data/definitions/798.html";
@@ -157,37 +161,50 @@ export interface ScanOptions {
 	readonly binary?: boolean;
 }
 
-/** Scans one file's content for hardcoded secrets. Exported for tests. */
-export const scanForSecrets = (
-	text: string,
-	file: string,
-	options: ScanOptions = {},
-): FindingInput[] => {
-	const findings: FindingInput[] = [];
-	const seen = new Set<string>();
-	const where = (index: number) =>
-		options.binary ? { file } : { file, line: lineOf(text, index) };
-	const push = (
-		key: string,
-		f: Omit<FindingInput, "category" | "location"> & {
-			readonly index: number;
-			readonly category?: Category;
-		},
-	) => {
-		if (seen.has(key)) return;
-		seen.add(key);
-		const { index, category, ...rest } = f;
-		findings.push({
+/** A finding before its location is resolved from the match index. */
+type SecretHit = Omit<FindingInput, "category" | "location"> & {
+	readonly index: number;
+	readonly category?: Category;
+};
+
+/** Findings for one file, each secret or host reported once. */
+class SecretScan {
+	readonly findings: FindingInput[] = [];
+	private readonly seen = new Set<string>();
+
+	constructor(
+		readonly text: string,
+		readonly file: string,
+		readonly binary: boolean | undefined,
+	) {}
+
+	has(key: string): boolean {
+		return this.seen.has(key);
+	}
+
+	push(key: string, hit: SecretHit) {
+		if (this.seen.has(key)) return;
+		this.seen.add(key);
+		const { index, category, ...rest } = hit;
+		this.findings.push({
 			...rest,
 			category: category ?? "security",
-			location: where(index),
+			location: this.where(index),
 		});
-	};
+	}
 
-	for (const rule of RULES) {
-		for (const m of text.matchAll(rule.re)) {
+	private where(index: number) {
+		return this.binary
+			? { file: this.file }
+			: { file: this.file, line: lineOf(this.text, index) };
+	}
+}
+
+const scanTokenRules = (scan: SecretScan) => {
+	for (const rule of RULES)
+		for (const m of scan.text.matchAll(rule.re)) {
 			const secret = m[1] ?? m[0];
-			push(secret, {
+			scan.push(secret, {
 				ruleId: `mobile.secrets/${rule.id}`,
 				title: rule.title,
 				severity: rule.severity,
@@ -201,12 +218,13 @@ export const scanForSecrets = (
 				index: m.index ?? 0,
 			});
 		}
-	}
+};
 
-	const firebaseConfig = FIREBASE_CONFIG_RE.test(file);
-	for (const m of text.matchAll(GOOGLE_KEY_RE)) {
+const scanGoogleKeys = (scan: SecretScan) => {
+	const firebaseConfig = FIREBASE_CONFIG_RE.test(scan.file);
+	for (const m of scan.text.matchAll(GOOGLE_KEY_RE)) {
 		const key = m[1] ?? m[0];
-		push(key, {
+		scan.push(key, {
 			ruleId: "mobile.secrets/google-api-key",
 			title: "Google API key in app",
 			severity: firebaseConfig ? "info" : "low",
@@ -224,10 +242,12 @@ export const scanForSecrets = (
 			index: m.index ?? 0,
 		});
 	}
+};
 
-	for (const m of text.matchAll(FIREBASE_DB_RE)) {
+const scanFirebaseUrls = (scan: SecretScan) => {
+	for (const m of scan.text.matchAll(FIREBASE_DB_RE)) {
 		const url = m[1] ?? m[0];
-		push(url, {
+		scan.push(url, {
 			ruleId: "mobile.secrets/firebase-database-url",
 			title: "Firebase Realtime Database URL",
 			severity: "info",
@@ -245,22 +265,23 @@ export const scanForSecrets = (
 			index: m.index ?? 0,
 		});
 	}
+};
 
-	if (options.binary) return findings;
+/** Values too short, placeholder-like, already covered or too regular to report. */
+const unlikelySecret = (scan: SecretScan, value: string) =>
+	value.length < 16 ||
+	scan.has(value) ||
+	PLACEHOLDER.test(value) ||
+	/^AIza|^https?:/.test(value) ||
+	entropy(value) < 3.5;
 
-	for (const re of GENERIC_RES) {
-		for (const m of text.matchAll(re)) {
+const scanGenericSecrets = (scan: SecretScan) => {
+	for (const re of GENERIC_RES)
+		for (const m of scan.text.matchAll(re)) {
 			const name = m[1] ?? "";
 			const value = (m[2] ?? "").replace(/^["']|["']$/g, "");
-			if (
-				value.length < 16 ||
-				seen.has(value) ||
-				PLACEHOLDER.test(value) ||
-				/^AIza|^https?:/.test(value) ||
-				entropy(value) < 3.5
-			)
-				continue;
-			push(value, {
+			if (unlikelySecret(scan, value)) continue;
+			scan.push(value, {
 				ruleId: "mobile.secrets/generic-secret",
 				title: "Possible hardcoded secret",
 				severity: "medium",
@@ -274,20 +295,26 @@ export const scanForSecrets = (
 				index: m.index ?? 0,
 			});
 		}
-	}
+};
 
+const PRIVATE_NETWORK = /^(192\.168|172\.(1[6-9]|2\d|3[01]))\./;
+
+/** Hosts that are local, private, well-known schema hosts or already reported. */
+const ignoredHost = (scan: SecretScan, host: string) =>
+	!host.includes(".") ||
+	IGNORED_HOSTS.test(host) ||
+	PRIVATE_NETWORK.test(host) ||
+	scan.has(`http:${host}`);
+
+const MAX_CLEARTEXT_HOSTS = 10;
+
+const scanCleartextEndpoints = (scan: SecretScan) => {
 	let httpCount = 0;
-	for (const m of text.matchAll(HTTP_RE)) {
+	for (const m of scan.text.matchAll(HTTP_RE)) {
 		const host = (m[1] ?? "").toLowerCase().replace(/\.$/, "");
-		if (
-			!host.includes(".") ||
-			IGNORED_HOSTS.test(host) ||
-			/^(192\.168|172\.(1[6-9]|2\d|3[01]))\./.test(host) ||
-			seen.has(`http:${host}`)
-		)
-			continue;
-		if (++httpCount > 10) break;
-		push(`http:${host}`, {
+		if (ignoredHost(scan, host)) continue;
+		if (++httpCount > MAX_CLEARTEXT_HOSTS) break;
+		scan.push(`http:${host}`, {
 			ruleId: "mobile.secrets/cleartext-endpoint",
 			title: "Cleartext HTTP endpoint",
 			severity: "low",
@@ -304,8 +331,22 @@ export const scanForSecrets = (
 			index: m.index ?? 0,
 		});
 	}
+};
 
-	return findings;
+/** Scans one file's content for hardcoded secrets. Exported for tests. */
+export const scanForSecrets = (
+	text: string,
+	file: string,
+	options: ScanOptions = {},
+): FindingInput[] => {
+	const scan = new SecretScan(text, file, options.binary);
+	scanTokenRules(scan);
+	scanGoogleKeys(scan);
+	scanFirebaseUrls(scan);
+	if (options.binary) return scan.findings;
+	scanGenericSecrets(scan);
+	scanCleartextEndpoints(scan);
+	return scan.findings;
 };
 
 /* --------------------------------- targets --------------------------------- */
@@ -347,6 +388,36 @@ const SOURCE_RE =
 const decode = (bytes: Uint8Array, kind: "text" | "binary") =>
 	new TextDecoder(kind === "binary" ? "latin1" : "utf-8").decode(bytes);
 
+const artifactSecrets = (target: MobileArtifact): FindingInput[] => {
+	const classify = target.type === "ipa" ? iosEntry : androidEntry;
+	const entries = target.extract(
+		(name, info) =>
+			info.originalSize <= MAX_ENTRY_BYTES && classify(name) !== undefined,
+	);
+	return Object.entries(entries).flatMap(([name, bytes]) => {
+		const kind = classify(name);
+		if (!kind) return [];
+		return scanForSecrets(decode(bytes, kind), `${target.file}!${name}`, {
+			binary: kind === "binary",
+		});
+	});
+};
+
+const sourceSecrets = (target: MobileSource) =>
+	Effect.gen(function* () {
+		const files = target.files.filter((f) => SOURCE_RE.test(f));
+		if (files.length === 0)
+			return yield* skip("No mobile configuration files found");
+		const findings: FindingInput[] = [];
+		for (const file of files) {
+			const text = yield* target.ws
+				.readText(file)
+				.pipe(Effect.orElseSucceed(() => undefined));
+			if (text !== undefined) findings.push(...scanForSecrets(text, file));
+		}
+		return findings;
+	});
+
 /** Hardcoded credentials and insecure endpoints in mobile apps and their config. */
 export const mobileSecrets = defineAuditor({
 	id: "mobile.secrets",
@@ -359,36 +430,7 @@ export const mobileSecrets = defineAuditor({
 	run: (ctx) =>
 		Effect.gen(function* () {
 			const target = yield* loadMobileTarget(ctx);
-			const findings: FindingInput[] = [];
-
-			if (target.kind === "artifact") {
-				const classify = target.type === "ipa" ? iosEntry : androidEntry;
-				const entries = target.extract(
-					(name, info) =>
-						info.originalSize <= MAX_ENTRY_BYTES &&
-						classify(name) !== undefined,
-				);
-				for (const [name, bytes] of Object.entries(entries)) {
-					const kind = classify(name);
-					if (!kind) continue;
-					findings.push(
-						...scanForSecrets(decode(bytes, kind), `${target.file}!${name}`, {
-							binary: kind === "binary",
-						}),
-					);
-				}
-				return findings;
-			}
-
-			const files = target.files.filter((f) => SOURCE_RE.test(f));
-			if (files.length === 0)
-				return yield* skip("No mobile configuration files found");
-			for (const file of files) {
-				const text = yield* target.ws
-					.readText(file)
-					.pipe(Effect.orElseSucceed(() => undefined));
-				if (text !== undefined) findings.push(...scanForSecrets(text, file));
-			}
-			return findings;
+			if (target.kind === "artifact") return artifactSecrets(target);
+			return yield* sourceSecrets(target);
 		}),
 });
