@@ -55,18 +55,19 @@ const stripUrlUserinfo = (s: string): string => {
 /** scp-like `user:password@host:path` (the password may hold `/`). */
 const SCP_WORD = /[^\s"'()<>]+/g;
 
+/** A `user:password@` prefix: a colon inside a non-empty user part. */
+const hasScpPassword = (colon: number, at: number) =>
+	colon > 0 && colon < at - 1;
+
+const stripScpWord = (word: string): string => {
+	if (word.includes("://")) return word;
+	const at = word.indexOf("@");
+	if (at <= 0 || !hasScpPassword(word.indexOf(":"), at)) return word;
+	return /^[\w.-]+[:/]/.test(word.slice(at + 1)) ? word.slice(at + 1) : word;
+};
+
 const stripScpUserinfo = (s: string): string =>
-	s.replace(SCP_WORD, (word) => {
-		if (word.includes("://")) return word;
-		const at = word.indexOf("@");
-		const colon = word.indexOf(":");
-		return at > 0 &&
-			colon > 0 &&
-			colon < at - 1 &&
-			/^[\w.-]+[:/]/.test(word.slice(at + 1))
-			? word.slice(at + 1)
-			: word;
-	});
+	s.replace(SCP_WORD, stripScpWord);
 
 const mask = (token: string) => redact(token);
 

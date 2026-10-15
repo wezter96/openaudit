@@ -26,77 +26,92 @@ const GIT_REPOSITORY_TYPES = new Set([
 	"perforce",
 ]);
 
+/** composer.json `repositories`, as a list or keyed by name. */
+const repositoryList = (repositories: unknown): unknown[] => {
+	if (Array.isArray(repositories)) return repositories;
+	return isRecord(repositories) ? Object.values(repositories) : [];
+};
+
+/** The finding for one composer.json repository, if it has a problem. */
+const repositoryFinding = (
+	file: SourceFile,
+	lineOf: (needle: string) => number | undefined,
+	repo: Record<string, unknown>,
+): FindingInput | undefined => {
+	const type = (str(repo.type) ?? "").toLowerCase();
+	const url = str(repo.url);
+	if (!url) return undefined;
+	const site = { file: file.path, line: lineOf(`"${url}"`) };
+	const evidence = `${type}: ${displayUrl(url)}`;
+	if (isInsecureUrl(url))
+		return insecureFinding(
+			site,
+			`The ${type} repository ${displayUrl(url)}`,
+			evidence,
+		);
+	if (type === "path" && escapesRoot(dirOf(file.path), url))
+		return pathFinding(
+			site,
+			`The path repository ${truncate(url, 60)}`,
+			`path: ${truncate(url, 120)}`,
+		);
+	if (GIT_REPOSITORY_TYPES.has(type))
+		return gitFinding(
+			site,
+			`The ${type} repository ${displayUrl(url)}`,
+			evidence,
+			{
+				pinned: true,
+				how: `${displayUrl(url)} (composer.lock pins the commit)`,
+				host: gitHost(url),
+			},
+		);
+	return undefined;
+};
+
+const secureHttpFinding = (
+	file: SourceFile,
+	line: number | undefined,
+): FindingInput => ({
+	...insecureFinding(
+		{ file: file.path, line },
+		"Composer",
+		"secure-http: false",
+		"medium",
+	),
+	title: "Composer is allowed to download over plain HTTP",
+	message:
+		"config.secure-http is false, so Composer accepts http:// repository and package URLs, which anyone on the network path can tamper with.",
+	remediation:
+		"Remove secure-http: false and serve every repository over https://.",
+	references: [COMPOSER_CONFIG, cweUrl(319)],
+});
+
 /** composer.json `repositories` and `config.secure-http`. */
 export const composerJsonFindings = (file: SourceFile): FindingInput[] => {
 	const json = parseJson(file.text);
 	if (!isRecord(json))
 		return [unparsedConfigFinding(file.path, "is not a JSON object")];
 	const lineOf = lineFinder(file.text);
-	const out: FindingInput[] = [];
-	const repos = Array.isArray(json.repositories)
-		? json.repositories
-		: isRecord(json.repositories)
-			? Object.values(json.repositories)
-			: [];
-	for (const repo of repos) {
-		if (!isRecord(repo)) continue;
-		const type = (str(repo.type) ?? "").toLowerCase();
-		const url = str(repo.url);
-		if (!url) continue;
-		const line = lineOf(`"${url}"`);
-		const evidence = `${type}: ${displayUrl(url)}`;
-		if (isInsecureUrl(url))
-			out.push(
-				insecureFinding(
-					file.path,
-					line,
-					`The ${type} repository ${displayUrl(url)}`,
-					evidence,
-				),
-			);
-		else if (type === "path" && escapesRoot(dirOf(file.path), url))
-			out.push(
-				pathFinding(
-					file.path,
-					line,
-					`The path repository ${truncate(url, 60)}`,
-					`path: ${truncate(url, 120)}`,
-				),
-			);
-		else if (GIT_REPOSITORY_TYPES.has(type))
-			out.push(
-				gitFinding(
-					file.path,
-					line,
-					`The ${type} repository ${displayUrl(url)}`,
-					evidence,
-					true,
-					`${displayUrl(url)} (composer.lock pins the commit)`,
-					gitHost(url),
-				),
-			);
-	}
+	const out = repositoryList(json.repositories)
+		.filter(isRecord)
+		.map((repo) => repositoryFinding(file, lineOf, repo))
+		.filter((f) => f !== undefined);
 	if (isRecord(json.config) && json.config["secure-http"] === false)
-		out.push({
-			...insecureFinding(
-				file.path,
-				lineOf('"secure-http"'),
-				"Composer",
-				"secure-http: false",
-				"medium",
-			),
-			title: "Composer is allowed to download over plain HTTP",
-			message:
-				"config.secure-http is false, so Composer accepts http:// repository and package URLs, which anyone on the network path can tamper with.",
-			remediation:
-				"Remove secure-http: false and serve every repository over https://.",
-			references: [COMPOSER_CONFIG, cweUrl(319)],
-		});
+		out.push(secureHttpFinding(file, lineOf('"secure-http"')));
 	return out.map((f) => ({
 		...f,
 		references: [...(f.references ?? []), COMPOSER_REPOS],
 	}));
 };
+
+/** The `dist` and `source` URLs of a composer.lock package. */
+const packageUrls = (p: Record<string, unknown>): string[] =>
+	(["dist", "source"] as const).flatMap((field) => {
+		const download = p[field];
+		const url = isRecord(download) ? str(download.url) : undefined;
+		return url ? [url] : [];
+	});
 
 /** composer.lock `dist`/`source` URLs over plain HTTP. */
 export const composerLockFindings = (file: SourceFile): FindingInput[] => {
@@ -110,28 +125,21 @@ export const composerLockFindings = (file: SourceFile): FindingInput[] => {
 			),
 		];
 	const lineOf = lineFinder(file.text);
-	const out: FindingInput[] = [];
 	const list = [
 		...(Array.isArray(json.packages) ? json.packages : []),
 		...(Array.isArray(json["packages-dev"]) ? json["packages-dev"] : []),
 	];
-	for (const p of list) {
-		if (!isRecord(p)) continue;
+	const out = list.filter(isRecord).flatMap((p) => {
 		const name = str(p.name) ?? "a package";
-		for (const field of ["dist", "source"] as const) {
-			const url = isRecord(p[field])
-				? str((p[field] as Record<string, unknown>).url)
-				: undefined;
-			if (url && isInsecureUrl(url))
-				out.push(
-					insecureFinding(
-						file.path,
-						lineOf(url),
-						name,
-						`${name}: ${displayUrl(url)}`,
-					),
-				);
-		}
-	}
+		return packageUrls(p)
+			.filter(isInsecureUrl)
+			.map((url) =>
+				insecureFinding(
+					{ file: file.path, line: lineOf(url) },
+					name,
+					`${name}: ${displayUrl(url)}`,
+				),
+			);
+	});
 	return capPerRule(out);
 };

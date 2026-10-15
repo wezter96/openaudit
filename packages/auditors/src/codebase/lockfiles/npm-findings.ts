@@ -17,6 +17,7 @@ import {
 import {
 	base,
 	capPerRule,
+	type FindingSite,
 	gitFinding,
 	insecureFinding,
 	LOCKFILE_LINT,
@@ -52,14 +53,39 @@ import {
 	hostOf,
 	integrityStrength,
 	isOfficialRuntime,
+	type Source,
 } from "./sources";
+import type { FilePath, Host, PackageName } from "./types";
+
+/** Packages served by a registry that a config in the target declares. */
+interface CustomSource {
+	readonly registry: Registry;
+	readonly host: Host;
+	readonly packages: LockedPackage[];
+}
+
+/** One lockfile entry being checked, and what its findings need. */
+interface EntryContext {
+	readonly lock: Lockfile;
+	readonly p: LockedPackage;
+	readonly configs: ReadonlyArray<FileConfig>;
+	/** Packages from registries the target configures, reported together. */
+	readonly custom: Map<Host, CustomSource>;
+}
+
+/** A source host the lockfile points at, as shown to users. */
+interface UnexpectedHost {
+	readonly host: Host;
+	readonly shown: Text;
+	readonly why: Text;
+}
+
+/** Text shown to users. */
+type Text = string;
 
 const unexpectedHostFinding = (
-	lock: Lockfile,
-	p: LockedPackage,
-	host: string,
-	shown: string,
-	why: string,
+	{ lock, p }: EntryContext,
+	{ host, shown, why }: UnexpectedHost,
 ): FindingInput => ({
 	...base,
 	ruleId: rule("unexpected-host"),
@@ -80,111 +106,136 @@ const unexpectedHostFinding = (
 	tags: ["cwe-829", "owasp-a08"],
 });
 
-/** Packages served by a registry that a config in the target declares. */
-interface CustomSource {
-	readonly registry: Registry;
-	readonly host: string;
-	readonly packages: LockedPackage[];
-}
+const siteOf = ({ lock, p }: EntryContext): FindingSite => ({
+	file: lock.path,
+	line: p.line,
+});
+
+const entryEvidence = ({ p }: EntryContext, shown: Text) =>
+	`${label(p)}: ${shown}`;
+
+/** Collects the entry under the configured registry that serves it. */
+const fromRegistry = (ctx: EntryContext, host: Host, registry: Registry) => {
+	const entry = ctx.custom.get(host) ?? { registry, host, packages: [] };
+	entry.packages.push(ctx.p);
+	ctx.custom.set(host, entry);
+};
+
+/** A configured registry other than the public one, over https. */
+const isCustomHttpsRegistry = (host: Host, registry: Registry) =>
+	!DEFAULT_REGISTRY_HOSTS.has(host) &&
+	!registry.url.toLowerCase().startsWith("http:");
+
+/** No URL recorded: the package comes from the configured registry. */
+const registrySourceFinding = (ctx: EntryContext): undefined => {
+	const registry = registryFor(ctx.configs, ctx.p.name);
+	if (!registry) return undefined;
+	const host = hostOf(registry.url);
+	if (host && isCustomHttpsRegistry(host, registry))
+		fromRegistry(ctx, host, registry);
+	return undefined;
+};
+
+const unknownSourceFinding = (ctx: EntryContext): FindingInput =>
+	unexpectedHostFinding(ctx, {
+		host: "",
+		shown: displayUrl(ctx.p.source ?? ""),
+		why: "a source that is not a registry, a URL, git or a local path",
+	});
+
+const pathSourceFinding = (
+	ctx: EntryContext,
+	source: SourceOf<"path">,
+): FindingInput | undefined => {
+	const from = joinDir(dirOf(ctx.lock.path), ctx.p.base ?? "");
+	return escapesRoot(from, source.path)
+		? pathFinding(
+				siteOf(ctx),
+				ctx.p.name,
+				entryEvidence(ctx, truncate(source.path, 120)),
+			)
+		: undefined;
+};
+
+const gitSourceFinding = (
+	ctx: EntryContext,
+	source: SourceOf<"git">,
+): FindingInput => {
+	const { p } = ctx;
+	const evidence = entryEvidence(ctx, displayUrl(p.source ?? ""));
+	if (source.insecure) return insecureFinding(siteOf(ctx), p.name, evidence);
+	return gitFinding(siteOf(ctx), p.name, evidence, {
+		pinned: source.pinned || integrityStrength(p.integrity) !== "none",
+		how: source.ref
+			? `${displayUrl(source.url)} at "${truncate(scrubText(source.ref), 60)}"`
+			: displayUrl(source.url),
+		host: displayHost(p.source ?? "", source.host),
+	});
+};
+
+/** A registry configured next to the lockfile that serves `host` for `name`; a scoped registry only serves its own scope. */
+const configuredRegistry = (
+	configs: ReadonlyArray<FileConfig>,
+	host: Host,
+	name: PackageName,
+): Registry | undefined => {
+	const scope = scopeOfPackage(name);
+	const servesScope = (r: Registry) =>
+		r.scope === undefined || r.scope === scope;
+	return configs
+		.flatMap((c) => c.registries)
+		.find((r) => hostOf(r.url) === host && servesScope(r));
+};
+
+const tarballSourceFinding = (
+	ctx: EntryContext,
+	source: SourceOf<"tarball">,
+): FindingInput | undefined => {
+	const { p } = ctx;
+	const shown = displayUrl(source.url);
+	if (source.insecure)
+		return insecureFinding(siteOf(ctx), p.name, entryEvidence(ctx, shown));
+	if (DEFAULT_REGISTRY_HOSTS.has(source.host)) return undefined;
+	if (p.runtime && isOfficialRuntime(p.name, source.url)) return undefined;
+	const registry = configuredRegistry(ctx.configs, source.host, p.name);
+	if (registry) {
+		fromRegistry(ctx, source.host, registry);
+		return undefined;
+	}
+	return unexpectedHostFinding(ctx, {
+		host: displayHost(source.url, source.host),
+		shown,
+		why: "which is neither the public npm registry nor a registry configured for this package next to the lockfile",
+	});
+};
+
+type SourceOf<K extends Source["kind"]> = Extract<Source, { kind: K }>;
+
+const SOURCE_FINDINGS: {
+	readonly [K in Source["kind"]]: (
+		ctx: EntryContext,
+		source: SourceOf<K>,
+	) => FindingInput | undefined;
+} = {
+	ignored: () => undefined,
+	registry: registrySourceFinding,
+	unknown: unknownSourceFinding,
+	path: pathSourceFinding,
+	git: gitSourceFinding,
+	tarball: tarballSourceFinding,
+};
 
 /**
  * One finding for an entry's source, or none. Packages from a registry the
- * target configures are collected in `custom` and reported together.
+ * target configures are collected in `ctx.custom` and reported together.
  */
-const sourceFinding = (
-	lock: Lockfile,
-	p: LockedPackage,
-	configs: ReadonlyArray<FileConfig>,
-	custom: Map<string, CustomSource>,
-): FindingInput | undefined => {
-	const source = classifySource(p.source);
-	const file = lock.path;
-	const evidence = (s: string) => `${label(p)}: ${s}`;
-	const fromRegistry = (host: string, registry: Registry) => {
-		const entry = custom.get(host) ?? { registry, host, packages: [] };
-		entry.packages.push(p);
-		custom.set(host, entry);
-	};
-	switch (source.kind) {
-		case "ignored":
-			return undefined;
-		case "registry": {
-			// No URL recorded: the package comes from the configured registry.
-			const registry = registryFor(configs, p.name);
-			const host = registry && hostOf(registry.url);
-			if (
-				registry &&
-				host &&
-				!DEFAULT_REGISTRY_HOSTS.has(host) &&
-				!registry.url.toLowerCase().startsWith("http:")
-			)
-				fromRegistry(host, registry);
-			return undefined;
-		}
-		case "unknown":
-			return unexpectedHostFinding(
-				lock,
-				p,
-				"",
-				displayUrl(p.source ?? ""),
-				"a source that is not a registry, a URL, git or a local path",
-			);
-		case "path": {
-			const from = joinDir(dirOf(lock.path), p.base ?? "");
-			return escapesRoot(from, source.path)
-				? pathFinding(
-						file,
-						p.line,
-						p.name,
-						evidence(truncate(source.path, 120)),
-					)
-				: undefined;
-		}
-		case "git": {
-			const shown = displayUrl(p.source ?? "");
-			if (source.insecure)
-				return insecureFinding(file, p.line, p.name, evidence(shown));
-			const pinned = source.pinned || integrityStrength(p.integrity) !== "none";
-			return gitFinding(
-				file,
-				p.line,
-				p.name,
-				evidence(shown),
-				pinned,
-				source.ref
-					? `${displayUrl(source.url)} at "${truncate(scrubText(source.ref), 60)}"`
-					: displayUrl(source.url),
-				displayHost(p.source ?? "", source.host),
-			);
-		}
-		case "tarball": {
-			const shown = displayUrl(source.url);
-			if (source.insecure)
-				return insecureFinding(file, p.line, p.name, evidence(shown));
-			if (DEFAULT_REGISTRY_HOSTS.has(source.host)) return undefined;
-			if (p.runtime && isOfficialRuntime(p.name, source.url)) return undefined;
-			// A scoped registry only serves its own scope.
-			const scope = scopeOfPackage(p.name);
-			const registry = configs
-				.flatMap((c) => c.registries)
-				.find(
-					(r) =>
-						hostOf(r.url) === source.host &&
-						(r.scope === undefined || r.scope === scope),
-				);
-			if (registry) {
-				fromRegistry(source.host, registry);
-				return undefined;
-			}
-			return unexpectedHostFinding(
-				lock,
-				p,
-				displayHost(source.url, source.host),
-				shown,
-				"which is neither the public npm registry nor a registry configured for this package next to the lockfile",
-			);
-		}
-	}
+const sourceFinding = (ctx: EntryContext): FindingInput | undefined => {
+	const source = classifySource(ctx.p.source);
+	const find = SOURCE_FINDINGS[source.kind] as (
+		ctx: EntryContext,
+		source: Source,
+	) => FindingInput | undefined;
+	return find(ctx, source);
 };
 
 const customSourceFinding = (
@@ -215,67 +266,128 @@ const customSourceFinding = (
 	};
 };
 
+/** Entries with a missing or weak integrity hash, and the line of the first. */
+interface IntegrityGap {
+	readonly names: string[];
+	line: number | undefined;
+}
+
+const DOWNLOADED_KINDS = new Set<Source["kind"]>(["registry", "tarball"]);
+
+/** npm workspaces and the root are not downloaded. */
+const isNpmLocalEntry = (lock: Lockfile, p: LockedPackage) => {
+	if (lock.manager !== "npm") return false;
+	return !p.version && !p.source;
+};
+
+const needsIntegrity = (lock: Lockfile, p: LockedPackage) => {
+	if (p.bundled) return false;
+	if (!DOWNLOADED_KINDS.has(classifySource(p.source).kind)) return false;
+	return !isNpmLocalEntry(lock, p);
+};
+
+const integrityGaps = (
+	lock: Lockfile,
+	packages: ReadonlyArray<LockedPackage>,
+): Record<"none" | "weak", IntegrityGap> => {
+	const gaps: Record<"none" | "weak", IntegrityGap> = {
+		none: { names: [], line: undefined },
+		weak: { names: [], line: undefined },
+	};
+	for (const p of packages.filter((p) => needsIntegrity(lock, p))) {
+		const strength = integrityStrength(p.integrity);
+		if (strength === "strong") continue;
+		const gap = gaps[strength];
+		gap.names.push(label(p));
+		gap.line ??= p.line;
+	}
+	return gaps;
+};
+
+const missingIntegrityFinding = (
+	lock: Lockfile,
+	m: ReadonlyArray<string>,
+	line: number | undefined,
+): FindingInput => ({
+	...base,
+	ruleId: rule("missing-integrity"),
+	title: `${m.length} ${m.length === 1 ? "entry" : "entries"} in ${baseName(lock.path)} ${m.length === 1 ? "has" : "have"} no integrity hash`,
+	severity: "low",
+	message: truncate(
+		`The lockfile records no valid integrity hash for ${listNames(m)}. The package manager cannot detect a tarball that was changed on the server or in transit.`,
+		600,
+	),
+	location: { file: lock.path, line },
+	evidence: truncate(m.join(", ")),
+	remediation:
+		"Delete the affected entries (or the lockfile) and reinstall with a current package manager so it records integrity hashes; then commit the lockfile.",
+	references: [LOCKFILE_LINT, NPM_LOCKFILE, cweUrl(494), owaspUrl("a08")],
+	tags: ["cwe-494", "owasp-a08"],
+});
+
+const weakIntegrityFinding = (
+	lock: Lockfile,
+	w: ReadonlyArray<string>,
+	line: number | undefined,
+): FindingInput => ({
+	...base,
+	ruleId: rule("weak-integrity"),
+	title: `${w.length} ${w.length === 1 ? "entry" : "entries"} in ${baseName(lock.path)} ${w.length === 1 ? "is" : "are"} only checked with SHA-1`,
+	severity: "low",
+	message: truncate(
+		`The only integrity hash recorded for ${listNames(w)} is SHA-1, which is no longer collision resistant.`,
+		600,
+	),
+	location: { file: lock.path, line },
+	evidence: truncate(w.join(", ")),
+	remediation:
+		"Regenerate the lockfile with a current package manager so it records sha512 integrity hashes.",
+	references: [LOCKFILE_LINT, NPM_LOCKFILE, cweUrl(328)],
+	tags: ["cwe-328"],
+});
+
 const integrityFindings = (
 	lock: Lockfile,
 	packages: ReadonlyArray<LockedPackage>,
 ): FindingInput[] => {
-	const missing: string[] = [];
-	const weak: string[] = [];
-	let missingLine: number | undefined;
-	let weakLine: number | undefined;
-	for (const p of packages) {
-		if (p.bundled) continue;
-		const kind = classifySource(p.source).kind;
-		if (kind !== "registry" && kind !== "tarball") continue;
-		// npm workspaces and the root are not downloaded.
-		if (lock.manager === "npm" && !p.version && !p.source) continue;
-		const strength = integrityStrength(p.integrity);
-		if (strength === "none") {
-			missing.push(label(p));
-			missingLine ??= p.line;
-		} else if (strength === "weak") {
-			weak.push(label(p));
-			weakLine ??= p.line;
-		}
-	}
-	const out: FindingInput[] = [];
-	const m = unique(missing);
-	const w = unique(weak);
-	if (m.length)
-		out.push({
-			...base,
-			ruleId: rule("missing-integrity"),
-			title: `${m.length} ${m.length === 1 ? "entry" : "entries"} in ${baseName(lock.path)} ${m.length === 1 ? "has" : "have"} no integrity hash`,
-			severity: "low",
-			message: truncate(
-				`The lockfile records no valid integrity hash for ${listNames(m)}. The package manager cannot detect a tarball that was changed on the server or in transit.`,
-				600,
-			),
-			location: { file: lock.path, line: missingLine },
-			evidence: truncate(m.join(", ")),
-			remediation:
-				"Delete the affected entries (or the lockfile) and reinstall with a current package manager so it records integrity hashes; then commit the lockfile.",
-			references: [LOCKFILE_LINT, NPM_LOCKFILE, cweUrl(494), owaspUrl("a08")],
-			tags: ["cwe-494", "owasp-a08"],
-		});
-	if (w.length)
-		out.push({
-			...base,
-			ruleId: rule("weak-integrity"),
-			title: `${w.length} ${w.length === 1 ? "entry" : "entries"} in ${baseName(lock.path)} ${w.length === 1 ? "is" : "are"} only checked with SHA-1`,
-			severity: "low",
-			message: truncate(
-				`The only integrity hash recorded for ${listNames(w)} is SHA-1, which is no longer collision resistant.`,
-				600,
-			),
-			location: { file: lock.path, line: weakLine },
-			evidence: truncate(w.join(", ")),
-			remediation:
-				"Regenerate the lockfile with a current package manager so it records sha512 integrity hashes.",
-			references: [LOCKFILE_LINT, NPM_LOCKFILE, cweUrl(328)],
-			tags: ["cwe-328"],
-		});
-	return out;
+	const { none, weak } = integrityGaps(lock, packages);
+	const m = unique(none.names);
+	const w = unique(weak.names);
+	return [
+		...(m.length ? [missingIntegrityFinding(lock, m, none.line)] : []),
+		...(w.length ? [weakIntegrityFinding(lock, w, weak.line)] : []),
+	];
+};
+
+/** A declared dependency the lockfile does not match. */
+interface Drift {
+	readonly name: PackageName;
+	readonly text: Text;
+	readonly evidence: Text;
+}
+
+const driftOf = (
+	importer: Importer,
+	name: PackageName,
+	specs: ReadonlyArray<string> | undefined,
+): Drift | undefined => {
+	const spec = specs?.[0] ?? "";
+	// Specs can carry credentials (git+https://user:token@…).
+	const shown = displaySpec(spec);
+	if (!importer.has(name))
+		return {
+			name,
+			text: `${name} is missing`,
+			evidence: `${name}: ${shown} (not locked)`,
+		};
+	const locked = importer.get(name);
+	if (!locked || locked.includes(spec)) return undefined;
+	const lockedShown = displaySpec(locked[0] ?? "");
+	return {
+		name,
+		text: `${name} is "${shown}" but locked as "${lockedShown}"`,
+		evidence: `${name}: ${shown} (locked ${lockedShown})`,
+	};
 };
 
 /** package.json dependencies the lockfile does not record (or records differently). */
@@ -286,29 +398,9 @@ const driftFinding = (
 ): FindingInput | undefined => {
 	const json = parseJson(manifest.text);
 	if (!isRecord(json)) return undefined;
-	const drifted: Array<{ name: string; text: string; evidence: string }> = [];
-	for (const [name, specs] of declaredSpecs(json)) {
-		const spec = specs?.[0] ?? "";
-		// Specs can carry credentials (git+https://user:token@…).
-		const shown = displaySpec(spec);
-		if (!importer.has(name))
-			drifted.push({
-				name,
-				text: `${name} is missing`,
-				evidence: `${name}: ${shown} (not locked)`,
-			});
-		else {
-			const locked = importer.get(name);
-			if (locked && !locked.includes(spec)) {
-				const lockedShown = displaySpec(locked[0] ?? "");
-				drifted.push({
-					name,
-					text: `${name} is "${shown}" but locked as "${lockedShown}"`,
-					evidence: `${name}: ${shown} (locked ${lockedShown})`,
-				});
-			}
-		}
-	}
+	const drifted = [...declaredSpecs(json)]
+		.map(([name, specs]) => driftOf(importer, name, specs))
+		.filter((d) => d !== undefined);
 	const first = drifted[0];
 	if (!first) return undefined;
 	const lineOf = lineFinder(manifest.text);
@@ -336,34 +428,52 @@ const driftFinding = (
 	};
 };
 
+/** Source findings per entry, capped per rule, plus one per configured registry. */
+const sourceFindings = (
+	lock: Lockfile,
+	configs: ReadonlyArray<FileConfig>,
+): { perEntry: FindingInput[]; custom: Map<Host, CustomSource> } => {
+	const custom = new Map<Host, CustomSource>();
+	const perEntry = lock.packages
+		.map((p) => sourceFinding({ lock, p, configs, custom }))
+		.filter((f) => f !== undefined);
+	return { perEntry, custom };
+};
+
+/** Drift between each workspace's package.json and the lockfile. */
+const driftFindings = (
+	lock: Lockfile,
+	manifests: ReadonlyMap<FilePath, SourceFile>,
+): FindingInput[] => {
+	const lockDir = dirOf(lock.path);
+	return [...lock.importers]
+		.filter(([dir]) => !escapesRoot(lockDir, dir))
+		.map(([dir, importer]) => {
+			const manifest = manifests.get(
+				joinDir(joinDir(lockDir, dir), "package.json"),
+			);
+			return manifest && driftFinding(lock, manifest, importer);
+		})
+		.filter((f) => f !== undefined);
+};
+
 /** All findings for one parsed lockfile. */
 export const lockfileFindings = (
 	lock: Lockfile,
 	configs: ReadonlyArray<FileConfig>,
 	manifests: ReadonlyMap<string, SourceFile>,
 ): FindingInput[] => {
-	const perEntry: FindingInput[] = [];
-	const custom = new Map<string, CustomSource>();
-	for (const p of lock.packages) {
-		const f = sourceFinding(lock, p, configs, custom);
-		if (f) perEntry.push(f);
-	}
-	const findings = capPerRule(perEntry);
-	for (const problem of lock.problems ?? [])
-		findings.push(partlyCheckedFinding(lock.path, problem));
-	for (const c of custom.values()) findings.push(customSourceFinding(lock, c));
-	findings.push(...integrityFindings(lock, lock.packages));
-	findings.push(...installScriptFindings(lock, lock.packages, configs));
-	const lockDir = dirOf(lock.path);
-	for (const [dir, importer] of lock.importers) {
-		if (escapesRoot(lockDir, dir)) continue;
-		const manifest = manifests.get(
-			joinDir(joinDir(lockDir, dir), "package.json"),
-		);
-		const drift = manifest && driftFinding(lock, manifest, importer);
-		if (drift) findings.push(drift);
-	}
-	return findings;
+	const { perEntry, custom } = sourceFindings(lock, configs);
+	return [
+		...capPerRule(perEntry),
+		...(lock.problems ?? []).map((problem) =>
+			partlyCheckedFinding(lock.path, problem),
+		),
+		...[...custom.values()].map((c) => customSourceFinding(lock, c)),
+		...integrityFindings(lock, lock.packages),
+		...installScriptFindings(lock, lock.packages, configs),
+		...driftFindings(lock, manifests),
+	];
 };
 
 /** Registries (custom or insecure) and disabled TLS checks in a config file. */
@@ -374,8 +484,7 @@ export const configFindings = (config: FileConfig): FindingInput[] => {
 		if (r.url.toLowerCase().startsWith("http:"))
 			out.push(
 				insecureFinding(
-					r.file,
-					r.line,
+					{ file: r.file, line: r.line },
 					`The registry ${displayUrl(r.url)}`,
 					r.evidence,
 				),

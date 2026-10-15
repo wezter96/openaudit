@@ -13,6 +13,25 @@ import {
 	type Problem,
 } from "./shared";
 import { KNOWN_GIT_HOSTS } from "./sources";
+import type { FilePath, Host } from "./types";
+
+/** Text shown to users: a package or source name, or the evidence for it. */
+type Text = string;
+
+/** Where a finding points: a file and, when known, a line in it. */
+export interface FindingSite {
+	readonly file: FilePath;
+	readonly line: number | undefined;
+}
+
+/** How a git dependency is fetched. */
+export interface GitSource {
+	/** The lockfile pins it to a commit or hash. */
+	readonly pinned: boolean;
+	/** Where it is installed from, for the message. */
+	readonly how: Text;
+	readonly host: Host;
+}
 
 export const LOCKFILE_LINT = "https://github.com/lirantal/lockfile-lint";
 
@@ -42,7 +61,7 @@ export const COMPOSER_CONFIG =
 
 export const COMPOSER_REPOS = "https://getcomposer.org/doc/05-repositories.md";
 
-export const rule = (name: string) => `${LOCKFILES_ID}/${name}`;
+export const rule = (name: Text) => `${LOCKFILES_ID}/${name}`;
 
 export const base = {
 	category: "supply-chain",
@@ -53,16 +72,15 @@ export const label = (p: LockedPackage) =>
 	p.version ? `${p.name}@${p.version}` : p.name;
 
 /** Names, at most `max`, joined for a message. */
-export const listNames = (names: ReadonlyArray<string>, max = 10) =>
+export const listNames = (names: ReadonlyArray<Text>, max = 10) =>
 	`${names.slice(0, max).join(", ")}${names.length > max ? `, … (${names.length - max} more)` : ""}`;
 
-export const unique = (xs: ReadonlyArray<string>) => [...new Set(xs)];
+export const unique = (xs: ReadonlyArray<Text>) => [...new Set(xs)];
 
 export const insecureFinding = (
-	file: string,
-	line: number | undefined,
-	what: string,
-	evidence: string,
+	{ file, line }: FindingSite,
+	what: Text,
+	evidence: Text,
 	severity: Severity = "high",
 ): FindingInput => ({
 	...base,
@@ -82,10 +100,9 @@ export const insecureFinding = (
 });
 
 export const pathFinding = (
-	file: string,
-	line: number | undefined,
-	name: string,
-	evidence: string,
+	{ file, line }: FindingSite,
+	name: Text,
+	evidence: Text,
 ): FindingInput => ({
 	...base,
 	ruleId: rule("path-outside-workspace"),
@@ -107,13 +124,10 @@ export const pathFinding = (
 });
 
 export const gitFinding = (
-	file: string,
-	line: number | undefined,
-	name: string,
-	evidence: string,
-	pinned: boolean,
-	how: string,
-	host: string,
+	{ file, line }: FindingSite,
+	name: Text,
+	evidence: Text,
+	{ pinned, how, host }: GitSource,
 ): FindingInput => {
 	const knownHost = KNOWN_GIT_HOSTS.has(host);
 	return {
@@ -141,8 +155,8 @@ export const gitFinding = (
 /** A lockfile that was not checked at all (too large or unparseable). */
 export const uncheckedFinding = (
 	ruleName: "truncated" | "unparseable-lockfile",
-	file: string,
-	message: string,
+	file: FilePath,
+	message: Text,
 ): FindingInput => ({
 	...base,
 	ruleId: rule(ruleName),
@@ -161,7 +175,7 @@ export const uncheckedFinding = (
 
 /** A lockfile that was read, but not all of it. */
 export const partlyCheckedFinding = (
-	file: string,
+	file: FilePath,
 	problem: Problem,
 ): FindingInput => ({
 	...uncheckedFinding("unparseable-lockfile", file, ""),
@@ -173,8 +187,8 @@ export const partlyCheckedFinding = (
 
 /** A package-manager config (or manifest) that was not checked. */
 export const unparsedConfigFinding = (
-	file: string,
-	reason: string,
+	file: FilePath,
+	reason: Text,
 ): FindingInput => ({
 	...base,
 	ruleId: rule("unparseable-config"),
@@ -189,13 +203,9 @@ export const unparsedConfigFinding = (
 	tags: ["lockfile"],
 });
 
-/**
- * Keeps the first `MAX_FINDINGS_PER_RULE` findings of each rule per file and
- * folds the rest into one finding of that rule at their highest severity.
- */
-export const capPerRule = (
+const groupByRuleAndFile = (
 	findings: ReadonlyArray<FindingInput>,
-): FindingInput[] => {
+): Map<string, FindingInput[]> => {
 	const byRule = new Map<string, FindingInput[]>();
 	for (const f of findings) {
 		const key = `${f.ruleId}|${f.location?.file ?? ""}`;
@@ -203,35 +213,52 @@ export const capPerRule = (
 		if (group) group.push(f);
 		else byRule.set(key, [f]);
 	}
-	const out: FindingInput[] = [];
-	for (const group of byRule.values()) {
-		out.push(...group.slice(0, MAX_FINDINGS_PER_RULE));
-		const rest = group.slice(MAX_FINDINGS_PER_RULE);
-		const first = rest[0];
-		if (!first) continue;
-		const severity = rest.reduce<Severity>(
-			(s, f) => (severityRank(f.severity) < severityRank(s) ? f.severity : s),
-			first.severity,
-		);
-		const items = rest.map((f) => f.evidence ?? f.title);
-		out.push({
-			...first,
-			title: truncate(
-				`${rest.length} more ${first.ruleId.split("/")[1]} findings in ${baseName(first.location?.file ?? "")}`,
-				120,
-			),
-			severity,
-			message: truncate(
-				`Only the first ${MAX_FINDINGS_PER_RULE} findings of this rule are listed one by one. ${rest.length} more entries have the same problem: ${listNames(items)}.`,
-				1000,
-			),
-			evidence: truncate(`${rest.length} more: ${items.join(", ")}`),
-		});
-	}
-	return out;
+	return byRule;
 };
 
-export const tlsFinding = (s: Setting, who: string): FindingInput => ({
+/** One finding standing for `rest`, at their highest severity. */
+const foldedFinding = (
+	rest: ReadonlyArray<FindingInput>,
+): FindingInput | undefined => {
+	const first = rest[0];
+	if (!first) return undefined;
+	const severity = rest.reduce<Severity>(
+		(s, f) => (severityRank(f.severity) < severityRank(s) ? f.severity : s),
+		first.severity,
+	);
+	const items = rest.map((f) => f.evidence ?? f.title);
+	return {
+		...first,
+		title: truncate(
+			`${rest.length} more ${first.ruleId.split("/")[1]} findings in ${baseName(first.location?.file ?? "")}`,
+			120,
+		),
+		severity,
+		message: truncate(
+			`Only the first ${MAX_FINDINGS_PER_RULE} findings of this rule are listed one by one. ${rest.length} more entries have the same problem: ${listNames(items)}.`,
+			1000,
+		),
+		evidence: truncate(`${rest.length} more: ${items.join(", ")}`),
+	};
+};
+
+/**
+ * Keeps the first `MAX_FINDINGS_PER_RULE` findings of each rule per file and
+ * folds the rest into one finding of that rule at their highest severity.
+ */
+export const capPerRule = (
+	findings: ReadonlyArray<FindingInput>,
+): FindingInput[] =>
+	[...groupByRuleAndFile(findings).values()].flatMap((group) => {
+		const rest = group.slice(MAX_FINDINGS_PER_RULE);
+		const folded = foldedFinding(rest);
+		return [
+			...group.slice(0, MAX_FINDINGS_PER_RULE),
+			...(folded ? [folded] : []),
+		];
+	});
+
+export const tlsFinding = (s: Setting, who: Text): FindingInput => ({
 	...base,
 	ruleId: rule("tls-verification-disabled"),
 	title: `TLS certificate checks are disabled for ${who}`,

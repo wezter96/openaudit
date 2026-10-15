@@ -138,16 +138,23 @@ const isRelevant = (path: string) => {
 	);
 };
 
-/** Reads a file up to `MAX_LOCKFILE_BYTES` (Workspace.readText stops at 2 MB). */
-const readLarge = (
-	ws: Workspace,
-	path: string,
-): Effect.Effect<
+/** A file read in full, or why it was not. */
+type ReadResult =
 	| SourceFile
 	| { readonly path: string; readonly size: number }
 	| { readonly path: string; readonly unreadable: string }
-	| undefined
-> =>
+	| undefined;
+
+const UTF16_BOMS = [
+	[0xff, 0xfe],
+	[0xfe, 0xff],
+];
+
+const isUtf16 = (bytes: Uint8Array) =>
+	UTF16_BOMS.some(([a, b]) => bytes[0] === a && bytes[1] === b);
+
+/** Reads a file up to `MAX_LOCKFILE_BYTES` (Workspace.readText stops at 2 MB). */
+const readLarge = (ws: Workspace, path: string): Effect.Effect<ReadResult> =>
 	Effect.gen(function* () {
 		const size = yield* ws.size(path);
 		if (size === 0) return undefined;
@@ -155,13 +162,191 @@ const readLarge = (
 		const bytes = yield* ws.readBytes(path);
 		// Read as UTF-8 like the package managers do, NUL bytes included:
 		// Yarn and npm's ini parser accept them in comments.
-		return (bytes[0] === 0xff && bytes[1] === 0xfe) ||
-			(bytes[0] === 0xfe && bytes[1] === 0xff)
+		return isUtf16(bytes)
 			? { path, unreadable: "is UTF-16 encoded" }
 			: { path, text: new TextDecoder().decode(bytes) };
 	}).pipe(
 		Effect.orElseSucceed(() => ({ path, unreadable: "could not be read" })),
 	);
+
+const LIMIT_MB = MAX_LOCKFILE_BYTES / 1024 / 1024;
+
+const isSourceFile = (f: ReadResult): f is SourceFile =>
+	f !== undefined && "text" in f;
+
+/** A finding for a file found at the top level that was not read. */
+const readFailureFindings = (f: ReadResult): FindingInput[] => {
+	if (f === undefined || isSourceFile(f)) return [];
+	if ("unreadable" in f) return [unreadFinding(f)];
+	return [
+		uncheckedFinding(
+			"truncated",
+			f.path,
+			`${f.path} is ${(f.size / 1024 / 1024).toFixed(1)} MB, above the ${LIMIT_MB} MB limit.`,
+		),
+	];
+};
+
+const binaryLockfileFinding = (path: string): FindingInput =>
+	uncheckedFinding(
+		"unparseable-lockfile",
+		path,
+		`${path} is a binary lockfile, which openaudit cannot read. Run \`bun install --save-text-lockfile\` to migrate to bun.lock.`,
+	);
+
+const isBinaryLockfile = (path: string) => BINARY_LOCKFILES.has(baseName(path));
+
+const isLockfile = (f: SourceFile) => baseName(f.path) in LOCKFILE_PARSERS;
+
+/** Nothing the auditor checks: no lockfile, no report so far, only package.json manifests. */
+const nothingToCheck = (
+	files: ReadonlyArray<SourceFile>,
+	findings: ReadonlyArray<FindingInput>,
+) => {
+	if (files.some(isLockfile) || findings.length) return false;
+	return files.every((f) => baseName(f.path) === "package.json");
+};
+
+/** Package-manager configs and manifests, and the findings from reading them. */
+interface ReadConfigs {
+	readonly configs: Map<string, FileConfig>;
+	readonly manifests: Map<string, SourceFile>;
+	readonly findings: FindingInput[];
+}
+
+/** Reads one config file into `configs`, with its findings. */
+const readConfig = (
+	f: SourceFile,
+	configs: Map<string, FileConfig>,
+): FindingInput[] => {
+	const reader = CONFIG_READERS[baseName(f.path)];
+	if (!reader) return [];
+	const config: FileConfig = { file: f.path, registries: [] };
+	const unparsed = reader(f, config)
+		? []
+		: [unparsedConfigFinding(f.path, "could not be parsed")];
+	configs.set(f.path, config);
+	return [...unparsed, ...configFindings(config)];
+};
+
+const readConfigs = (files: ReadonlyArray<SourceFile>): ReadConfigs => {
+	const out: ReadConfigs = {
+		configs: new Map(),
+		manifests: new Map(),
+		findings: [],
+	};
+	for (const f of files) {
+		const name = baseName(f.path);
+		out.findings.push(...readConfig(f, out.configs));
+		if (name === "package.json") out.manifests.set(f.path, f);
+		const other = OTHER_READERS[name];
+		if (other) out.findings.push(...other(f));
+	}
+	return out;
+};
+
+/** Requirements files still to check, and those already queued. */
+interface RequirementsWalk {
+	readonly ws: Workspace;
+	readonly queue: SourceFile[];
+	readonly seen: Set<string>;
+	readonly findings: FindingInput[];
+	/** The include limit was reported. */
+	capped: boolean;
+}
+
+/** An include that was found but not queued: unreadable or too large. */
+const queueIncluded = (
+	walk: RequirementsWalk,
+	path: string,
+	included: ReadResult,
+) => {
+	if (!included) return;
+	if ("text" in included) walk.queue.push(included);
+	else if ("unreadable" in included)
+		walk.findings.push(unreadFinding(included));
+	else
+		walk.findings.push(
+			uncheckedFinding(
+				"truncated",
+				path,
+				`${path} is above the ${LIMIT_MB} MB limit.`,
+			),
+		);
+};
+
+/** Reports the first include beyond `MAX_REQUIREMENTS_FILES`. */
+const capIncludes = (
+	walk: RequirementsWalk,
+	from: SourceFile,
+	path: string,
+) => {
+	if (!walk.capped)
+		walk.findings.push(
+			uncheckedFinding(
+				"truncated",
+				path,
+				`${from.path} includes ${path}, beyond the ${MAX_REQUIREMENTS_FILES} requirements files openaudit reads.`,
+			),
+		);
+	walk.capped = true;
+};
+
+/** Queues a `-r`/`-c` include of `from`, once. */
+const followInclude = (
+	walk: RequirementsWalk,
+	from: SourceFile,
+	include: string,
+) =>
+	Effect.gen(function* () {
+		const path = resolveInRepo(dirOf(from.path), include);
+		if (path === undefined || walk.seen.has(path)) return;
+		if (walk.seen.size >= MAX_REQUIREMENTS_FILES)
+			return capIncludes(walk, from, path);
+		walk.seen.add(path);
+		// pip fails on a missing include, so there is nothing to check.
+		if (!(yield* walk.ws.exists(path))) return;
+		queueIncluded(walk, path, yield* readLarge(walk.ws, path));
+	});
+
+/** pip follows -r/-c includes, whatever their names, so do we. */
+const requirementsWalkFindings = (
+	ws: Workspace,
+	files: ReadonlyArray<SourceFile>,
+) =>
+	Effect.gen(function* () {
+		const queue = files.filter((f) => isRequirements(f.path));
+		const walk: RequirementsWalk = {
+			ws,
+			queue,
+			seen: new Set(queue.map((f) => f.path)),
+			findings: [],
+			capped: false,
+		};
+		for (let f = queue.shift(); f; f = queue.shift()) {
+			const result = requirementsFindings(f);
+			walk.findings.push(...result.findings);
+			for (const include of result.includes)
+				yield* followInclude(walk, f, include);
+		}
+		return walk.findings;
+	});
+
+const parsedLockfileFindings = (
+	f: SourceFile,
+	{ configs, manifests }: ReadConfigs,
+): FindingInput[] => {
+	const lock = parseLockfile(f);
+	if (!lock)
+		return [
+			uncheckedFinding(
+				"unparseable-lockfile",
+				f.path,
+				`${f.path} could not be parsed.`,
+			),
+		];
+	return lockfileFindings(lock, configsFor(configs, lock), manifests);
+};
 
 export const lockfiles = defineAuditor({
 	id: LOCKFILES_ID,
@@ -176,120 +361,30 @@ export const lockfiles = defineAuditor({
 		Effect.gen(function* () {
 			const ws = yield* requireWorkspace(ctx);
 			const paths = (yield* ws.files).filter(isRelevant).sort();
-			const findings: FindingInput[] = paths
-				.filter((p) => BINARY_LOCKFILES.has(baseName(p)))
-				.map((p) =>
-					uncheckedFinding(
-						"unparseable-lockfile",
-						p,
-						`${p} is a binary lockfile, which openaudit cannot read. Run \`bun install --save-text-lockfile\` to migrate to bun.lock.`,
-					),
-				);
 			const read = yield* Effect.forEach(
-				paths.filter((p) => !BINARY_LOCKFILES.has(baseName(p))),
+				paths.filter((p) => !isBinaryLockfile(p)),
 				(p) => readLarge(ws, p),
 				{ concurrency: 16 },
 			);
-			const files: SourceFile[] = [];
-			for (const f of read) {
-				if (!f) continue;
-				if ("text" in f) files.push(f);
-				else if ("unreadable" in f) findings.push(unreadFinding(f));
-				else
-					findings.push(
-						uncheckedFinding(
-							"truncated",
-							f.path,
-							`${f.path} is ${(f.size / 1024 / 1024).toFixed(1)} MB, above the ${MAX_LOCKFILE_BYTES / 1024 / 1024} MB limit.`,
-						),
-					);
-			}
-			const lockfileList = files.filter(
-				(f) => baseName(f.path) in LOCKFILE_PARSERS,
-			);
-			if (
-				!lockfileList.length &&
-				!findings.length &&
-				!files.some((f) => baseName(f.path) !== "package.json")
-			)
+			const files = read.filter(isSourceFile);
+			const unread = [
+				...paths.filter(isBinaryLockfile).map(binaryLockfileFinding),
+				...read.flatMap(readFailureFindings),
+			];
+			if (nothingToCheck(files, unread))
 				return yield* skip(
 					"No lockfiles, package-manager configs, requirements files or composer.json found",
 				);
-
-			const configs = new Map<string, FileConfig>();
-			const manifests = new Map<string, SourceFile>();
-			for (const f of files) {
-				const name = baseName(f.path);
-				const reader = CONFIG_READERS[name];
-				if (reader) {
-					const config: FileConfig = { file: f.path, registries: [] };
-					if (!reader(f, config))
-						findings.push(unparsedConfigFinding(f.path, "could not be parsed"));
-					configs.set(f.path, config);
-					findings.push(...configFindings(config));
-				}
-				if (name === "package.json") manifests.set(f.path, f);
-				const other = OTHER_READERS[name];
-				if (other) findings.push(...other(f));
-			}
-
-			// pip follows -r/-c includes, whatever their names, so do we.
-			const queue = files.filter((f) => isRequirements(f.path));
-			const seen = new Set(queue.map((f) => f.path));
-			let capped = false;
-			for (let f = queue.shift(); f; f = queue.shift()) {
-				const result = requirementsFindings(f);
-				findings.push(...result.findings);
-				for (const include of result.includes) {
-					const path = resolveInRepo(dirOf(f.path), include);
-					if (path === undefined || seen.has(path)) continue;
-					if (seen.size >= MAX_REQUIREMENTS_FILES) {
-						if (!capped)
-							findings.push(
-								uncheckedFinding(
-									"truncated",
-									path,
-									`${f.path} includes ${path}, beyond the ${MAX_REQUIREMENTS_FILES} requirements files openaudit reads.`,
-								),
-							);
-						capped = true;
-						continue;
-					}
-					seen.add(path);
-					// pip fails on a missing include, so there is nothing to check.
-					if (!(yield* ws.exists(path))) continue;
-					const included = yield* readLarge(ws, path);
-					if (!included) continue;
-					if ("text" in included) queue.push(included);
-					else if ("unreadable" in included)
-						findings.push(unreadFinding(included));
-					else
-						findings.push(
-							uncheckedFinding(
-								"truncated",
-								path,
-								`${path} is above the ${MAX_LOCKFILE_BYTES / 1024 / 1024} MB limit.`,
-							),
-						);
-				}
-			}
-
-			for (const f of lockfileList) {
-				const lock = parseLockfile(f);
-				if (!lock) {
-					findings.push(
-						uncheckedFinding(
-							"unparseable-lockfile",
-							f.path,
-							`${f.path} could not be parsed.`,
-						),
-					);
-					continue;
-				}
-				findings.push(
-					...lockfileFindings(lock, configsFor(configs, lock), manifests),
-				);
-			}
+			const configs = readConfigs(files);
+			const requirements = yield* requirementsWalkFindings(ws, files);
+			const findings = [
+				...unread,
+				...configs.findings,
+				...requirements,
+				...files
+					.filter(isLockfile)
+					.flatMap((f) => parsedLockfileFindings(f, configs)),
+			];
 			// Defence in depth: whatever the builders quoted, no credential leaves.
 			return findings.map(scrubFinding);
 		}),

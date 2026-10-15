@@ -5,22 +5,34 @@ import {
 	type Lockfile,
 	lineFinder,
 	type Problem,
-	parseYaml,
 	scalar,
 	sourceField,
 	uniqueProblems,
 	versionProblem,
-	yamlKeyLines,
 } from "./shared";
 import { classifySource } from "./sources";
+import {
+	grammarDocument,
+	parseYarnClassic,
+	type YarnDocument,
+	yamlDocument,
+} from "./yarn-grammar";
 
-const nameOfSpec = (spec: string) => {
+export { parseYarnClassic };
+
+/** A Yarn descriptor or locator, such as `name@^1.0.0` or `name@npm:1.0.0`. */
+type Descriptor = string;
+
+/** The query after a Berry locator's `::`, such as `locator=name%40workspace%3Adir`. */
+type LocatorParams = string;
+
+const nameOfSpec = (spec: Descriptor) => {
 	const at = spec.indexOf("@", 1);
 	return at === -1 ? spec : spec.slice(0, at);
 };
 
 /** Workspace directory from Berry's `::locator=name%40workspace%3Adir`. */
-const berryLocatorDir = (params: string): string => {
+const berryLocatorDir = (params: LocatorParams): string => {
 	for (const pair of params.split("&")) {
 		if (!pair.startsWith("locator=")) continue;
 		let locator: string;
@@ -35,204 +47,207 @@ const berryLocatorDir = (params: string): string => {
 	return "";
 };
 
-/*
- * A port of Yarn 1's lockfile parser (src/lockfile/parse.js), so that what is
- * checked is exactly what Yarn reads: comments run to the next \n, a lone \r
- * is a newline but does not start an indent, only even runs of spaces indent,
- * quoted strings are JSON, and a repeated key overrides the earlier one.
- */
-
-type YarnToken =
-	| {
-			readonly type:
-				| "newline"
-				| "colon"
-				| "comma"
-				| "comment"
-				| "eof"
-				| "invalid";
-			readonly line: number;
-	  }
-	| { readonly type: "indent"; readonly value: number; readonly line: number }
-	| {
-			readonly type: "string" | "number" | "boolean";
-			readonly value: string | number | boolean;
-			readonly line: number;
-	  };
-
-class YarnLexer {
-	private i = 0;
-	private line = 1;
-	private lastNewline = false;
-	constructor(private readonly s: string) {}
-
-	next(): YarnToken {
-		const s = this.s;
-		for (;;) {
-			const i = this.i;
-			if (i >= s.length) return { type: "eof", line: this.line };
-			const c = s[i] as string;
-			const line = this.line;
-			let chop = 1;
-			let token: YarnToken | undefined;
-			if (c === "\n" || c === "\r") {
-				if (c === "\r" && s[i + 1] === "\n") chop = 2;
-				this.line++;
-				token = { type: "newline", line };
-			} else if (c === "#") {
-				const nl = s.indexOf("\n", i + 1);
-				chop = (nl === -1 ? s.length : nl) - i;
-				token = { type: "comment", line };
-			} else if (c === " ") {
-				if (this.lastNewline) {
-					let n = 1;
-					while (s[i + n] === " ") n++;
-					if (n % 2) throw new Error("Invalid number of spaces");
-					chop = n;
-					token = { type: "indent", value: n / 2, line };
-				}
-			} else if (c === '"') {
-				let j = i + 1;
-				for (; j < s.length; j++)
-					if (s[j] === '"' && !(s[j - 1] === "\\" && s[j - 2] !== "\\")) {
-						j++;
-						break;
-					}
-				chop = j - i;
-				try {
-					token = { type: "string", value: JSON.parse(s.slice(i, j)), line };
-				} catch {
-					token = { type: "invalid", line };
-				}
-			} else if (c >= "0" && c <= "9") {
-				let j = i;
-				while (
-					s[j] !== undefined &&
-					(s[j] as string) >= "0" &&
-					(s[j] as string) <= "9"
-				)
-					j++;
-				chop = j - i;
-				token = { type: "number", value: Number(s.slice(i, j)), line };
-			} else if (s.startsWith("true", i)) {
-				chop = 4;
-				token = { type: "boolean", value: true, line };
-			} else if (s.startsWith("false", i)) {
-				chop = 5;
-				token = { type: "boolean", value: false, line };
-			} else if (c === ":") token = { type: "colon", line };
-			else if (c === ",") token = { type: "comma", line };
-			else if (/[a-zA-Z/.-]/.test(c)) {
-				let j = i;
-				for (; j < s.length; j++) {
-					const ch = s[j];
-					if (
-						ch === ":" ||
-						ch === " " ||
-						ch === "\n" ||
-						ch === "\r" ||
-						ch === ","
-					)
-						break;
-				}
-				chop = j - i;
-				token = { type: "string", value: s.slice(i, j), line };
-			} else token = { type: "invalid", line };
-			this.lastNewline = c === "\n" || (c === "\r" && s[i + 1] === "\n");
-			this.i += chop;
-			if (token) return token;
-		}
-	}
-}
-
-/** Yarn 1's grammar; throws where Yarn throws. Records top-level key lines. */
-const yarnGrammar = (
-	text: string,
-): {
-	readonly obj: Record<string, unknown>;
-	readonly lines: Map<string, number>;
-} => {
-	const lexer = new YarnLexer(text);
-	const lines = new Map<string, number>();
-	let token = lexer.next();
-	const next = () => {
-		token = lexer.next();
-		return token;
-	};
-	const parse = (indent: number): Record<string, unknown> => {
-		const obj: Record<string, unknown> = Object.create(null);
-		for (;;) {
-			const t = token;
-			if (t.type === "newline") {
-				const n = next();
-				if (!indent) continue;
-				if (n.type !== "indent") break;
-				if (n.value === indent) next();
-				else break;
-			} else if (t.type === "indent") {
-				if (t.value === indent) next();
-				else break;
-			} else if (t.type === "eof") break;
-			else if (t.type === "string") {
-				if (!t.value) throw new Error("Expected a key");
-				const keys = [String(t.value)];
-				next();
-				while (token.type === "comma") {
-					const k = next();
-					if (k.type !== "string") throw new Error("Expected string");
-					keys.push(String(k.value));
-					next();
-				}
-				const wasColon = token.type === "colon";
-				if (wasColon) next();
-				const v = token;
-				const plain =
-					v.type === "string" || v.type === "number" || v.type === "boolean";
-				if (!plain && !wasColon) throw new Error("Invalid value type");
-				let value: unknown;
-				if (plain) {
-					value = v.value;
-					next();
-				} else value = parse(indent + 1);
-				for (const k of keys) {
-					obj[k] = value;
-					if (!indent) lines.set(k, t.line);
-				}
-				if (!plain && indent && token.type !== "indent") break;
-			} else if (t.type === "comment") next();
-			else throw new Error("Unknown token");
-		}
-		return obj;
-	};
-	return { obj: parse(0), lines };
-};
-
-/** Yarn 1 reads lockfiles and .yarnrc with its grammar, falling back to YAML. */
-export const parseYarnClassic = (
-	text: string,
-):
-	| {
-			readonly obj: Record<string, unknown>;
-			readonly lines: Map<string, number>;
-	  }
-	| undefined => {
-	try {
-		return yarnGrammar(text);
-	} catch {
-		// Yarn 1 retries with js-yaml (FAILSAFE schema).
-	}
-	try {
-		const doc: unknown = parseYaml(text);
-		if (isRecord(doc))
-			return { obj: doc, lines: yamlKeyLines(text, undefined) };
-	} catch {
-		// Neither parses: Yarn 1 cannot read it either.
-	}
-	return undefined;
-};
-
 /** Yarn 2+ treats files with this header as classic lockfiles. */
 const YARN_V1_HEADER = /^(#.*(\r?\n))*?#\s+yarn\s+lockfile\s+v1\r?\n/i;
+
+/** What the entries of every reading of the file add up to. */
+interface YarnLock {
+	readonly packages: LockedPackage[];
+	readonly workspaces: Map<string, Importer>;
+	readonly rootSpecs: Map<string, string[]>;
+	readonly problems: Problem[];
+	berry: boolean;
+}
+
+/** One entry of one reading of the file. */
+interface YarnEntry {
+	readonly key: Descriptor;
+	readonly value: Record<string, unknown>;
+	readonly line: number | undefined;
+	/** From the reading Yarn 1 uses. */
+	readonly classic: boolean;
+}
+
+/**
+ * Yarn 1's reading (its grammar) and Yarn 2+'s (YAML unless the file has the
+ * classic header); where neither reads it, Yarn 1's YAML fallback.
+ */
+const readDocs = (
+	text: string,
+): {
+	readonly docs: ReadonlyArray<YarnDocument>;
+	readonly classic: YarnDocument | undefined;
+} => {
+	const classic = grammarDocument(text);
+	// Not YAML: Yarn 2+ cannot read it either.
+	const berry = YARN_V1_HEADER.test(text) ? undefined : yamlDocument(text);
+	const docs = [classic, berry].filter(
+		(doc): doc is YarnDocument => doc !== undefined,
+	);
+	if (docs.length) return { docs, classic };
+	const fallback = parseYarnClassic(text);
+	return { docs: fallback ? [fallback] : [], classic: fallback };
+};
+
+/** A locator split at its `::` parameters. */
+const splitParams = (
+	spec: Descriptor,
+): readonly [Descriptor, LocatorParams | undefined] => {
+	const at = spec.indexOf("::");
+	return at === -1
+		? [spec, undefined]
+		: [spec.slice(0, at), spec.slice(at + 2)];
+};
+
+/**
+ * npm: packages outside the registry's usual tarball path are downloaded
+ * from the URL in their locator. Several values: which one Yarn uses is not
+ * modelled.
+ */
+const archiveUrl = (params: LocatorParams | undefined) => {
+	if (params === undefined) return undefined;
+	const urls = new URLSearchParams(params).getAll("__archiveUrl");
+	return urls.length > 1 ? "(several __archiveUrl values)" : urls[0];
+};
+
+const berryPackage = (
+	entry: YarnEntry,
+	name: string,
+	spec: Descriptor,
+): LockedPackage => {
+	const [bare, params] = splitParams(spec);
+	const isPath = /^(file|link|portal):/.test(bare);
+	const checksum = scalar(entry.value.checksum);
+	return {
+		name,
+		version: scalar(entry.value.version),
+		source: archiveUrl(params) ?? (isPath ? bare.split("#")[0] : bare),
+		...(isPath && params !== undefined
+			? { base: berryLocatorDir(params) }
+			: {}),
+		// Berry checksums are SHA-512 digests of the package archive.
+		integrity: checksum ? `sha512-${checksum}` : undefined,
+		line: entry.line,
+	};
+};
+
+const workspaceImporter = (
+	spec: Descriptor,
+	value: Record<string, unknown>,
+): readonly [string, Importer] => {
+	const dir = spec.slice("workspace:".length);
+	const deps = isRecord(value.dependencies) ? value.dependencies : {};
+	return [
+		dir === "." ? "" : dir,
+		new Map(Object.keys(deps).map((n) => [n, undefined])),
+	];
+};
+
+/** Yarn 2+'s `resolution`; a malformed one is kept to be reported. */
+const berryResolution = ({ key, value }: YarnEntry) => {
+	const malformed = sourceField(value.resolution);
+	return (
+		scalar(value.resolution) ?? (malformed && `${nameOfSpec(key)}@${malformed}`)
+	);
+};
+
+const readBerryEntry = (
+	lock: YarnLock,
+	entry: YarnEntry,
+	resolution: Descriptor,
+) => {
+	const name = nameOfSpec(resolution);
+	const spec = resolution.slice(name.length + 1);
+	if (spec.startsWith("workspace:"))
+		lock.workspaces.set(...workspaceImporter(spec, entry.value));
+	else lock.packages.push(berryPackage(entry, name, spec));
+};
+
+const isArchive = (resolved: string) => {
+	const { kind } = classifySource(resolved);
+	if (kind === "tarball") return true;
+	return kind === "git" && /^https?:/i.test(resolved);
+};
+
+/**
+ * Classic yarn appends the archive's SHA-1 to registry, tarball and codeload
+ * URLs; for those the fragment is a checksum, not a git ref.
+ */
+const sha1Fragment = (resolved: string | undefined) => {
+	if (!resolved) return undefined;
+	const hash = resolved.indexOf("#");
+	const sha1 = hash === -1 ? "" : resolved.slice(hash + 1);
+	if (!isArchive(resolved) || !/^[0-9a-f]{40}$/i.test(sha1)) return undefined;
+	return { url: resolved.slice(0, hash), sha1 };
+};
+
+/** Yarn 1's `resolved` and `integrity`, with an archive's SHA-1 moved over. */
+const classicFetch = (value: Record<string, unknown>) => {
+	const resolved = scalar(value.resolved) ?? sourceField(value.resolved);
+	const integrity = scalar(value.integrity);
+	const fragment = sha1Fragment(resolved);
+	if (!fragment) return { resolved, integrity };
+	return {
+		resolved: fragment.url,
+		integrity: integrity ?? `sha1-${fragment.sha1}`,
+	};
+};
+
+const addRootSpec = (
+	rootSpecs: Map<string, string[]>,
+	name: string,
+	declared: Descriptor,
+) => {
+	// Pushed in place: copying the list per entry is quadratic.
+	const specs = rootSpecs.get(name);
+	if (specs) specs.push(declared);
+	else rootSpecs.set(name, [declared]);
+};
+
+const readClassicEntry = (lock: YarnLock, entry: YarnEntry) => {
+	const { key, value } = entry;
+	const first = key.split(",")[0]?.trim() ?? key;
+	const name = nameOfSpec(first);
+	const declared = first.slice(name.length + 1);
+	if (entry.classic) addRootSpec(lock.rootSpecs, name, declared);
+	const { resolved, integrity } = classicFetch(value);
+	lock.packages.push({
+		name,
+		version: value.version === undefined ? undefined : String(value.version),
+		source: resolved ?? (/^(file|link):/.test(declared) ? declared : undefined),
+		integrity,
+		line: entry.line,
+	});
+};
+
+const readEntry = (lock: YarnLock, entry: YarnEntry) => {
+	const resolution = berryResolution(entry);
+	if (resolution !== undefined) readBerryEntry(lock, entry, resolution);
+	// Yarn 1's reading of the entry.
+	if (resolution === undefined || entry.value.resolved !== undefined)
+		readClassicEntry(lock, entry);
+};
+
+const readDoc = (
+	lock: YarnLock,
+	{ obj, lines }: YarnDocument,
+	context: {
+		readonly lineOf: ReturnType<typeof lineFinder>;
+		readonly classic: boolean;
+	},
+) => {
+	if (isRecord(obj.__metadata)) {
+		lock.berry = true;
+		lock.problems.push(
+			...versionProblem(obj.__metadata.version, [4, 5, 6, 7, 8]),
+		);
+	}
+	for (const [key, value] of Object.entries(obj)) {
+		if (key === "__metadata" || !isRecord(value)) continue;
+		const line = lines.get(key) ?? context.lineOf(key);
+		readEntry(lock, { key, value, line, classic: context.classic });
+	}
+};
 
 /**
  * yarn.lock, read the way both Yarn 1 (its grammar, then YAML) and Yarn 2+
@@ -241,133 +256,24 @@ const YARN_V1_HEADER = /^(#.*(\r?\n))*?#\s+yarn\s+lockfile\s+v1\r?\n/i;
  * `resolution`/`checksum` and Yarn 1's `resolved`/`integrity`.
  */
 export const parseYarnLock = (file: SourceFile): Lockfile | undefined => {
-	const text = file.text;
-	const docs: Array<{
-		readonly obj: Record<string, unknown>;
-		readonly lines: Map<string, number>;
-	}> = [];
-	let classic: ReturnType<typeof parseYarnClassic>;
-	try {
-		classic = yarnGrammar(text);
-		docs.push(classic);
-	} catch {
-		classic = undefined;
-	}
-	if (!YARN_V1_HEADER.test(text))
-		try {
-			const doc: unknown = parseYaml(text);
-			if (isRecord(doc))
-				docs.push({ obj: doc, lines: yamlKeyLines(text, undefined) });
-		} catch {
-			// Not YAML: Yarn 2+ cannot read it either.
-		}
-	if (!docs.length) {
-		classic = parseYarnClassic(text);
-		if (classic) docs.push(classic);
-	}
+	const { docs, classic } = readDocs(file.text);
 	if (!docs.length) return undefined;
-
-	const lineOf = lineFinder(text);
-	const packages: LockedPackage[] = [];
-	const workspaces = new Map<string, Importer>();
-	const rootSpecs = new Map<string, string[]>();
-	const problems: Problem[] = [];
-	let berry = false;
-	for (const { obj, lines } of docs) {
-		if (isRecord(obj.__metadata)) {
-			berry = true;
-			problems.push(...versionProblem(obj.__metadata.version, [4, 5, 6, 7, 8]));
-		}
-		for (const [key, value] of Object.entries(obj)) {
-			if (key === "__metadata" || !isRecord(value)) continue;
-			const line = lines.get(key) ?? lineOf(key);
-			const malformed = sourceField(value.resolution);
-			const resolution =
-				scalar(value.resolution) ??
-				(malformed && `${nameOfSpec(key)}@${malformed}`);
-			if (resolution !== undefined) {
-				const name = nameOfSpec(resolution);
-				const spec = resolution.slice(name.length + 1);
-				if (spec.startsWith("workspace:")) {
-					const dir = spec.slice("workspace:".length);
-					const deps = isRecord(value.dependencies) ? value.dependencies : {};
-					workspaces.set(
-						dir === "." ? "" : dir,
-						new Map(Object.keys(deps).map((n) => [n, undefined])),
-					);
-				} else {
-					const params = spec.indexOf("::");
-					const bare = params === -1 ? spec : spec.slice(0, params);
-					const isPath = /^(file|link|portal):/.test(bare);
-					// npm: packages outside the registry's usual tarball path
-					// are downloaded from the URL in their locator.
-					// Several values: which one Yarn uses is not modelled.
-					const archiveUrls =
-						params === -1
-							? []
-							: new URLSearchParams(spec.slice(params + 2)).getAll(
-									"__archiveUrl",
-								);
-					const archiveUrl =
-						archiveUrls.length > 1
-							? "(several __archiveUrl values)"
-							: archiveUrls[0];
-					const checksum = scalar(value.checksum);
-					packages.push({
-						name,
-						version: scalar(value.version),
-						source: archiveUrl ?? (isPath ? bare.split("#")[0] : bare),
-						...(isPath && params !== -1
-							? { base: berryLocatorDir(spec.slice(params + 2)) }
-							: {}),
-						// Berry checksums are SHA-512 digests of the package archive.
-						integrity: checksum ? `sha512-${checksum}` : undefined,
-						line,
-					});
-				}
-			}
-			if (resolution !== undefined && value.resolved === undefined) continue;
-			// Yarn 1's reading of the entry.
-			const first = key.split(",")[0]?.trim() ?? key;
-			const name = nameOfSpec(first);
-			const declared = first.slice(name.length + 1);
-			if (obj === classic?.obj) {
-				// Pushed in place: copying the list per entry is quadratic.
-				const specs = rootSpecs.get(name);
-				if (specs) specs.push(declared);
-				else rootSpecs.set(name, [declared]);
-			}
-			let resolved = scalar(value.resolved) ?? sourceField(value.resolved);
-			let integrity = scalar(value.integrity);
-			const source = classifySource(resolved);
-			const hash = resolved?.indexOf("#") ?? -1;
-			const sha1 = resolved && hash !== -1 ? resolved.slice(hash + 1) : "";
-			// Classic yarn appends the archive's SHA-1 to registry, tarball and
-			// codeload URLs; for those the fragment is a checksum, not a git ref.
-			const archive =
-				source.kind === "tarball" ||
-				(source.kind === "git" && /^https?:/i.test(resolved ?? ""));
-			if (resolved && archive && /^[0-9a-f]{40}$/i.test(sha1)) {
-				resolved = resolved.slice(0, hash);
-				integrity ??= `sha1-${sha1}`;
-			}
-			packages.push({
-				name,
-				version:
-					value.version === undefined ? undefined : String(value.version),
-				source:
-					resolved ?? (/^(file|link):/.test(declared) ? declared : undefined),
-				integrity,
-				line,
-			});
-		}
-	}
+	const lineOf = lineFinder(file.text);
+	const lock: YarnLock = {
+		packages: [],
+		workspaces: new Map(),
+		rootSpecs: new Map(),
+		problems: [],
+		berry: false,
+	};
+	for (const doc of docs)
+		readDoc(lock, doc, { lineOf, classic: doc.obj === classic?.obj });
 	return {
 		path: file.path,
-		manager: berry ? "yarn-berry" : "yarn",
-		packages,
-		importers: berry ? workspaces : new Map([["", rootSpecs]]),
+		manager: lock.berry ? "yarn-berry" : "yarn",
+		packages: lock.packages,
+		importers: lock.berry ? lock.workspaces : new Map([["", lock.rootSpecs]]),
 		recordsInstallScripts: false,
-		problems: uniqueProblems(problems),
+		problems: uniqueProblems(lock.problems),
 	};
 };

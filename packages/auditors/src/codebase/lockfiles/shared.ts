@@ -1,6 +1,10 @@
 import type { Severity } from "@openaudit/core";
 
 import { isRecord, lineLocator, parseJsonc } from "../util";
+import type { FilePath, FileText, PackageName, TextLine } from "./types";
+
+/** A top-level key of a JSON or YAML lockfile, such as `packages`. */
+type SectionKey = string;
 
 export const LOCKFILES_ID = "code.lockfiles";
 
@@ -16,12 +20,12 @@ export const MAX_LOCKFILE_BYTES = 20 * 1024 * 1024;
 /** Text searches for a location per file; later findings get no line. */
 const MAX_LINE_SEARCHES = 50;
 
-export const dirOf = (path: string) => {
+export const dirOf = (path: FilePath) => {
 	const i = path.lastIndexOf("/");
 	return i === -1 ? "" : path.slice(0, i);
 };
 
-export const joinDir = (a: string, b: string) =>
+export const joinDir = (a: FilePath, b: FilePath) =>
 	[a, b].filter((s) => s && s !== ".").join("/");
 
 export type Manager = "npm" | "bun" | "pnpm" | "yarn" | "yarn-berry";
@@ -87,7 +91,7 @@ export const sourceField = (v: unknown): string | undefined =>
 
 /** A lockfile entry that is not the shape the format defines. */
 export const malformedEntry = (
-	name: string,
+	name: PackageName,
 	value: unknown,
 	line: number | undefined,
 ): LockedPackage => ({ name, source: `(${typeName(value)} entry)`, line });
@@ -112,20 +116,20 @@ export const versionProblem = (
 			];
 };
 
+const SCALAR_TYPES = new Set(["string", "number", "boolean"]);
+
 /** A YAML or Yarn scalar as text (js-yaml's FAILSAFE schema keeps every scalar a string). */
 export const scalar = (v: unknown): string | undefined =>
-	typeof v === "string" || typeof v === "number" || typeof v === "boolean"
-		? String(v)
-		: undefined;
+	SCALAR_TYPES.has(typeof v) ? String(v) : undefined;
 
 export const strings = (v: unknown): string[] =>
 	Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 
 /** Every package manager here ignores a leading byte-order mark. */
-export const stripBom = (text: string) =>
+export const stripBom = (text: FileText) =>
 	text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 
-export const parseJson = (text: string): unknown => {
+export const parseJson = (text: FileText): unknown => {
 	const t = stripBom(text);
 	try {
 		return JSON.parse(t);
@@ -135,7 +139,7 @@ export const parseJson = (text: string): unknown => {
 };
 
 /** Strips quotes; double-quoted strings are JSON-decoded like Yarn does. */
-export const unquote = (s: string) => {
+export const unquote = (s: TextLine) => {
 	if (s.length < 2) return s;
 	if (s[0] === '"' && s.endsWith('"')) {
 		try {
@@ -167,68 +171,83 @@ export const declaredSpecs = (pkg: Record<string, unknown>): Importer => {
 	return out;
 };
 
+const isQuote = (c: string | undefined) => c === '"' || c === "'";
+
+/** A `"section":` line at the top level of a JSON document indented by two. */
+const isJsonSectionLine = (line: TextLine, section: SectionKey) => {
+	const t = line.trimStart();
+	if (line.length - t.length !== 2 || !isQuote(t[0])) return false;
+	return t.startsWith(`${section}${t[0]}`, 1);
+};
+
+/** The quoted key at the start of `t` when a `:` follows it. */
+const jsonKey = (t: TextLine): string | undefined => {
+	const quote = t[0];
+	if (!isQuote(quote)) return undefined;
+	let end = 1;
+	while (end < t.length && t[end] !== quote) end += t[end] === "\\" ? 2 : 1;
+	return t[end + 1] === ":" ? unquote(t.slice(0, end + 1)) : undefined;
+};
+
 /**
  * 1-based lines of `"key":` lines after the top-level `"section"` key (first
  * occurrence wins). Linear: no regex backtracking. Minified files get none.
  */
 export const jsonKeyLines = (
-	text: string,
-	section: string,
+	text: FileText,
+	section: SectionKey,
 ): Map<string, number> => {
 	const out = new Map<string, number>();
 	const lines = text.split("\n");
-	let started = false;
-	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i] ?? "";
-		const t = line.trimStart();
-		if (!started) {
-			started =
-				line.length - t.length === 2 &&
-				(t[0] === '"' || t[0] === "'") &&
-				t.startsWith(`${section}${t[0]}`, 1);
-			continue;
-		}
-		const quote = t[0];
-		if (quote !== '"' && quote !== "'") continue;
-		let end = 1;
-		while (end < t.length && t[end] !== quote) end += t[end] === "\\" ? 2 : 1;
-		if (t[end + 1] !== ":") continue;
-		const key = unquote(t.slice(0, end + 1));
-		if (!out.has(key)) out.set(key, i + 1);
+	const start = lines.findIndex((line) => isJsonSectionLine(line, section));
+	if (start === -1) return out;
+	for (let i = start + 1; i < lines.length; i++) {
+		const key = jsonKey((lines[i] ?? "").trimStart());
+		if (key !== undefined && !out.has(key)) out.set(key, i + 1);
 	}
 	return out;
 };
+
+/** The indentation of keys under `section`, or undefined outside it. */
+type KeyIndent = (line: TextLine, indent: number) => number | undefined;
+
+const sectionKeyIndent = (section: SectionKey): KeyIndent => {
+	let current = "";
+	let keyIndent = -1;
+	return (line, indent) => {
+		if (indent === 0) {
+			current = line;
+			keyIndent = -1;
+			return undefined;
+		}
+		if (current !== `${section}:`) return undefined;
+		if (keyIndent === -1) keyIndent = indent;
+		return keyIndent;
+	};
+};
+
+const isYamlContent = (t: TextLine) => t !== "" && !t.startsWith("#");
 
 /**
  * Lines of block-style `key:` lines: the first indentation level under the
  * top-level `section`, or top-level keys when `section` is undefined.
  */
 export const yamlKeyLines = (
-	text: string,
-	section: string | undefined,
+	text: FileText,
+	section: SectionKey | undefined,
 ): Map<string, number> => {
 	const out = new Map<string, number>();
-	const lines = text.split("\n");
-	let current = "";
-	let keyIndent = -1;
-	for (let i = 0; i < lines.length; i++) {
-		const line = (lines[i] ?? "").trimEnd();
+	const keyIndentAt: KeyIndent =
+		section === undefined ? () => 0 : sectionKeyIndent(section);
+	text.split("\n").forEach((raw, i) => {
+		const line = raw.trimEnd();
 		const t = line.trimStart();
-		if (!t || t.startsWith("#")) continue;
+		if (!isYamlContent(t)) return;
 		const indent = line.length - t.length;
-		if (section !== undefined) {
-			if (indent === 0) {
-				current = line;
-				keyIndent = -1;
-				continue;
-			}
-			if (current !== `${section}:`) continue;
-			if (keyIndent === -1) keyIndent = indent;
-		} else keyIndent = 0;
-		if (indent !== keyIndent || !t.endsWith(":")) continue;
+		if (indent !== keyIndentAt(line, indent) || !t.endsWith(":")) return;
 		const key = unquote(t.slice(0, -1));
 		if (!out.has(key)) out.set(key, i + 1);
-	}
+	});
 	return out;
 };
 
@@ -243,36 +262,44 @@ export const shiftLines = (
 	),
 });
 
+/** Specs of a dependency recorded in two parses (`undefined`: any spec). */
+const mergeSpecs = (
+	prev: ReadonlyArray<string> | undefined,
+	specs: ReadonlyArray<string> | undefined,
+) =>
+	prev === undefined || specs === undefined ? undefined : [...prev, ...specs];
+
+const mergeImporter = (into: Importer, importer: Importer) => {
+	for (const [name, specs] of importer)
+		into.set(name, into.has(name) ? mergeSpecs(into.get(name), specs) : specs);
+};
+
+const mergeImporters = (
+	locks: ReadonlyArray<Lockfile>,
+): Map<string, Importer> => {
+	const importers = new Map<string, Importer>();
+	for (const lock of locks)
+		for (const [dir, importer] of lock.importers) {
+			const into: Importer = importers.get(dir) ?? new Map();
+			mergeImporter(into, importer);
+			importers.set(dir, into);
+		}
+	return importers;
+};
+
 /** One lockfile from several parses of the same file (documents, conflict sides). */
 export const mergeLockfiles = (
 	locks: ReadonlyArray<Lockfile>,
 ): Lockfile | undefined => {
 	const [first] = locks;
 	if (!first || locks.length === 1) return first;
-	const importers = new Map<string, Importer>();
-	for (const lock of locks)
-		for (const [dir, importer] of lock.importers) {
-			const into: Importer = importers.get(dir) ?? new Map();
-			for (const [name, specs] of importer) {
-				const prev = into.get(name);
-				into.set(
-					name,
-					!into.has(name)
-						? specs
-						: prev === undefined || specs === undefined
-							? undefined
-							: [...prev, ...specs],
-				);
-			}
-			importers.set(dir, into);
-		}
 	return {
 		path: first.path,
 		manager: locks.some((l) => l.manager === "yarn-berry")
 			? "yarn-berry"
 			: first.manager,
 		packages: locks.flatMap((l) => l.packages),
-		importers,
+		importers: mergeImporters(locks),
 		recordsInstallScripts: locks.some((l) => l.recordsInstallScripts),
 		trusted: [...new Set(locks.flatMap((l) => l.trusted ?? []))],
 		problems: uniqueProblems(locks.flatMap((l) => l.problems ?? [])),
@@ -292,7 +319,7 @@ export const uniqueProblems = (problems: ReadonlyArray<Problem>): Problem[] => {
  * as numbers or booleans, so callers compare them as strings. A stream of
  * several documents is an error, as it is for js-yaml's `load`.
  */
-export const parseYaml = (text: string): unknown => {
+export const parseYaml = (text: FileText): unknown => {
 	const doc: unknown = Bun.YAML.parse(text);
 	if (Array.isArray(doc) && /^---|\n---/.test(text))
 		throw new Error("Expected a single YAML document");
@@ -300,7 +327,7 @@ export const parseYaml = (text: string): unknown => {
 };
 
 /** The line of the first occurrence of `needle`, within a search budget. */
-export const lineFinder = (text: string) => {
+export const lineFinder = (text: FileText) => {
 	let budget = MAX_LINE_SEARCHES;
 	let locate: ((i: number) => number) | undefined;
 	return (needle: string): number | undefined => {

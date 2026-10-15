@@ -11,43 +11,53 @@ interface ConflictSide {
 	readonly lines: ReadonlyArray<number>;
 }
 
+type ConflictState = "top" | "ours" | "parent" | "theirs";
+
+const CONFLICT_MARKERS = ["<<<<<<<", "=======", ">>>>>>>"];
+
+/** The state a conflict marker line switches to, or undefined for content. */
+const markerState = (line: string): ConflictState | undefined => {
+	if (line.startsWith("<<<<<<<")) return "ours";
+	if (line.startsWith("|||||||")) return "parent";
+	if (line === "=======") return "theirs";
+	if (line.startsWith(">>>>>>>")) return "top";
+	return undefined;
+};
+
+/** Collects the lines of one side of the conflicts. */
+const sideCollector = (keep: ReadonlySet<ConflictState>) => {
+	const text: string[] = [];
+	const lines: number[] = [];
+	return {
+		add: (state: ConflictState, line: string, at: number) => {
+			if (!keep.has(state)) return;
+			text.push(line);
+			lines.push(at);
+		},
+		side: (): ConflictSide => ({ text: text.join("\n"), lines }),
+	};
+};
+
 /**
  * Both sides of git merge conflicts in a lockfile. npm (parse-conflict-json),
  * pnpm and Yarn resolve a conflicted lockfile by reading both sides and
  * merging them, so code.lockfiles checks both.
  */
 export const conflictSides = (text: string): ConflictSide[] => {
-	if (
-		!text.includes("<<<<<<<") ||
-		!text.includes("=======") ||
-		!text.includes(">>>>>>>")
-	)
-		return [];
-	const ours: string[] = [];
-	const theirs: string[] = [];
-	const oursLines: number[] = [];
-	const theirsLines: number[] = [];
-	let state: "top" | "ours" | "parent" | "theirs" = "top";
+	if (!CONFLICT_MARKERS.every((marker) => text.includes(marker))) return [];
+	const ours = sideCollector(new Set(["top", "ours"]));
+	const theirs = sideCollector(new Set(["top", "theirs"]));
+	let state: ConflictState = "top";
 	text.split(/\r\n|\r|\n/).forEach((line, i) => {
-		if (line.startsWith("<<<<<<<")) state = "ours";
-		else if (line.startsWith("|||||||")) state = "parent";
-		else if (line === "=======") state = "theirs";
-		else if (line.startsWith(">>>>>>>")) state = "top";
-		else {
-			if (state === "top" || state === "ours") {
-				ours.push(line);
-				oursLines.push(i + 1);
-			}
-			if (state === "top" || state === "theirs") {
-				theirs.push(line);
-				theirsLines.push(i + 1);
-			}
+		const next = markerState(line);
+		if (next) {
+			state = next;
+			return;
 		}
+		ours.add(state, line, i + 1);
+		theirs.add(state, line, i + 1);
 	});
-	return [
-		{ text: ours.join("\n"), lines: oursLines },
-		{ text: theirs.join("\n"), lines: theirsLines },
-	];
+	return [ours.side(), theirs.side()];
 };
 
 export const LOCKFILE_PARSERS: Readonly<
