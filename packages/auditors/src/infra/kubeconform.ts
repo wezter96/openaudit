@@ -1,4 +1,5 @@
 import {
+	type AuditContext,
 	AuditorError,
 	type Category,
 	defineAuditor,
@@ -9,6 +10,7 @@ import {
 } from "@openaudit/core";
 import { Effect } from "effect";
 import {
+	type Document,
 	isMap,
 	isPair,
 	isScalar,
@@ -142,6 +144,112 @@ export type ResourceLocator = (
 const nodeStart = (node: unknown): number | undefined =>
 	(node as Node | undefined)?.range?.[0];
 
+/** A parsed YAML document of a manifest, as the locator matches it. */
+interface LocatedDoc {
+	readonly kind?: string;
+	readonly name?: string;
+	/** Line of the `---` marker, or 0 for an unmarked first document. */
+	readonly base: number;
+	readonly lineOf: (path: ReadonlyArray<string>) => number | undefined;
+}
+
+const keyName = (key: unknown): string =>
+	isScalar(key) ? String(key.value) : String(key);
+
+/** The node under `key` in a YAML map or sequence, with the offset to report for it. */
+const childOf = (
+	node: unknown,
+	key: string,
+):
+	| { readonly start: number | undefined; readonly node: unknown }
+	| undefined => {
+	if (isMap(node)) {
+		const pair = node.items.find((p) => isPair(p) && keyName(p.key) === key);
+		return pair && { start: nodeStart(pair.key), node: pair.value };
+	}
+	if (isSeq(node) && /^\d+$/.test(key)) {
+		const item = node.items[Number(key)];
+		return item === undefined
+			? undefined
+			: { start: nodeStart(item), node: item };
+	}
+	return undefined;
+};
+
+/** Offset of the deepest node along `path` that exists. */
+const offsetAt = (
+	contents: unknown,
+	path: ReadonlyArray<string>,
+): number | undefined => {
+	let node = contents;
+	let offset = nodeStart(node);
+	for (const key of path) {
+		const child = childOf(node, key);
+		if (!child) break;
+		offset = child.start ?? offset;
+		node = child.node;
+	}
+	return offset;
+};
+
+const toJsOrUndefined = (doc: Document.Parsed): unknown => {
+	try {
+		return doc.toJS({ maxAliasCount: 100 });
+	} catch {
+		return undefined;
+	}
+};
+
+const locatedDoc = (
+	doc: Document.Parsed,
+	text: string,
+	counter: LineCounter,
+): LocatedDoc => {
+	const value = toJsOrUndefined(doc);
+	const meta = isRecord(value) ? value.metadata : undefined;
+	const start = doc.range[0];
+	return {
+		kind: isRecord(value) ? str(value.kind) : undefined,
+		name: isRecord(meta) ? str(meta.name) : undefined,
+		base: text.startsWith("---", start) ? counter.linePos(start).line : 0,
+		lineOf: (path) => {
+			const offset = offsetAt(doc.contents, path);
+			return offset === undefined ? undefined : counter.linePos(offset).line;
+		},
+	};
+};
+
+/** Duplicate keys allowed, last one wins, like kubeconform's parser. */
+const locateDocs = (text: string): ReadonlyArray<LocatedDoc> => {
+	const counter = new LineCounter();
+	const docs = parseAllDocuments(text, {
+		lineCounter: counter,
+		uniqueKeys: false,
+	});
+	return (Array.isArray(docs) ? docs : []).map((doc) =>
+		locatedDoc(doc, text, counter),
+	);
+};
+
+const findDoc = (
+	docs: ReadonlyArray<LocatedDoc>,
+	resource: { kind?: string; name?: string },
+): LocatedDoc | undefined => {
+	if (resource.kind)
+		return docs.find(
+			(d) => d.kind === resource.kind && d.name === resource.name,
+		);
+	// Unparseable resources carry no kind; only a single-document file is unambiguous.
+	return docs.length === 1 ? docs[0] : undefined;
+};
+
+/** JSON pointer (`/spec/replicas`) to YAML keys. */
+const pointerPath = (pointer: string | undefined): string[] =>
+	(pointer ?? "")
+		.split("/")
+		.filter(Boolean)
+		.map((p) => p.replace(/~1/g, "/").replace(/~0/g, "~"));
+
 /**
  * Builds a locator over manifest texts. Documents are matched by kind and
  * metadata.name, as kubeconform reports them (duplicate keys allowed, last
@@ -150,103 +258,217 @@ const nodeStart = (node: unknown): number | undefined =>
 export const kubeconformLocator = (
 	texts: ReadonlyMap<string, string>,
 ): ResourceLocator => {
-	const parsed = new Map<
-		string,
-		ReadonlyArray<{
-			kind?: string;
-			name?: string;
-			/** Line of the `---` marker, or 0 for an unmarked first document. */
-			base: number;
-			lineOf: (path: ReadonlyArray<string>) => number | undefined;
-		}>
-	>();
+	const parsed = new Map<string, ReadonlyArray<LocatedDoc>>();
 	const docsOf = (file: string) => {
 		const cached = parsed.get(file);
 		if (cached) return cached;
 		const text = texts.get(file);
 		if (text === undefined) return [];
-		const counter = new LineCounter();
-		const docs = parseAllDocuments(text, {
-			lineCounter: counter,
-			uniqueKeys: false,
-		});
-		const entries = (Array.isArray(docs) ? docs : []).map((doc) => {
-			let value: unknown;
-			try {
-				value = doc.toJS({ maxAliasCount: 100 });
-			} catch {
-				value = undefined;
-			}
-			const meta = isRecord(value) ? value.metadata : undefined;
-			const start = doc.range[0];
-			const base = text.startsWith("---", start)
-				? counter.linePos(start).line
-				: 0;
-			const lineOf = (path: ReadonlyArray<string>) => {
-				let node: unknown = doc.contents;
-				let offset = nodeStart(node);
-				for (const key of path) {
-					if (isMap(node)) {
-						const pair = node.items.find(
-							(p) =>
-								isPair(p) &&
-								(isScalar(p.key) ? String(p.key.value) : String(p.key)) === key,
-						);
-						if (!pair) break;
-						offset = nodeStart(pair.key) ?? offset;
-						node = pair.value;
-					} else if (isSeq(node) && /^\d+$/.test(key)) {
-						const item = node.items[Number(key)];
-						if (item === undefined) break;
-						offset = nodeStart(item) ?? offset;
-						node = item;
-					} else break;
-				}
-				return offset === undefined ? undefined : counter.linePos(offset).line;
-			};
-			return {
-				kind: isRecord(value) ? str(value.kind) : undefined,
-				name: isRecord(meta) ? str(meta.name) : undefined,
-				base,
-				lineOf,
-			};
-		});
+		const entries = locateDocs(text);
 		parsed.set(file, entries);
 		return entries;
 	};
 
 	return (file, resource, pointer, docLine) => {
-		const docs = docsOf(file);
-		const doc = resource.kind
-			? docs.find((d) => d.kind === resource.kind && d.name === resource.name)
-			: // Unparseable resources carry no kind; only a single-document file is unambiguous.
-				docs.length === 1
-				? docs[0]
-				: undefined;
+		const doc = findDoc(docsOf(file), resource);
 		if (!doc) return undefined;
 		if (docLine !== undefined) return doc.base + docLine;
-		const path = (pointer ?? "")
-			.split("/")
-			.filter(Boolean)
-			.map((p) => p.replace(/~1/g, "/").replace(/~0/g, "~"));
-		return doc.lineOf(path);
+		return doc.lineOf(pointerPath(pointer));
 	};
 };
 
 const DOWNLOAD_FAILED_RE = /^failed downloading schema/;
 const MISSING_SCHEMA_RE = /^could not find schema for/;
 
+const isSchemaDownloadError = (r: Record<string, unknown>): boolean =>
+	r.status === "statusError" && DOWNLOAD_FAILED_RE.test(str(r.msg) ?? "");
+
 /** Messages of resources whose schema could not be downloaded (offline, proxy, outage). */
 export const kubeconformDownloadFailures = (json: unknown): string[] =>
 	isRecord(json)
-		? arr(json.resources).flatMap((r) =>
-				isRecord(r) &&
-				r.status === "statusError" &&
-				DOWNLOAD_FAILED_RE.test(str(r.msg) ?? "")
-					? [str(r.msg) ?? ""]
-					: [],
-			)
+		? arr(json.resources)
+				.filter(isRecord)
+				.filter(isSchemaDownloadError)
+				.map((r) => str(r.msg) ?? "")
 		: [];
+
+/** One entry of kubeconform's `resources` list. */
+interface KubeResource {
+	readonly file: string;
+	readonly kind: string | undefined;
+	readonly name: string | undefined;
+	readonly version: string | undefined;
+	readonly status: string | undefined;
+	readonly msg: string;
+	readonly errors: Record<string, unknown>[];
+}
+
+/** Kinds without a schema are reported once per kind, not once per resource. */
+interface MissingKind {
+	readonly files: string[];
+	readonly first: FindingInput["location"];
+	count: number;
+}
+
+type MissingKinds = Map<string, MissingKind>;
+
+const toResource = (
+	root: string,
+	r: Record<string, unknown>,
+): KubeResource => ({
+	file: relPath(root, str(r.filename)) ?? "",
+	kind: str(r.kind) || undefined,
+	name: str(r.name) || undefined,
+	version: str(r.version) || undefined,
+	status: str(r.status),
+	msg: str(r.msg) ?? "",
+	errors: arr(r.validationErrors).filter(isRecord),
+});
+
+const compareResources = (a: KubeResource, b: KubeResource): number =>
+	a.file.localeCompare(b.file) ||
+	(a.kind ?? "").localeCompare(b.kind ?? "") ||
+	(a.name ?? "").localeCompare(b.name ?? "");
+
+const labelOf = (r: KubeResource): string =>
+	[r.kind, r.name].filter(Boolean).join("/");
+
+/** What one finding about a resource reports. */
+interface Hit {
+	readonly rule: Rule;
+	readonly message: string;
+	readonly line: number | undefined;
+	readonly evidence: string | undefined;
+}
+
+const resourceFinding = (r: KubeResource, hit: Hit): FindingInput => {
+	const label = labelOf(r);
+	const { rule } = hit;
+	return {
+		ruleId: `${ID}/${rule.id}`,
+		title: label ? `${rule.title}: ${label}` : rule.title,
+		severity: rule.severity,
+		category: rule.category,
+		message: truncate(hit.message, 300),
+		remediation: rule.remediation,
+		location: { file: r.file, line: hit.line },
+		// Kind, name and JSON path only: never a field value.
+		evidence: hit.evidence ? truncate(hit.evidence) : undefined,
+		references: [DOCS, API_REFERENCE],
+		tags: ["kubeconform", "kubernetes", rule.id],
+	};
+};
+
+const violationFinding = (
+	r: KubeResource,
+	error: Record<string, unknown>,
+	locate: ResourceLocator,
+): FindingInput => {
+	const label = labelOf(r);
+	const pointer = str(error.path) ?? "";
+	const msg = str(error.msg) ?? r.msg;
+	// Point at the unknown key itself rather than its parent.
+	const extra = /^additional propert\w+ '([^'/~]+)'/.exec(msg)?.[1];
+	const path = extra ? `${pointer}/${extra}` : pointer;
+	return resourceFinding(r, {
+		rule: ruleOfViolation(msg),
+		message: `${label || "Resource"}${pointer ? ` at ${pointer}` : ""}: ${msg}`,
+		line: locate(r.file, r, path),
+		evidence: `${label} ${path}`.trim(),
+	});
+};
+
+const invalidFindings = (
+	r: KubeResource,
+	locate: ResourceLocator,
+): FindingInput[] =>
+	(r.errors.length > 0 ? r.errors : [{ path: "", msg: r.msg }])
+		.sort((a, b) => (str(a.path) ?? "").localeCompare(str(b.path) ?? ""))
+		.map((error) => violationFinding(r, error, locate));
+
+const errorRule = (msg: string): Rule => {
+	if (/already set in map|duplicate key/i.test(msg)) return RULES.duplicateKey;
+	if (/error (unmarshalling|converting) /.test(msg)) return RULES.invalidYaml;
+	return RULES.error;
+};
+
+const errorFinding = (
+	r: KubeResource,
+	locate: ResourceLocator,
+): FindingInput => {
+	const label = labelOf(r);
+	const yamlLine = /line (\d+):/.exec(r.msg)?.[1];
+	return resourceFinding(r, {
+		rule: errorRule(r.msg),
+		message: `${label || "Document"}: ${r.msg.replace(/\s+/g, " ")}`,
+		line: locate(
+			r.file,
+			r,
+			undefined,
+			yamlLine === undefined ? undefined : Number(yamlLine),
+		),
+		evidence: label || undefined,
+	});
+};
+
+const noteMissingSchema = (
+	missing: MissingKinds,
+	r: KubeResource,
+	locate: ResourceLocator,
+): void => {
+	const key = `${r.kind}@${r.version}`;
+	const entry = missing.get(key);
+	if (!entry) {
+		missing.set(key, {
+			files: [r.file],
+			first: { file: r.file, line: locate(r.file, r) },
+			count: 1,
+		});
+		return;
+	}
+	entry.count++;
+	if (!entry.files.includes(r.file)) entry.files.push(r.file);
+};
+
+const resourceFindings = (
+	r: KubeResource,
+	missing: MissingKinds,
+	locate: ResourceLocator,
+): FindingInput[] => {
+	if (r.status === "statusInvalid") return invalidFindings(r, locate);
+	if (r.status !== "statusError") return [];
+	if (DOWNLOAD_FAILED_RE.test(r.msg)) return [];
+	if (MISSING_SCHEMA_RE.test(r.msg)) {
+		noteMissingSchema(missing, r, locate);
+		return [];
+	}
+	return [errorFinding(r, locate)];
+};
+
+const fileList = (files: ReadonlyArray<string>): string =>
+	files.length > 3
+		? `${files.slice(0, 3).join(", ")} and ${files.length - 3} more`
+		: files.join(", ");
+
+const missingSchemaFinding = ([key, entry]: [
+	string,
+	MissingKind,
+]): FindingInput => {
+	const [kind, version] = key.split("@");
+	const rule = RULES.missingSchema;
+	return {
+		ruleId: `${ID}/${rule.id}`,
+		title: `${rule.title}: ${kind}`,
+		severity: rule.severity,
+		category: rule.category,
+		message: `${entry.count} ${kind} resource${entry.count === 1 ? "" : "s"} (${version}) not validated: no JSON schema found. Files: ${fileList(entry.files)}.`,
+		remediation: rule.remediation,
+		location: entry.first,
+		evidence: `${kind} ${version}`,
+		references: ["https://github.com/datreeio/CRDs-catalog", DOCS],
+		tags: ["kubeconform", "kubernetes", rule.id],
+	};
+};
 
 /** Parses `kubeconform -output json -summary` output. */
 export const parseKubeconformReport = (
@@ -255,132 +477,73 @@ export const parseKubeconformReport = (
 	locate: ResourceLocator = () => undefined,
 ): FindingInput[] => {
 	if (!isRecord(json)) return [];
-	const findings: FindingInput[] = [];
-	// Kinds without a schema are reported once per kind, not once per resource.
-	const missing = new Map<
-		string,
-		{ files: string[]; first: FindingInput["location"]; count: number }
-	>();
-
-	const resources = arr(json.resources)
+	const missing: MissingKinds = new Map();
+	const findings = arr(json.resources)
 		.filter(isRecord)
-		.map((r) => ({
-			file: relPath(root, str(r.filename)) ?? "",
-			kind: str(r.kind) || undefined,
-			name: str(r.name) || undefined,
-			version: str(r.version) || undefined,
-			status: str(r.status),
-			msg: str(r.msg) ?? "",
-			errors: arr(r.validationErrors).filter(isRecord),
-		}))
+		.map((r) => toResource(root, r))
 		// kubeconform validates concurrently, so its output order is not stable.
-		.sort(
-			(a, b) =>
-				a.file.localeCompare(b.file) ||
-				(a.kind ?? "").localeCompare(b.kind ?? "") ||
-				(a.name ?? "").localeCompare(b.name ?? ""),
-		);
-
-	for (const r of resources) {
-		const label = [r.kind, r.name].filter(Boolean).join("/");
-		const push = (
-			rule: Rule,
-			message: string,
-			line: number | undefined,
-			evidence: string | undefined,
-		) =>
-			findings.push({
-				ruleId: `${ID}/${rule.id}`,
-				title: label ? `${rule.title}: ${label}` : rule.title,
-				severity: rule.severity,
-				category: rule.category,
-				message: truncate(message, 300),
-				remediation: rule.remediation,
-				location: { file: r.file, line },
-				// Kind, name and JSON path only: never a field value.
-				evidence: evidence ? truncate(evidence) : undefined,
-				references: [DOCS, API_REFERENCE],
-				tags: ["kubeconform", "kubernetes", rule.id],
-			});
-
-		if (r.status === "statusInvalid") {
-			const errors = (
-				r.errors.length > 0 ? r.errors : [{ path: "", msg: r.msg }]
-			).sort((a, b) => (str(a.path) ?? "").localeCompare(str(b.path) ?? ""));
-			for (const e of errors) {
-				const pointer = str(e.path) ?? "";
-				const msg = str(e.msg) ?? r.msg;
-				// Point at the unknown key itself rather than its parent.
-				const extra = /^additional propert\w+ '([^'/~]+)'/.exec(msg)?.[1];
-				const path = extra ? `${pointer}/${extra}` : pointer;
-				push(
-					ruleOfViolation(msg),
-					`${label || "Resource"}${pointer ? ` at ${pointer}` : ""}: ${msg}`,
-					locate(r.file, r, path),
-					`${label} ${path}`.trim(),
-				);
-			}
-		} else if (r.status === "statusError") {
-			if (DOWNLOAD_FAILED_RE.test(r.msg)) continue;
-			if (MISSING_SCHEMA_RE.test(r.msg)) {
-				const key = `${r.kind}@${r.version}`;
-				const entry = missing.get(key);
-				if (entry) {
-					entry.count++;
-					if (!entry.files.includes(r.file)) entry.files.push(r.file);
-				} else
-					missing.set(key, {
-						files: [r.file],
-						first: { file: r.file, line: locate(r.file, r) },
-						count: 1,
-					});
-				continue;
-			}
-			const yamlLine = /line (\d+):/.exec(r.msg)?.[1];
-			const duplicate = /already set in map|duplicate key/i.test(r.msg);
-			const unparseable = /error (unmarshalling|converting) /.test(r.msg);
-			push(
-				duplicate
-					? RULES.duplicateKey
-					: unparseable
-						? RULES.invalidYaml
-						: RULES.error,
-				`${label || "Document"}: ${r.msg.replace(/\s+/g, " ")}`,
-				locate(
-					r.file,
-					r,
-					undefined,
-					yamlLine === undefined ? undefined : Number(yamlLine),
-				),
-				label || undefined,
-			);
-		}
-	}
-
-	for (const [key, entry] of missing) {
-		const [kind, version] = key.split("@");
-		const rule = RULES.missingSchema;
-		const files =
-			entry.files.length > 3
-				? `${entry.files.slice(0, 3).join(", ")} and ${entry.files.length - 3} more`
-				: entry.files.join(", ");
-		findings.push({
-			ruleId: `${ID}/${rule.id}`,
-			title: `${rule.title}: ${kind}`,
-			severity: rule.severity,
-			category: rule.category,
-			message: `${entry.count} ${kind} resource${entry.count === 1 ? "" : "s"} (${version}) not validated: no JSON schema found. Files: ${files}.`,
-			remediation: rule.remediation,
-			location: entry.first,
-			evidence: `${kind} ${version}`,
-			references: ["https://github.com/datreeio/CRDs-catalog", DOCS],
-			tags: ["kubeconform", "kubernetes", rule.id],
-		});
-	}
-	return findings;
+		.sort(compareResources)
+		.flatMap((r) => resourceFindings(r, missing, locate));
+	return [...findings, ...[...missing].map(missingSchemaFinding)];
 };
 
 const VERSION_RE = /^(master|\d+\.\d+\.\d+)$/;
+
+const isValidVersion = (version: unknown): version is string =>
+	typeof version === "string" && VERSION_RE.test(version);
+
+/** `settings["iac.kubeconform"].kubernetesVersion`, validated. */
+const kubernetesVersion = (
+	ctx: AuditContext,
+): Effect.Effect<string | undefined, AuditorError> => {
+	const version = ctx.options.settings?.[ID]?.kubernetesVersion;
+	if (version === undefined || isValidVersion(version))
+		return Effect.succeed(version);
+	return Effect.fail(
+		new AuditorError({
+			message: `settings["${ID}"].kubernetesVersion must be "master" or a full version such as "1.31.0"`,
+		}),
+	);
+};
+
+const kubeconformArgs = (
+	bin: string,
+	version: string | undefined,
+	manifests: ReadonlyArray<string>,
+): string[] => [
+	bin,
+	"-output",
+	"json",
+	"-summary",
+	"-strict",
+	...(version ? ["-kubernetes-version", version] : []),
+	"-schema-location",
+	"default",
+	"-schema-location",
+	CRDS_CATALOG,
+	// "./" keeps hostile file names from being read as flags.
+	...manifests.map((f) => `./${f}`),
+];
+
+/** Resources kubeconform validated (valid or invalid), from its summary. */
+const validatedCount = (json: unknown): number => {
+	const summary = isRecord(json) && isRecord(json.summary) ? json.summary : {};
+	return (num(summary.valid) ?? 0) + (num(summary.invalid) ?? 0);
+};
+
+/** Fails when no schema could be downloaded at all; logs partial failures. */
+const checkSchemaDownloads = (ctx: AuditContext, json: unknown) =>
+	Effect.gen(function* () {
+		const failures = kubeconformDownloadFailures(json);
+		if (failures.length === 0) return;
+		if (validatedCount(json) === 0)
+			return yield* new AuditorError({
+				message: `kubeconform could not download any schema (network access to raw.githubusercontent.com is needed): ${truncate(failures[0] ?? "", 200)}`,
+			});
+		yield* ctx.log(
+			`kubeconform: ${failures.length} resource(s) not validated, schema download failed`,
+		);
+	});
 
 /** Wraps kubeconform, which validates Kubernetes manifests against the API schemas. */
 export const kubeconform = defineAuditor({
@@ -403,30 +566,10 @@ export const kubeconform = defineAuditor({
 				"kubeconform",
 				"Install: brew install kubeconform or go install github.com/yannh/kubeconform/cmd/kubeconform@latest (https://github.com/yannh/kubeconform#installation).",
 			);
-			const version = ctx.options.settings?.[ID]?.kubernetesVersion;
-			if (
-				version !== undefined &&
-				(typeof version !== "string" || !VERSION_RE.test(version))
-			)
-				return yield* new AuditorError({
-					message: `settings["${ID}"].kubernetesVersion must be "master" or a full version such as "1.31.0"`,
-				});
+			const version = yield* kubernetesVersion(ctx);
 			const res = yield* runTool(
 				ctx,
-				[
-					bin,
-					"-output",
-					"json",
-					"-summary",
-					"-strict",
-					...(version ? ["-kubernetes-version", version] : []),
-					"-schema-location",
-					"default",
-					"-schema-location",
-					CRDS_CATALOG,
-					// "./" keeps hostile file names from being read as flags.
-					...[...manifests.keys()].map((f) => `./${f}`),
-				],
+				kubeconformArgs(bin, version, [...manifests.keys()]),
 				ws.root,
 				// 1 = some resources are invalid or errored; the report is still on stdout.
 				[0, 1],
@@ -436,20 +579,7 @@ export const kubeconform = defineAuditor({
 					message: `kubeconform produced no output: ${truncate(res.stderr, 300)}`,
 				});
 			const json = yield* parseJson(res.stdout, "kubeconform");
-			const failures = kubeconformDownloadFailures(json);
-			const summary =
-				isRecord(json) && isRecord(json.summary) ? json.summary : {};
-			if (
-				failures.length > 0 &&
-				(num(summary.valid) ?? 0) + (num(summary.invalid) ?? 0) === 0
-			)
-				return yield* new AuditorError({
-					message: `kubeconform could not download any schema (network access to raw.githubusercontent.com is needed): ${truncate(failures[0] ?? "", 200)}`,
-				});
-			if (failures.length > 0)
-				yield* ctx.log(
-					`kubeconform: ${failures.length} resource(s) not validated, schema download failed`,
-				);
+			yield* checkSchemaDownloads(ctx, json);
 			return parseKubeconformReport(
 				json,
 				ws.root,
