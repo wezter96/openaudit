@@ -19,6 +19,11 @@ services:
     environment:
       SCANNER_TOKEN: ${SCANNER_TOKEN:?SCANNER_TOKEN is required}
       API_URL: ${API_URL:-https://openaudit.se}
+    # Public resolvers: the host firewall drops this network's traffic to the
+    # LAN, so the router's DNS is out of reach on purpose.
+    dns:
+      - 1.1.1.1
+      - 9.9.9.9
     networks:
       - openaudit-scanner
 
