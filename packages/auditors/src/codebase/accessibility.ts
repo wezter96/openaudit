@@ -8,6 +8,13 @@ import {
 import { Effect } from "effect";
 
 import {
+	type AttrValue,
+	type Markup,
+	type Offset,
+	scanTags,
+	type Tag,
+} from "./accessibility-tags";
+import {
 	extOf,
 	isFixturePath,
 	isGeneratedPath,
@@ -19,137 +26,18 @@ import {
 	wcagUrl,
 } from "./util";
 
-/* -------------------------------------------------------------------------- */
-/*                                 Tag parsing                                */
-/* -------------------------------------------------------------------------- */
+export { parseTag, scanTags, type Tag } from "./accessibility-tags";
 
-type AttrValue =
-	| { readonly kind: "string"; readonly value: string }
-	| { readonly kind: "expr"; readonly value: string }
-	| { readonly kind: "bool" };
-
-export interface Tag {
-	readonly name: string;
-	/** Normalised attribute names: `onClick`, `@click`, `on:click` → `onclick`. */
-	readonly attrs: ReadonlyMap<string, AttrValue>;
-	/** `{...props}` / `v-bind="obj"`: attributes we cannot see. */
-	readonly hasSpread: boolean;
-	readonly selfClosing: boolean;
-	readonly start: number;
-	/** Index just past the closing `>`. */
-	readonly end: number;
-}
-
-/** Skips a balanced `{...}` starting at `i`; returns the index after `}`. */
-const skipBraces = (text: string, i: number): number => {
-	let depth = 0;
-	for (let j = i; j < text.length && j - i < 4000; j++) {
-		const ch = text[j];
-		if (ch === '"' || ch === "'" || ch === "`") {
-			const close = text.indexOf(ch, j + 1);
-			if (close === -1) return -1;
-			j = close;
-		} else if (ch === "{") depth++;
-		else if (ch === "}" && --depth === 0) return j + 1;
-	}
-	return -1;
-};
-
-const normaliseAttr = (raw: string): string => {
-	let name = raw;
-	if (name.startsWith("v-bind:")) name = name.slice(7);
-	else if (name.startsWith(":")) name = name.slice(1);
-	else if (name.startsWith("v-on:")) name = `on${name.slice(5)}`;
-	else if (name.startsWith("@")) name = `on${name.slice(1)}`;
-	else if (name.startsWith("on:")) name = `on${name.slice(3)}`;
-	name = name.split(".")[0] ?? name; // @click.prevent
-	name = name.toLowerCase();
-	return name === "classname" ? "class" : name === "htmlfor" ? "for" : name;
-};
-
-/** Parses the tag opening at `start` (`text[start] === "<"`). */
-export const parseTag = (text: string, start: number): Tag | undefined => {
-	const nameMatch = /^<([a-zA-Z][\w.:-]*)/.exec(text.slice(start, start + 64));
-	if (!nameMatch?.[1]) return undefined;
-	const attrs = new Map<string, AttrValue>();
-	let hasSpread = false;
-	let j = start + nameMatch[0].length;
-	const ws = () => {
-		while (j < text.length && /\s/.test(text[j] ?? "")) j++;
-	};
-	while (j < text.length) {
-		if (j - start > 6000) return undefined;
-		ws();
-		const ch = text[j];
-		if (ch === ">") return done(false);
-		if (ch === "/" && text[j + 1] === ">") {
-			j++;
-			return done(true);
-		}
-		if (ch === "{") {
-			const end = skipBraces(text, j);
-			if (end === -1) return undefined;
-			const inner = text.slice(j + 1, end - 1).trim();
-			if (inner.startsWith("...")) hasSpread = true;
-			else if (/^\w+$/.test(inner))
-				attrs.set(inner.toLowerCase(), { kind: "expr", value: inner }); // svelte {alt}
-			j = end;
-			continue;
-		}
-		const nm = /^[^\s=>/"'{}<]+/.exec(text.slice(j, j + 128));
-		if (!nm) return undefined;
-		const rawName = nm[0];
-		j += rawName.length;
-		ws();
-		let value: AttrValue = { kind: "bool" };
-		if (text[j] === "=") {
-			j++;
-			ws();
-			const q = text[j];
-			if (q === '"' || q === "'") {
-				const close = text.indexOf(q, j + 1);
-				if (close === -1) return undefined;
-				const v = text.slice(j + 1, close);
-				const bound = rawName.startsWith(":") || rawName.startsWith("v-bind:");
-				value = { kind: bound ? "expr" : "string", value: v };
-				j = close + 1;
-			} else if (q === "{") {
-				const end = skipBraces(text, j);
-				if (end === -1) return undefined;
-				value = { kind: "expr", value: text.slice(j + 1, end - 1).trim() };
-				j = end;
-			} else {
-				const v = /^[^\s>]+/.exec(text.slice(j, j + 256))?.[0] ?? "";
-				value = { kind: "string", value: v };
-				j += v.length;
-			}
-		}
-		if (rawName === "v-bind") hasSpread = true;
-		else attrs.set(normaliseAttr(rawName), value);
-	}
-	return undefined;
-
-	function done(selfClosing: boolean): Tag {
-		return {
-			name: nameMatch?.[1] ?? "",
-			attrs,
-			hasSpread,
-			selfClosing,
-			start,
-			end: j + 1,
-		};
-	}
-};
-
-/** All lowercase (intrinsic HTML) opening tags in `text`. */
-export const scanTags = (text: string): Tag[] => {
-	const tags: Tag[] = [];
-	for (const m of text.matchAll(/<[a-z][\w-]*(?=[\s/>])/g)) {
-		const tag = parseTag(text, m.index ?? 0);
-		if (tag) tags.push(tag);
-	}
-	return tags;
-};
+/** Repository-relative file path. */
+type FilePath = string;
+/** File extension without the dot, lowercase. */
+type Extension = string;
+/** Value of an element's `role` attribute. */
+type AriaRole = string;
+/** Value of an element's `id` attribute. */
+type ElementId = string;
+/** Static value of an attribute. */
+type AttrText = string;
 
 /* -------------------------------------------------------------------------- */
 /*                                    Rules                                   */
@@ -311,7 +199,7 @@ const UNLABELLED_INPUT_TYPES = new Set([
 const ICON_COMPONENT =
 	/<(?:\w+Icon|Icon\w*|Fa[A-Z]\w*|Md[A-Z]\w*|Io[A-Z]\w*|Hi[A-Z]\w*|Bi[A-Z]\w*|Ai[A-Z]\w*|Lu[A-Z]\w*)\b/;
 
-const strValue = (v: AttrValue | undefined): string | undefined =>
+const strValue = (v: AttrValue | undefined): AttrText | undefined =>
 	v?.kind === "string"
 		? v.value
 		: v?.kind === "expr"
@@ -333,8 +221,8 @@ const isHidden = (tag: Tag) => {
 
 /** Text between an element's open tag and its first closing tag. */
 const elementContent = (
-	text: string,
-	lower: string,
+	text: Markup,
+	lower: Markup,
 	tag: Tag,
 ): string | undefined => {
 	if (tag.selfClosing) return "";
@@ -345,7 +233,7 @@ const elementContent = (
 };
 
 /** Whether element content (between open and close tags) yields a name. */
-const contentHasName = (content: string): boolean => {
+const contentHasName = (content: Markup): boolean => {
 	if (/\{/.test(content)) return true; // expression or template interpolation
 	if (/<img\b[^>]*\balt\s*=\s*["'][^"']+["']/i.test(content)) return true;
 	if (/aria-label(?:ledby)?\s*=/i.test(content)) return true;
@@ -358,10 +246,10 @@ const contentHasName = (content: string): boolean => {
 	return text.length > 0;
 };
 
-const isWrappedInLabel = (text: string, index: number) =>
+const isWrappedInLabel = (text: Markup, index: Offset) =>
 	text.lastIndexOf("<label", index) > text.lastIndexOf("</label", index);
 
-const hasExplicitLabel = (text: string, id: string) =>
+const hasExplicitLabel = (text: Markup, id: ElementId) =>
 	// id is escaped, so it only matches itself.
 	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 	new RegExp(
@@ -369,7 +257,7 @@ const hasExplicitLabel = (text: string, id: string) =>
 	).test(text);
 
 /** max-scale below 2 or user-scalable=no in a viewport `content` string. */
-export const viewportBlocksZoom = (content: string): boolean => {
+export const viewportBlocksZoom = (content: AttrText): boolean => {
 	if (/user-scalable\s*=\s*(?:no|0)\b/i.test(content)) return true;
 	const max = /maximum-scale\s*=\s*([\d.]+)/i.exec(content)?.[1];
 	return max !== undefined && Number(max) < 2;
@@ -399,196 +287,286 @@ const markupExt = new Set([
 const styleExt = new Set(["css", "scss", "sass", "less", "styl"]);
 const scriptExt = new Set(["ts", "mts", "js", "mjs", "jsx", "tsx"]);
 
+/** A rule hit on one tag, before it is placed in the file. */
+interface TagHit {
+	readonly rule: A11yRule;
+	readonly confidence: Confidence;
+	readonly detail?: string;
+}
+
+/** A rule hit at a position in the file. */
+interface Match extends TagHit {
+	readonly index: Offset;
+	readonly evidence: string;
+}
+
+interface TagContext {
+	readonly text: Markup;
+	readonly lower: Markup;
+	readonly tag: Tag;
+	readonly role: AriaRole | undefined;
+}
+
+type TagCheck = (ctx: TagContext) => TagHit | undefined;
+
+interface TagRule {
+	/** Element names the check applies to; every element when absent. */
+	readonly on?: ReadonlySet<string>;
+	readonly check: TagCheck;
+}
+
+const isPresentational = (role: AriaRole | undefined) =>
+	role === "presentation" || role === "none";
+
+const checkImgAlt: TagCheck = ({ tag, role }) => {
+	if (isPresentational(role)) return undefined;
+	return tag.attrs.has("alt") || hasName(tag)
+		? undefined
+		: { rule: RULES.imgAlt, confidence: "high" };
+};
+
+const KEY_HANDLERS = ["onkeydown", "onkeyup", "onkeypress"];
+
+/** What a clickable non-interactive element lacks for keyboard users. */
+const missingKeyboardSupport = (attrs: Tag["attrs"]) =>
+	[
+		attrs.has("role") ? undefined : "role",
+		attrs.has("tabindex") ? undefined : "tabIndex",
+		KEY_HANDLERS.some((handler) => attrs.has(handler))
+			? undefined
+			: "keyboard handler",
+	].filter(Boolean);
+
+const checkClickHandler: TagCheck = ({ tag, role }) => {
+	if (!tag.attrs.has("onclick") || isPresentational(role)) return undefined;
+	const missing = missingKeyboardSupport(tag.attrs);
+	return missing.length
+		? {
+				rule: RULES.clickNonInteractive,
+				confidence: "medium",
+				detail: `Missing: ${missing.join(", ")}.`,
+			}
+		: undefined;
+};
+
+/** Missing href, `#`, empty or `javascript:`: the link goes nowhere. */
+const isDeadHref = (href: AttrValue | undefined): boolean => {
+	if (href === undefined) return true;
+	const value = strValue(href);
+	return value !== undefined && /^(#|javascript:.*|)$/i.test(value.trim());
+};
+
+const isJavascriptUrl = (href: AttrText | undefined): boolean =>
+	href !== undefined && /^javascript:/i.test(href.trim());
+
+const checkAnchorButton: TagCheck = ({ tag }) => {
+	const href = tag.attrs.get("href");
+	const actsAsButton = tag.attrs.has("onclick") && isDeadHref(href);
+	return actsAsButton || isJavascriptUrl(strValue(href))
+		? { rule: RULES.anchorButton, confidence: "high" }
+		: undefined;
+};
+
+const checkPositiveTabindex: TagCheck = ({ tag }) => {
+	const tabindex = tag.attrs.get("tabindex");
+	if (tabindex === undefined || tabindex.kind === "bool") return undefined;
+	const value = Number(tabindex.value.trim());
+	return Number.isInteger(value) && value > 0
+		? { rule: RULES.positiveTabindex, confidence: "high" }
+		: undefined;
+};
+
+const checkAutofocus: TagCheck = ({ tag }) => {
+	const autofocus = tag.attrs.get("autofocus");
+	if (autofocus === undefined) return undefined;
+	const disabled =
+		autofocus.kind !== "bool" && /^false$/.test(autofocus.value.trim());
+	return disabled ? undefined : { rule: RULES.autofocus, confidence: "medium" };
+};
+
+const FORM_CONTROLS = new Set(["input", "select", "textarea"]);
+
+const inputType = (attrs: Tag["attrs"]): string =>
+	(strValue(attrs.get("type")) ?? "text").toLowerCase();
+
+/** A bound `type` or `id` may get its label at runtime. */
+const hasBoundTypeOrId = (attrs: Tag["attrs"]): boolean =>
+	attrs.get("type")?.kind === "expr" || attrs.get("id")?.kind === "expr";
+
+const hasLabelFor = (text: Markup, attrs: Tag["attrs"]): boolean => {
+	const id = attrs.get("id");
+	return id?.kind === "string" && hasExplicitLabel(text, id.value);
+};
+
+const isLabelled = (text: Markup, tag: Tag): boolean => {
+	if (hasName(tag) || UNLABELLED_INPUT_TYPES.has(inputType(tag.attrs)))
+		return true;
+	if (hasBoundTypeOrId(tag.attrs) || hasLabelFor(text, tag.attrs)) return true;
+	return isWrappedInLabel(text, tag.start);
+};
+
+const checkFormLabel: TagCheck = ({ text, tag }) =>
+	isLabelled(text, tag)
+		? undefined
+		: { rule: RULES.formLabel, confidence: "medium" };
+
+const checkHtmlLang: TagCheck = ({ tag }) =>
+	tag.attrs.has("lang") || tag.attrs.has("xml:lang")
+		? undefined
+		: { rule: RULES.htmlLang, confidence: "high" };
+
+const isControl = (tag: Tag): boolean =>
+	tag.name === "button" || (tag.name === "a" && tag.attrs.has("href"));
+
+const checkEmptyControl: TagCheck = ({ text, lower, tag }) => {
+	if (!isControl(tag) || hasName(tag)) return undefined;
+	const content = elementContent(text, lower, tag);
+	if (content === undefined || contentHasName(content)) return undefined;
+	return {
+		rule: RULES.emptyControl,
+		confidence: ICON_COMPONENT.test(content) ? "low" : "medium",
+	};
+};
+
+const checkViewportMeta: TagCheck = ({ tag }) => {
+	if (strValue(tag.attrs.get("name"))?.toLowerCase() !== "viewport")
+		return undefined;
+	const content = strValue(tag.attrs.get("content"));
+	return content && viewportBlocksZoom(content)
+		? { rule: RULES.viewportZoom, confidence: "high" }
+		: undefined;
+};
+
+const OUTLINE_NONE_CLASS = /(?:^|[\s"'`])outline-(?:none|0)(?=[\s"'`]|$)/;
+const FOCUS_STYLE_CLASS =
+	/focus(?:-visible|-within)?:(?:ring|outline|border|shadow|underline|bg)/;
+
+const checkOutlineClass: TagCheck = ({ tag }) => {
+	const cls = tag.attrs.get("class");
+	if (cls === undefined || cls.kind === "bool") return undefined;
+	if (!OUTLINE_NONE_CLASS.test(cls.value) || FOCUS_STYLE_CLASS.test(cls.value))
+		return undefined;
+	return {
+		rule: RULES.outline,
+		confidence: "low",
+		detail:
+			"Tailwind `outline-none` is used without a focus: / focus-visible: replacement.",
+	};
+};
+
+/** Per-tag checks, in the order their findings are reported. */
+const TAG_RULES: ReadonlyArray<TagRule> = [
+	{ on: new Set(["img"]), check: checkImgAlt },
+	{ on: NON_INTERACTIVE, check: checkClickHandler },
+	{ on: new Set(["a"]), check: checkAnchorButton },
+	{ check: checkPositiveTabindex },
+	{ check: checkAutofocus },
+	{ on: FORM_CONTROLS, check: checkFormLabel },
+	{ on: new Set(["html"]), check: checkHtmlLang },
+	{ check: checkEmptyControl },
+	{ on: new Set(["meta"]), check: checkViewportMeta },
+	{ check: checkOutlineClass },
+];
+
+const appliesTo = (rule: TagRule, tag: Tag): boolean =>
+	rule.on?.has(tag.name) ?? true;
+
+const tagMatches = (ctx: TagContext): Match[] => {
+	const { start, end } = ctx.tag;
+	const evidence = ctx.text.slice(start, end);
+	return TAG_RULES.flatMap((rule) => {
+		const hit = appliesTo(rule, ctx.tag) ? rule.check(ctx) : undefined;
+		return hit ? [{ ...hit, index: start, evidence }] : [];
+	});
+};
+
+const scanMarkup = (text: Markup): Match[] => {
+	const lower = text.toLowerCase();
+	return scanTags(text).flatMap((tag) =>
+		tag.hasSpread || isHidden(tag)
+			? []
+			: tagMatches({ text, lower, tag, role: strValue(tag.attrs.get("role")) }),
+	);
+};
+
+/** Next.js `viewport` exports that disable zoom. */
+const scanViewportOptions = (text: Markup): Match[] =>
+	Array.from(
+		text.matchAll(
+			/\b(?:userScalable\s*:\s*false|maximumScale\s*:\s*(?:1(?:\.\d+)?|0?\.\d+))\b/g,
+		),
+		(m) => ({
+			rule: RULES.viewportZoom,
+			index: m.index ?? 0,
+			evidence: m[0],
+			confidence: "medium",
+		}),
+	);
+
+const hasStyles = (text: Markup, ext: Extension): boolean =>
+	styleExt.has(ext) ||
+	/<style[\s>]/.test(text) ||
+	(scriptExt.has(ext) && /\boutline\s*:\s*["']?(?:none|0)\b/.test(text));
+
+/** Whether the CSS block around `index` draws its own focus indicator. */
+const hasOutlineReplacement = (text: Markup, index: Offset): boolean => {
+	const open = text.lastIndexOf("{", index);
+	const close = text.indexOf("}", index);
+	const block = text.slice(open + 1, close === -1 ? undefined : close);
+	return /box-shadow|boxShadow|border(?:-color|Color)?\s*:|outline-(?:color|style|width)\s*:/.test(
+		block,
+	);
+};
+
+const scanOutlineStyles = (text: Markup, ext: Extension): Match[] => {
+	if (!hasStyles(text, ext) || /focus-visible/.test(text)) return [];
+	const confidence: Confidence = styleExt.has(ext) ? "medium" : "low";
+	return Array.from(text.matchAll(/\boutline\s*:\s*["']?(?:none|0)\b/g))
+		.filter((m) => !hasOutlineReplacement(text, m.index ?? 0))
+		.map((m) => ({
+			rule: RULES.outline,
+			index: m.index ?? 0,
+			evidence: m[0],
+			confidence,
+		}));
+};
+
+interface FindingSite {
+	readonly path: FilePath;
+	readonly lineOf: (index: Offset) => number;
+}
+
+const toFinding = (site: FindingSite, match: Match): FindingInput => {
+	const { rule, detail } = match;
+	return {
+		ruleId: `code.accessibility/${rule.id}`,
+		title: rule.title,
+		severity: rule.severity,
+		category: "accessibility",
+		message: detail ? `${rule.message} ${detail}` : rule.message,
+		location: { file: site.path, line: site.lineOf(match.index) },
+		evidence: truncate(match.evidence.replace(/\s+/g, " ")),
+		remediation: rule.remediation,
+		references: rule.wcag.map(wcagUrl),
+		confidence: match.confidence,
+		tags: rule.wcag.map((sc) => `wcag-${sc}`),
+	};
+};
+
 /** Runs every rule over one file. Exported for unit tests. */
 export const scanAccessibility = (file: SourceFile): FindingInput[] => {
 	const { path, text } = file;
 	const ext = extOf(path);
-	const lineOf = lineLocator(text);
-	const findings: FindingInput[] = [];
-	const report = (
-		rule: A11yRule,
-		index: number,
-		evidence: string,
-		confidence: Confidence = "medium",
-		detail?: string,
-	) =>
-		findings.push({
-			ruleId: `code.accessibility/${rule.id}`,
-			title: rule.title,
-			severity: rule.severity,
-			category: "accessibility",
-			message: detail ? `${rule.message} ${detail}` : rule.message,
-			location: { file: path, line: lineOf(index) },
-			evidence: truncate(evidence.replace(/\s+/g, " ")),
-			remediation: rule.remediation,
-			references: rule.wcag.map(wcagUrl),
-			confidence,
-			tags: rule.wcag.map((sc) => `wcag-${sc}`),
-		});
-
-	if (markupExt.has(ext)) {
-		const lower = text.toLowerCase();
-		for (const tag of scanTags(text)) {
-			const src = text.slice(tag.start, tag.end);
-			const a = tag.attrs;
-			if (tag.hasSpread || isHidden(tag)) continue;
-			const role = strValue(a.get("role"));
-
-			if (
-				tag.name === "img" &&
-				!a.has("alt") &&
-				!hasName(tag) &&
-				role !== "presentation" &&
-				role !== "none"
-			)
-				report(RULES.imgAlt, tag.start, src, "high");
-
-			if (
-				NON_INTERACTIVE.has(tag.name) &&
-				a.has("onclick") &&
-				role !== "presentation" &&
-				role !== "none"
-			) {
-				const missing = [
-					a.has("role") ? undefined : "role",
-					a.has("tabindex") ? undefined : "tabIndex",
-					a.has("onkeydown") || a.has("onkeyup") || a.has("onkeypress")
-						? undefined
-						: "keyboard handler",
-				].filter(Boolean);
-				if (missing.length)
-					report(
-						RULES.clickNonInteractive,
-						tag.start,
-						src,
-						"medium",
-						`Missing: ${missing.join(", ")}.`,
-					);
-			}
-
-			if (tag.name === "a") {
-				const href = a.get("href");
-				const hrefStr = strValue(href);
-				const dead =
-					href === undefined ||
-					(hrefStr !== undefined &&
-						/^(#|javascript:.*|)$/i.test(hrefStr.trim()));
-				if (
-					(a.has("onclick") && dead) ||
-					(hrefStr !== undefined && /^javascript:/i.test(hrefStr.trim()))
-				)
-					report(RULES.anchorButton, tag.start, src, "high");
-			}
-
-			const tabindex = a.get("tabindex");
-			const tabValue =
-				tabindex?.kind === "bool" ? undefined : Number(tabindex?.value.trim());
-			if (tabValue !== undefined && Number.isInteger(tabValue) && tabValue > 0)
-				report(RULES.positiveTabindex, tag.start, src, "high");
-
-			const autofocus = a.get("autofocus");
-			if (
-				autofocus &&
-				!(autofocus.kind !== "bool" && /^false$/.test(autofocus.value.trim()))
-			)
-				report(RULES.autofocus, tag.start, src, "medium");
-
-			if (
-				tag.name === "input" ||
-				tag.name === "select" ||
-				tag.name === "textarea"
-			) {
-				const type = (strValue(a.get("type")) ?? "text").toLowerCase();
-				const id = a.get("id");
-				const labelled =
-					hasName(tag) ||
-					UNLABELLED_INPUT_TYPES.has(type) ||
-					a.get("type")?.kind === "expr" ||
-					id?.kind === "expr" ||
-					(id?.kind === "string" && hasExplicitLabel(text, id.value)) ||
-					isWrappedInLabel(text, tag.start);
-				if (!labelled) report(RULES.formLabel, tag.start, src, "medium");
-			}
-
-			if (tag.name === "html" && !a.has("lang") && !a.has("xml:lang"))
-				report(RULES.htmlLang, tag.start, src, "high");
-
-			if (
-				(tag.name === "button" || (tag.name === "a" && a.has("href"))) &&
-				!hasName(tag)
-			) {
-				const content = elementContent(text, lower, tag);
-				if (content !== undefined && !contentHasName(content))
-					report(
-						RULES.emptyControl,
-						tag.start,
-						src,
-						ICON_COMPONENT.test(content) ? "low" : "medium",
-					);
-			}
-
-			if (
-				tag.name === "meta" &&
-				strValue(a.get("name"))?.toLowerCase() === "viewport"
-			) {
-				const content = strValue(a.get("content"));
-				if (content && viewportBlocksZoom(content))
-					report(RULES.viewportZoom, tag.start, src, "high");
-			}
-
-			const cls = a.get("class");
-			if (
-				cls &&
-				cls.kind !== "bool" &&
-				/(?:^|[\s"'`])outline-(?:none|0)(?=[\s"'`]|$)/.test(cls.value)
-			) {
-				if (
-					!/focus(?:-visible|-within)?:(?:ring|outline|border|shadow|underline|bg)/.test(
-						cls.value,
-					)
-				)
-					report(
-						RULES.outline,
-						tag.start,
-						src,
-						"low",
-						"Tailwind `outline-none` is used without a focus: / focus-visible: replacement.",
-					);
-			}
-		}
-	}
-
-	if (scriptExt.has(ext)) {
-		for (const m of text.matchAll(
-			/\b(?:userScalable\s*:\s*false|maximumScale\s*:\s*(?:1(?:\.\d+)?|0?\.\d+))\b/g,
-		))
-			report(RULES.viewportZoom, m.index ?? 0, m[0], "medium");
-	}
-
-	const hasStyles =
-		styleExt.has(ext) ||
-		/<style[\s>]/.test(text) ||
-		(scriptExt.has(ext) && /\boutline\s*:\s*["']?(?:none|0)\b/.test(text));
-	if (hasStyles && !/focus-visible/.test(text)) {
-		for (const m of text.matchAll(/\boutline\s*:\s*["']?(?:none|0)\b/g)) {
-			const index = m.index ?? 0;
-			const open = text.lastIndexOf("{", index);
-			const close = text.indexOf("}", index);
-			const block = text.slice(open + 1, close === -1 ? undefined : close);
-			if (
-				/box-shadow|boxShadow|border(?:-color|Color)?\s*:|outline-(?:color|style|width)\s*:/.test(
-					block,
-				)
-			)
-				continue;
-			report(RULES.outline, index, m[0], styleExt.has(ext) ? "medium" : "low");
-		}
-	}
-
-	return findings;
+	const matches = [
+		...(markupExt.has(ext) ? scanMarkup(text) : []),
+		...(scriptExt.has(ext) ? scanViewportOptions(text) : []),
+		...scanOutlineStyles(text, ext),
+	];
+	const site: FindingSite = { path, lineOf: lineLocator(text) };
+	return matches.map((match) => toFinding(site, match));
 };
 
-const shouldScan = (path: string) => {
+const shouldScan = (path: FilePath) => {
 	const ext = extOf(path);
 	return (
 		(markupExt.has(ext) || styleExt.has(ext) || scriptExt.has(ext)) &&

@@ -5,6 +5,17 @@ import {
 	type Workspace,
 } from "@openaudit/core";
 import { Effect } from "effect";
+import type {
+	CharCount,
+	CweId,
+	FilePath,
+	Language,
+	Offset,
+	SourceText,
+	StandardId,
+} from "./util-types";
+
+export { nonCodeMask } from "./util-noncode";
 
 /** Shared helpers for codebase auditors: file selection, reading, matching. */
 
@@ -92,28 +103,28 @@ const BINARY_EXTENSIONS = new Set([
 ]);
 
 /** Lowercase extension without the dot (`""` for none or dotfiles). */
-export const extOf = (path: string): string => {
+export const extOf = (path: FilePath): string => {
 	const base = baseName(path);
 	const dot = base.lastIndexOf(".");
 	return dot <= 0 ? "" : base.slice(dot + 1).toLowerCase();
 };
 
-export const baseName = (path: string): string =>
+export const baseName = (path: FilePath): string =>
 	path.slice(path.lastIndexOf("/") + 1);
 
-export const isBinaryPath = (path: string): boolean =>
+export const isBinaryPath = (path: FilePath): boolean =>
 	BINARY_EXTENSIONS.has(extOf(path));
 
 const LOCKFILE =
 	/(^|\/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|Cargo\.lock|poetry\.lock|Pipfile\.lock|uv\.lock|Gemfile\.lock|composer\.lock|go\.sum|packages\.lock\.json|pubspec\.lock|Podfile\.lock|mix\.lock|flake\.lock)$/;
 
-export const isLockfile = (path: string): boolean => LOCKFILE.test(path);
+export const isLockfile = (path: FilePath): boolean => LOCKFILE.test(path);
 
-export const isMinifiedPath = (path: string): boolean =>
+export const isMinifiedPath = (path: FilePath): boolean =>
 	/[.-]min\.(m?js|css)$|[.-]bundle\.m?js$|\.(map|chunk\.js)$/.test(path);
 
 /** Long lines with little whitespace: bundled or minified output. */
-export const looksMinified = (text: string): boolean => {
+export const looksMinified = (text: SourceText): boolean => {
 	if (text.length < 4000) return false;
 	const sample = text.slice(0, 20_000);
 	const lines = sample.split("\n");
@@ -125,16 +136,16 @@ const TEST_PATH =
 	/(^|\/)(__tests__|__mocks__|tests?|spec|specs|e2e|cypress|playwright)\/|(^|\/)[^/]*[._-](test|spec|stories|story)\.[^/]+$|(^|\/)test_[^/]+\.py$|_test\.(go|py|rb)$|(^|\/)[^/]*Tests?\.(java|kt|cs|swift)$/;
 
 /** Test and story sources. */
-export const isTestPath = (path: string): boolean => TEST_PATH.test(path);
+export const isTestPath = (path: FilePath): boolean => TEST_PATH.test(path);
 
 /** Test fixtures and snapshots: often intentionally insecure or fake data. */
-export const isFixturePath = (path: string): boolean =>
+export const isFixturePath = (path: FilePath): boolean =>
 	/(^|\/)(fixtures?|__fixtures__|testdata|test-data|__snapshots__|mocks?)\//.test(
 		path,
 	);
 
 /** Generated or vendored code that the project does not maintain by hand. */
-export const isGeneratedPath = (path: string): boolean =>
+export const isGeneratedPath = (path: FilePath): boolean =>
 	/\.d\.[cm]?ts$|[._-](gen|generated|pb)\.\w+$|(^|\/)(generated|__generated__|third[_-]party|bower_components|vendor)\//.test(
 		path,
 	);
@@ -170,10 +181,10 @@ export const LANGUAGE_BY_EXT: Readonly<Record<string, string>> = {
 	dart: "dart",
 };
 
-export const languageOf = (path: string): string | undefined =>
+export const languageOf = (path: FilePath): Language | undefined =>
 	LANGUAGE_BY_EXT[extOf(path)];
 
-export const isSourcePath = (path: string): boolean =>
+export const isSourcePath = (path: FilePath): boolean =>
 	languageOf(path) !== undefined;
 
 export interface SourceFile {
@@ -188,6 +199,34 @@ export interface ReadOptions {
 	readonly allowMinified?: boolean;
 }
 
+const isMinified = (file: SourceFile): boolean =>
+	isMinifiedPath(file.path) || looksMinified(file.text);
+
+/** Whether a file's text is worth scanning: no NUL bytes, minified only on request. */
+const keepFile = (file: SourceFile, options: ReadOptions): boolean => {
+	if (file.text.includes("\u0000")) return false;
+	return options.allowMinified === true || !isMinified(file);
+};
+
+const readSourceFile = (
+	ws: Workspace,
+	path: FilePath,
+	options: ReadOptions,
+): Effect.Effect<SourceFile | undefined> =>
+	Effect.gen(function* () {
+		const size = yield* ws.size(path);
+		if (size === 0 || size > (options.maxBytes ?? MAX_SCAN_BYTES))
+			return undefined;
+		// readText refuses files over MAX_TEXT_BYTES; callers that allow
+		// more (lockfiles, up to 20 MB) read the bytes instead.
+		const text =
+			size > MAX_TEXT_BYTES
+				? new TextDecoder().decode(yield* ws.readBytes(path))
+				: yield* ws.readText(path);
+		const file: SourceFile = { path, text };
+		return keepFile(file, options) ? file : undefined;
+	}).pipe(Effect.orElseSucceed(() => undefined));
+
 /**
  * Reads up to `limit` text files whose path satisfies `include`, skipping
  * binaries, empty/oversized files, NUL-containing content and minified output.
@@ -195,77 +234,68 @@ export interface ReadOptions {
  */
 export const readTextFiles = (
 	ws: Workspace,
-	include: (path: string) => boolean,
+	include: (path: FilePath) => boolean,
 	options: ReadOptions = {},
 ): Effect.Effect<ReadonlyArray<SourceFile>, AuditorError> =>
 	Effect.gen(function* () {
 		const limit = options.limit ?? MAX_SCAN_FILES;
-		const maxBytes = options.maxBytes ?? MAX_SCAN_BYTES;
 		const paths = (yield* ws.files)
 			.filter((f) => !isBinaryPath(f) && include(f))
 			.slice(0, limit);
 		const read = yield* Effect.forEach(
 			paths,
-			(path) =>
-				Effect.gen(function* () {
-					const size = yield* ws.size(path);
-					if (size === 0 || size > maxBytes) return undefined;
-					// readText refuses files over MAX_TEXT_BYTES; callers that allow
-					// more (lockfiles, up to 20 MB) read the bytes instead.
-					const text =
-						size > MAX_TEXT_BYTES
-							? new TextDecoder().decode(yield* ws.readBytes(path))
-							: yield* ws.readText(path);
-					if (text.includes("\u0000")) return undefined;
-					if (
-						!options.allowMinified &&
-						(isMinifiedPath(path) || looksMinified(text))
-					)
-						return undefined;
-					return { path, text } satisfies SourceFile;
-				}).pipe(Effect.orElseSucceed(() => undefined)),
+			(path) => readSourceFile(ws, path, options),
 			{ concurrency: 16 },
 		);
 		return read.filter((f): f is SourceFile => f !== undefined);
 	});
 
-/** Returns a fast `index → 1-based line` lookup for `text`. */
-export const lineLocator = (text: string): ((index: number) => number) => {
+/** Offsets at which each line of `text` starts. */
+const lineStarts = (text: SourceText): Offset[] => {
 	const starts = [0];
 	for (let i = 0; i < text.length; i++) {
 		if (text.charCodeAt(i) === 10) starts.push(i + 1);
 	}
-	return (index) => {
-		let lo = 0;
-		let hi = starts.length - 1;
-		while (lo < hi) {
-			const mid = (lo + hi + 1) >> 1;
-			if ((starts[mid] ?? 0) <= index) lo = mid;
-			else hi = mid - 1;
-		}
-		return lo + 1;
-	};
+	return starts;
+};
+
+/** 1-based line of `index`, by binary search over line starts. */
+const lineOfOffset = (starts: ReadonlyArray<Offset>, index: Offset): number => {
+	let lo = 0;
+	let hi = starts.length - 1;
+	while (lo < hi) {
+		const mid = (lo + hi + 1) >> 1;
+		if ((starts[mid] ?? 0) <= index) lo = mid;
+		else hi = mid - 1;
+	}
+	return lo + 1;
+};
+
+/** Returns a fast `index → 1-based line` lookup for `text`. */
+export const lineLocator = (text: SourceText): ((index: Offset) => number) => {
+	const starts = lineStarts(text);
+	return (index) => lineOfOffset(starts, index);
 };
 
 /** The full (untrimmed) line containing `index`. */
-export const fullLineAt = (text: string, index: number): string => {
+export const fullLineAt = (text: SourceText, index: Offset): string => {
 	const start = text.lastIndexOf("\n", index - 1) + 1;
 	const end = text.indexOf("\n", index);
 	return text.slice(start, end === -1 ? undefined : end);
 };
 
 /** True for lines that are entirely a comment in C-like, hash or HTML syntax. */
-export const isCommentLine = (line: string): boolean =>
+export const isCommentLine = (line: SourceText): boolean =>
 	/^\s*(\/\/|\/\*|\*|#(?![[!{])|<!--|--\s)/.test(line);
 
 /** Truncates evidence to a readable length. */
-export const truncate = (s: string, max = 160): string => {
+export const truncate = (s: SourceText, max: CharCount = 160): string => {
 	const t = s.trim();
 	return t.length > max ? `${t.slice(0, max)}…` : t;
 };
 
 /** Shannon entropy in bits per character. */
-export const shannonEntropy = (s: string): number => {
+export const shannonEntropy = (s: SourceText): number => {
 	if (!s) return 0;
 	const counts = new Map<string, number>();
 	for (const ch of s) counts.set(ch, (counts.get(ch) ?? 0) + 1);
@@ -284,7 +314,7 @@ export const isRecord = (v: unknown): v is Record<string, unknown> =>
 
 /* ------------------------------- references ------------------------------- */
 
-export const cweUrl = (id: number) =>
+export const cweUrl = (id: CweId) =>
 	`https://cwe.mitre.org/data/definitions/${id}.html`;
 
 const OWASP_2021: Readonly<Record<string, string>> = {
@@ -301,7 +331,7 @@ const OWASP_2021: Readonly<Record<string, string>> = {
 };
 
 /** OWASP Top 10 (2021) page for a category such as `a03`. */
-export const owaspUrl = (category: string) =>
+export const owaspUrl = (category: StandardId) =>
 	`https://owasp.org/Top10/${OWASP_2021[category.toLowerCase()] ?? ""}/`;
 
 const OWASP_LLM_2025: Readonly<Record<string, string>> = {
@@ -318,7 +348,7 @@ const OWASP_LLM_2025: Readonly<Record<string, string>> = {
 };
 
 /** OWASP Top 10 for LLM Applications (2025) page for a risk such as `llm01`. */
-export const owaspLlmUrl = (risk: string) =>
+export const owaspLlmUrl = (risk: StandardId) =>
 	`https://genai.owasp.org/llmrisk/${OWASP_LLM_2025[risk.toLowerCase()] ?? ""}/`;
 
 const WCAG_SLUGS: Readonly<Record<string, string>> = {
@@ -336,190 +366,16 @@ const WCAG_SLUGS: Readonly<Record<string, string>> = {
 };
 
 /** WCAG 2.2 "Understanding" page for a success criterion such as `1.1.1`. */
-export const wcagUrl = (sc: string) =>
+export const wcagUrl = (sc: StandardId) =>
 	`https://www.w3.org/WAI/WCAG22/Understanding/${WCAG_SLUGS[sc] ?? ""}.html`;
 
 /** Converts an arbitrary identifier to kebab-case for rule ids. */
-export const kebab = (s: string): string =>
+export const kebab = (s: SourceText): string =>
 	s
 		.replace(/([a-z0-9])([A-Z])/g, "$1-$2")
 		.replace(/[^A-Za-z0-9]+/g, "-")
 		.replace(/^-+|-+$/g, "")
 		.toLowerCase();
-
-/* ---------------------------- string/comment mask --------------------------- */
-
-/** Past this `${...}` nesting in JS templates the rest of the file is code. */
-const MAX_TEMPLATE_DEPTH = 64;
-
-/** `if (...) /re/`: a regex, not a division, follows these conditions. */
-const CONTROL_KEYWORD = /(?:^|[^\w$])(?:if|while|for|with)$/;
-
-const REGEX_PRECEDER =
-	/[(,=:[!&|?{};+\-*%<>~^]$|(?:^|[^\w$])(?:return|typeof|case|do|else|in|of|void|yield|await|delete|throw|new)$/;
-
-/**
- * Marks characters inside string literals, comments and (JS) regex literals
- * with 1, so pattern matches in prose can be ignored. Opening delimiters stay
- * 0, so rules may still match on a quote. `${...}` inside JS templates is code.
- * Best-effort lexer: it never throws and degrades to "code" on odd input,
- * including input nested deeper than it tracks.
- */
-export const nonCodeMask = (text: string, lang: string): Uint8Array => {
-	const mask = new Uint8Array(text.length);
-	const n = text.length;
-	const slashComments = lang !== "python" && lang !== "ruby";
-	const hashComments = lang === "python" || lang === "ruby" || lang === "php";
-	const templates = lang === "js" || lang === "go";
-	const triple = lang === "python";
-	// Bounds that keep hostile input linear: template nesting depth, and the
-	// end of a line on which a regex literal already failed to close.
-	let nesting = 0;
-	let noRegexUntil = -1;
-	/** Where lexing gave up; everything from here on stays code. */
-	let abandonedAt = -1;
-	const fill = (from: number, to: number) =>
-		mask.fill(1, from, Math.min(to, n));
-
-	const lineEnd = (i: number) => {
-		const e = text.indexOf("\n", i);
-		return e === -1 ? n : e;
-	};
-
-	const scanQuoted = (i: number, quote: string): number => {
-		let j = i + 1;
-		while (j < n && text[j] !== quote && text[j] !== "\n")
-			j += text[j] === "\\" ? 2 : 1;
-		fill(i + 1, j);
-		return j + 1;
-	};
-
-	const scanTemplate = (i: number): number => {
-		let j = i + 1;
-		let segment = j;
-		while (j < n) {
-			const ch = text[j];
-			if (ch === "\\") j += 2;
-			else if (ch === "`") break;
-			else if (lang === "js" && ch === "$" && text[j + 1] === "{") {
-				fill(segment, j);
-				if (nesting >= MAX_TEMPLATE_DEPTH) {
-					abandonedAt = j;
-					return n;
-				}
-				nesting++;
-				j = scanCode(j + 2, true);
-				nesting--;
-				segment = j;
-			} else j++;
-		}
-		fill(segment, j);
-		return j + 1;
-	};
-
-	const scanRegex = (i: number): number => {
-		let j = i + 1;
-		let inClass = false;
-		while (j < n && text[j] !== "\n") {
-			const ch = text[j];
-			if (ch === "\\") j++;
-			else if (ch === "[") inClass = true;
-			else if (ch === "]") inClass = false;
-			else if (ch === "/" && !inClass) break;
-			j++;
-		}
-		if (j >= n || text[j] === "\n") return i + 1; // not a regex after all
-		fill(i, j + 1);
-		return j + 1;
-	};
-
-	function scanCode(start: number, untilBrace: boolean): number {
-		let i = start;
-		let depth = 0;
-		let prev = "";
-		const parens: boolean[] = [];
-		let closedControl = false;
-		while (i < n) {
-			const ch = text[i] ?? "";
-			const next = text[i + 1];
-			if (slashComments && ch === "/" && next === "/") {
-				const e = lineEnd(i);
-				fill(i, e);
-				i = e;
-				continue;
-			}
-			if (slashComments && ch === "/" && next === "*") {
-				const e = text.indexOf("*/", i + 2);
-				const end = e === -1 ? n : e + 2;
-				fill(i, end);
-				i = end;
-				continue;
-			}
-			if (
-				hashComments &&
-				ch === "#" &&
-				!(lang === "ruby" && next === "{") &&
-				!(lang === "php" && next === "[") // PHP 8 attribute
-			) {
-				const e = lineEnd(i);
-				fill(i, e);
-				i = e;
-				continue;
-			}
-			if (triple && (text.startsWith('"""', i) || text.startsWith("'''", i))) {
-				const q = text.slice(i, i + 3);
-				const e = text.indexOf(q, i + 3);
-				const end = e === -1 ? n : e;
-				fill(i + 3, end);
-				i = end + 3;
-				prev = "x";
-				continue;
-			}
-			if (ch === '"' || ch === "'") {
-				i = scanQuoted(i, ch);
-				prev = "x";
-				continue;
-			}
-			if (templates && ch === "`") {
-				i = scanTemplate(i);
-				prev = "x";
-				continue;
-			}
-			if (
-				lang === "js" &&
-				ch === "/" &&
-				i > noRegexUntil &&
-				(REGEX_PRECEDER.test(prev.trimEnd()) ||
-					(closedControl && prev.trimEnd().endsWith(")")))
-			) {
-				const after = scanRegex(i);
-				if (after > i + 1) {
-					i = after;
-					prev = "x";
-					continue;
-				}
-				noRegexUntil = lineEnd(i);
-			}
-			if (untilBrace) {
-				if (ch === "{") depth++;
-				else if (ch === "}") {
-					if (depth === 0) return i + 1;
-					depth--;
-				}
-			}
-			if (ch === "(") parens.push(CONTROL_KEYWORD.test(prev.trimEnd()));
-			else if (ch === ")") closedControl = parens.pop() ?? false;
-			if (!/\s/.test(ch)) prev = (prev + ch).slice(-8);
-			else if (prev && !prev.endsWith(" ")) prev = `${prev} `.slice(-8);
-			i++;
-		}
-		return n;
-	}
-
-	scanCode(0, false);
-	if (abandonedAt >= 0) mask.fill(0, abandonedAt);
-	return mask;
-};
 
 /* ------------------------------- scrubbing -------------------------------- */
 
@@ -549,33 +405,50 @@ const SECRET_ASSIGNMENT =
 /** Long base64/hex-like runs that mix letters and digits (key material). */
 const KEY_MATERIAL = /[A-Za-z0-9+/=_-]{32,}/g;
 
+/** A credential, or a fragment of text that may hold one. */
+type Secret = string;
+
+const maskKnownSecrets = (
+	line: SourceText,
+	known: ReadonlyArray<Secret>,
+): SourceText => {
+	let out = line;
+	for (const secret of known)
+		if (secret) out = out.split(secret).join(redact(secret));
+	return out;
+};
+
+const maskUrlPassword = (_m: SourceText, pre: SourceText, pw: Secret) =>
+	pw.includes("*") ? `${pre}${pw}@` : `${pre}${redact(pw, 0)}@`;
+
+const maskAssignedSecret = (_m: SourceText, pre: SourceText, value: Secret) =>
+	/^\w{0,4}\*+$|^redacted$/i.test(value)
+		? `${pre}${value}`
+		: `${pre}${redact(value)}`;
+
+/** Key material mixes letters and digits and is not already masked. */
+const isKeyMaterial = (m: Secret): boolean =>
+	/\d/.test(m) && /[A-Za-z]/.test(m) && !m.includes("*");
+
+const maskKeyMaterial = (m: Secret) => (isKeyMaterial(m) ? redact(m) : m);
+
 /**
  * Masks every credential-looking value in a line so it is safe to put into
  * evidence. `known` secrets (e.g. the one that triggered a finding) are
  * always masked, wherever they occur.
  */
 export const scrubLine = (
-	line: string,
-	known: ReadonlyArray<string> = [],
+	line: SourceText,
+	known: ReadonlyArray<Secret> = [],
 ): string => {
-	let out = line;
-	for (const secret of known)
-		if (secret) out = out.split(secret).join(redact(secret));
+	let out = maskKnownSecrets(line, known);
 	out = out.replace(
 		/(-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----).*/g,
 		"$1****",
 	);
-	out = out.replace(URL_CREDENTIALS, (_m, pre: string, pw: string) =>
-		pw.includes("*") ? `${pre}${pw}@` : `${pre}${redact(pw, 0)}@`,
-	);
+	out = out.replace(URL_CREDENTIALS, maskUrlPassword);
 	for (const re of CREDENTIAL_PATTERNS) out = out.replace(re, (m) => redact(m));
-	out = out.replace(SECRET_ASSIGNMENT, (_m, pre: string, value: string) =>
-		/^\w{0,4}\*+$|^redacted$/i.test(value)
-			? `${pre}${value}`
-			: `${pre}${redact(value)}`,
-	);
-	out = out.replace(KEY_MATERIAL, (m) =>
-		/\d/.test(m) && /[A-Za-z]/.test(m) && !m.includes("*") ? redact(m) : m,
-	);
+	out = out.replace(SECRET_ASSIGNMENT, maskAssignedSecret);
+	out = out.replace(KEY_MATERIAL, maskKeyMaterial);
 	return out;
 };
