@@ -16,38 +16,57 @@ import { escapeHtml as e } from "../shared";
 
 const f = (n: number): string => n.toFixed(2);
 
-/** Arc from `a0` to `a1` degrees, clockwise, 0° at 12 o'clock. */
-const arc = (cx: number, cy: number, r: number, a0: number, a1: number) => {
-	const at = (a: number) => {
-		const rad = (a * Math.PI) / 180;
-		return [cx + r * Math.sin(rad), cy - r * Math.cos(rad)] as const;
-	};
-	const [x0, y0] = at(a0);
-	const [x1, y1] = at(a1);
-	return `M${f(x0)} ${f(y0)}A${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${f(x1)} ${f(y1)}`;
+/** Clockwise from 12 o'clock. */
+type Degrees = number;
+/** A score from 0 to 100. */
+type Score = number;
+
+interface Ring {
+	readonly cx: number;
+	readonly cy: number;
+	readonly r: number;
+}
+
+/** From `a0` to `a1`. */
+interface Span {
+	readonly a0: Degrees;
+	readonly a1: Degrees;
+}
+
+/** SVG arc sweep flag: 1 draws clockwise, 0 anticlockwise. */
+type Sweep = 0 | 1;
+
+const pointAt = (ring: Ring, a: Degrees) => {
+	const rad = (a * Math.PI) / 180;
+	return [
+		ring.cx + ring.r * Math.sin(rad),
+		ring.cy - ring.r * Math.cos(rad),
+	] as const;
 };
 
-/** The same arc, drawn anticlockwise from `a1` back to `a0`. */
-const arcReverse = (
-	cx: number,
-	cy: number,
-	r: number,
-	a0: number,
-	a1: number,
-) => {
-	const at = (a: number) => {
-		const rad = (a * Math.PI) / 180;
-		return [cx + r * Math.sin(rad), cy - r * Math.cos(rad)] as const;
-	};
-	const [x0, y0] = at(a1);
-	const [x1, y1] = at(a0);
-	return `M${f(x0)} ${f(y0)}A${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 0 ${f(x1)} ${f(y1)}`;
+const arcPath = (ring: Ring, { a0, a1 }: Span, sweep: Sweep) => {
+	const [x0, y0] = pointAt(ring, sweep ? a0 : a1);
+	const [x1, y1] = pointAt(ring, sweep ? a1 : a0);
+	return `M${f(x0)} ${f(y0)}A${ring.r} ${ring.r} 0 ${a1 - a0 > 180 ? 1 : 0} ${sweep} ${f(x1)} ${f(y1)}`;
 };
+
+/** Arc from `a0` to `a1` degrees, clockwise, 0° at 12 o'clock. */
+const arc = (ring: Ring, span: Span) => arcPath(ring, span, 1);
+
+/** The same arc, drawn anticlockwise from `a1` back to `a0`. */
+const arcReverse = (ring: Ring, span: Span) => arcPath(ring, span, 0);
 
 const clamp = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
 
+/** Tick marks between radii `r0` and `r1`, major ones reaching further in. */
+interface TickBand {
+	readonly r0: number;
+	readonly r1: number;
+	readonly major: boolean;
+}
+
 /** One major tick every 10 points, minor ticks every 2. */
-const ticks = (cx: number, r0: number, r1: number, major: boolean) => {
+const ticks = (cx: number, { r0, r1, major }: TickBand) => {
 	let d = "";
 	for (let i = 0; i < 50; i++) {
 		if ((i % 5 === 0) !== major) continue;
@@ -59,7 +78,7 @@ const ticks = (cx: number, r0: number, r1: number, major: boolean) => {
 };
 
 /** The bead at the end of the score arc. */
-const capAt = (c: number, r: number, score: number, grade: Grade) => {
+const capAt = (c: number, r: number, score: Score, grade: Grade) => {
 	const a = (score / 100) * 2 * Math.PI;
 	return `<circle class="cap a-${grade}" cx="${f(c + r * Math.sin(a))}" cy="${f(c - r * Math.cos(a))}" r="4"/>`;
 };
@@ -75,7 +94,7 @@ export interface DialSegment {
  * per category, each filled to its own score.
  */
 export const dial = (
-	score: number,
+	score: Score,
 	grade: Grade,
 	segments: ReadonlyArray<DialSegment>,
 	label: string,
@@ -87,7 +106,7 @@ export const dial = (
 		.map((s, i) => {
 			const a0 = i * span + gap / 2;
 			const a1 = (i + 1) * span - gap / 2 - (segments.length === 1 ? 0.01 : 0);
-			const d = arc(c, c, 110, a0, a1);
+			const d = arc({ cx: c, cy: c, r: 110 }, { a0, a1 });
 			return `<path class="seg-track" d="${d}"/><path class="seg a-${s.grade}" d="${d}" pathLength="100" stroke-dasharray="${clamp(s.score)} 100" data-v="${clamp(s.score)}"><title>${e(s.label)}: ${clamp(s.score)}, grade ${s.grade}</title></path>`;
 		})
 		.join("");
@@ -101,7 +120,8 @@ export const dial = (
 			const r = bottom ? 126 : 120;
 			const room = (2 * Math.PI * r * (a1 - a0)) / 360;
 			if (segments.length > 12 || s.label.length * 4.1 > room) return "";
-			const d = bottom ? arcReverse(c, c, r, a0, a1) : arc(c, c, r, a0, a1);
+			const ring = { cx: c, cy: c, r };
+			const d = bottom ? arcReverse(ring, { a0, a1 }) : arc(ring, { a0, a1 });
 			return `<path id="dial-l${i}" d="${d}" fill="none"/><text class="seg-label"><textPath href="#dial-l${i}" startOffset="50%" text-anchor="middle">${e(s.label)}</textPath></text>`;
 		})
 		.join("");
@@ -110,7 +130,7 @@ export const dial = (
 <g class="seg-labels">${labels}</g>
 <circle class="dial-plate" cx="${c}" cy="${c}" r="97"/>
 <g class="segs">${segs}</g>
-<path class="ticks" d="${ticks(c, 93, 96.5, false)}"/><path class="ticks-major" d="${ticks(c, 92, 97, true)}"/>
+<path class="ticks" d="${ticks(c, { r0: 93, r1: 96.5, major: false })}"/><path class="ticks-major" d="${ticks(c, { r0: 92, r1: 97, major: true })}"/>
 <circle class="ring-track" cx="${c}" cy="${c}" r="80"/>
 <circle class="ring a-${grade}" cx="${c}" cy="${c}" r="80" pathLength="100" stroke-dasharray="${clamp(score)} 100" transform="rotate(-90 ${c} ${c})" data-v="${clamp(score)}"/>
 ${capAt(c, 80, clamp(score), grade)}
@@ -120,7 +140,7 @@ ${capAt(c, 80, clamp(score), grade)}
 };
 
 /** A small single-ring dial for category panels. */
-export const miniDial = (score: number, grade: Grade, label: string) =>
+export const miniDial = (score: Score, grade: Grade, label: string) =>
 	`<div class="dial" data-dial role="img" aria-label="${e(label)}">
 <svg viewBox="0 0 120 120" aria-hidden="true" focusable="false">
 <circle class="ring-track" cx="60" cy="60" r="50"/>
@@ -130,7 +150,7 @@ export const miniDial = (score: number, grade: Grade, label: string) =>
 </div>`;
 
 /** The tiny ring in the sticky bar. */
-export const tinyRing = (score: number, grade: Grade) =>
+export const tinyRing = (score: Score, grade: Grade) =>
 	`<svg viewBox="0 0 28 28" aria-hidden="true" focusable="false"><circle class="ring-track" cx="14" cy="14" r="11" stroke-width="4"/><circle class="ring a-${grade}" cx="14" cy="14" r="11" stroke-width="4" pathLength="100" stroke-dasharray="${clamp(score)} 100"/></svg>`;
 
 const total = (c: SeverityCounts): number =>
