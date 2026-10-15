@@ -16,6 +16,18 @@
         "varlock": "catalog:",
       },
     },
+    "apps/badge-scanner": {
+      "name": "@openaudit/badge-scanner",
+      "dependencies": {
+        "@openaudit/core": "workspace:*",
+        "effect": "4.0.3",
+      },
+      "devDependencies": {
+        "@openaudit/config": "workspace:*",
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "apps/cli": {
       "name": "@openaudit/cli",
       "version": "0.2.1",
@@ -620,6 +632,8 @@
     "@openaudit/auditors": ["@openaudit/auditors@workspace:packages/auditors"],
 
     "@openaudit/badge": ["@openaudit/badge@workspace:packages/badge"],
+
+    "@openaudit/badge-scanner": ["@openaudit/badge-scanner@workspace:apps/badge-scanner"],
 
     "@openaudit/cli": ["@openaudit/cli@workspace:apps/cli"],
 
