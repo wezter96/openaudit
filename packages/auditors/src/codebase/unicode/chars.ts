@@ -62,39 +62,24 @@ export const HIDDEN =
 
 export type Group = "bidi" | "mark" | "tag" | "selector" | "invisible";
 
-type Range = readonly [number, number];
+const inRange = (cp: number, lo: number, hi: number) => cp >= lo && cp <= hi;
 
-const within = (cp: number, ranges: ReadonlyArray<Range>) =>
-	ranges.some(([lo, hi]) => cp >= lo && cp <= hi);
+const isBidi = (cp: number) =>
+	inRange(cp, 0x202a, 0x202e) || inRange(cp, 0x2066, 0x2069);
 
-/** Code point ranges of each group; anything else is `invisible`. */
-const GROUP_RANGES: ReadonlyArray<readonly [Group, ReadonlyArray<Range>]> = [
-	[
-		"bidi",
-		[
-			[0x202a, 0x202e],
-			[0x2066, 0x2069],
-		],
-	],
-	[
-		"mark",
-		[
-			[0x200e, 0x200f],
-			[0x061c, 0x061c],
-		],
-	],
-	["tag", [[0xe0000, 0xe007f]]],
-	[
-		"selector",
-		[
-			[0xfe00, 0xfe0f],
-			[0xe0100, 0xe01ef],
-		],
-	],
-];
+const isMark = (cp: number) => inRange(cp, 0x200e, 0x200f) || cp === 0x061c;
 
-export const groupOf = (cp: number): Group =>
-	GROUP_RANGES.find(([, ranges]) => within(cp, ranges))?.[0] ?? "invisible";
+const isSelector = (cp: number) =>
+	inRange(cp, 0xfe00, 0xfe0f) || inRange(cp, 0xe0100, 0xe01ef);
+
+/** Runs once per hidden code point, so plain comparisons rather than tables. */
+export const groupOf = (cp: number): Group => {
+	if (isBidi(cp)) return "bidi";
+	if (isMark(cp)) return "mark";
+	if (inRange(cp, 0xe0000, 0xe007f)) return "tag";
+	if (isSelector(cp)) return "selector";
+	return "invisible";
+};
 
 /** Characters that only make sense in code as escapes. */
 export const CODE_ONLY = new Set([

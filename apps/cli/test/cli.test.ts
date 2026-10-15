@@ -211,6 +211,7 @@ describe("--diff", () => {
 });
 
 describe("openaudit init + config", () => {
+	// Runs whole audits, which are slow on shared CI runners.
 	test("writes a commented config that the audit command honours", async () => {
 		const project = await mkdtemp(join(tmpdir(), "openaudit-init-"));
 		await writeFile(join(project, "package.json"), "{}");
@@ -271,7 +272,7 @@ describe("openaudit init + config", () => {
 		expect(both.code).toBe(2);
 		expect(both.stderr).toContain("Keep one");
 		await rm(project, { recursive: true, force: true });
-	});
+	}, 30_000);
 });
 
 describe("untrusted target config", () => {
