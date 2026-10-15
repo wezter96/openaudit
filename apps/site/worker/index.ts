@@ -5,6 +5,8 @@
  * - send www.openaudit.se to the apex (static assets cannot redirect by host);
  * - send the retired architecture page to the auditor catalogue;
  * - answer the read-only MCP endpoint at /mcp (worker/mcp.ts);
+ * - serve the verified badges: their JSON API, SVGs, verification pages and
+ *   stored reports (worker/badge/);
  * - serve a page's Markdown version when `Accept` prefers text/markdown;
  * - add discovery Link headers and `Vary: Accept` to HTML;
  * - give the agent-facing files (llms.txt, .well-known/*, *.md, /data/*,
@@ -19,10 +21,12 @@ import {
 	PUBLIC_READ,
 	prefersMarkdown,
 } from "./agents";
+import type { BadgeBindings } from "./badge/env";
+import { badgeRoute } from "./badge/routes";
 import { type Assets, CORS, handleMcp } from "./mcp";
 import { recordVisit, type Visits } from "./visits";
 
-export interface Env {
+export interface Env extends BadgeBindings {
 	readonly ASSETS: Assets;
 	/** Analytics Engine dataset for page views; absent in tests and local dev. */
 	readonly VISITS?: Visits;
@@ -183,6 +187,8 @@ export default {
 		const url = new URL(request.url);
 		const redirect = redirectFor(url);
 		if (redirect) return redirect;
+		const badge = badgeRoute(request, env);
+		if (badge) return badge;
 		const head = request.method === "HEAD";
 		const visit: Visit = {
 			request,

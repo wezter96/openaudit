@@ -22,5 +22,17 @@
 	"analytics_engine_datasets": [
 		{ "binding": "VISITS", "dataset": "openaudit_site_visits" }
 	],
+	// Verified badges (worker/badge/). Schema: worker/badge/schema.sql.
+	// The scanner's bearer token is the Worker secret SCANNER_TOKEN.
+	"d1_databases": [
+		{
+			"binding": "BADGES",
+			"database_name": "openaudit-badges",
+			"database_id": "3e75e25b-d0f0-4567-8b61-9a9c7048f7af"
+		}
+	],
+	"r2_buckets": [
+		{ "binding": "BADGE_REPORTS", "bucket_name": "openaudit-badge-reports" }
+	],
 	"observability": { "enabled": false }
 }

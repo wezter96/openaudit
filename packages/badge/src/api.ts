@@ -207,6 +207,12 @@ export class RateLimited extends Schema.TaggedError<RateLimited>()(
 	message,
 	{ httpApiStatus: 429 },
 ) {}
+/** An upstream service (GitHub) didn't answer. */
+export class Unavailable extends Schema.TaggedError<Unavailable>()(
+	"Unavailable",
+	message,
+	{ httpApiStatus: 503 },
+) {}
 export class Unauthorized extends Schema.TaggedError<Unauthorized>()(
 	"Unauthorized",
 	message,
@@ -258,6 +264,7 @@ export class ProjectsApi extends HttpApiGroup.make("projects")
 				AlreadyRegistered,
 				Full,
 				RateLimited,
+				Unavailable,
 			],
 		}),
 		HttpApiEndpoint.post("verify", "/:id/verify", {

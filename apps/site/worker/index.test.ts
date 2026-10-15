@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { markdownFor, prefersMarkdown } from "./agents";
+import { fakeD1, fakeR2 } from "./badge/test/fakes";
 import worker, { type Env } from "./index";
 
 const HTML = { "content-type": "text/html; charset=utf-8" };
@@ -35,6 +36,8 @@ const files: Record<string, [string, Record<string, string>]> = {
 	"/favicon.svg": ["<svg/>", { "content-type": "image/svg+xml" }],
 };
 const env: Env = {
+	BADGES: fakeD1(),
+	BADGE_REPORTS: fakeR2(),
 	ASSETS: {
 		fetch: async (request) => {
 			const path = new URL(request.url).pathname;
