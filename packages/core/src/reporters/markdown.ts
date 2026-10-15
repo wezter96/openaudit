@@ -1,4 +1,11 @@
-import { type Finding, type Report, SEVERITIES, type Severity } from "../model";
+import {
+	type AiInsights,
+	type AuditorResult,
+	type Finding,
+	type Report,
+	SEVERITIES,
+	type Severity,
+} from "../model";
 import {
 	formatDuration,
 	formatLocation,
@@ -32,17 +39,20 @@ const escapeInline = (text: string): string =>
 /** A web address inside prose; `|` ends it so it cannot split a table cell. */
 const URL_IN_TEXT = /https?:\/\/[^\s<>`"|]+/g;
 
+/** Sentence punctuation at the end of an address. */
+const TRAILING_PUNCTUATION = /[.,;:!?'\]]$/;
+
+/** A `)` at the end that the address doesn't open. */
+const endsWithUnopened = (u: string): boolean =>
+	u.endsWith(")") &&
+	(u.match(/\)/g)?.length ?? 0) > (u.match(/\(/g)?.length ?? 0);
+
 /** Drops the sentence's punctuation, and a `)` the address doesn't open, from its end. */
 const trimUrl = (url: string): string => {
 	let u = url;
-	for (;;) {
-		const last = u.at(-1);
-		const unopened =
-			last === ")" &&
-			(u.match(/\)/g)?.length ?? 0) > (u.match(/\(/g)?.length ?? 0);
-		if (!(last && (/[.,;:!?'\]]/.test(last) || unopened))) return u;
+	while (TRAILING_PUNCTUATION.test(u) || endsWithUnopened(u))
 		u = u.slice(0, -1);
-	}
+	return u;
 };
 
 /**
@@ -122,123 +132,182 @@ const countsLine = (counts: Record<Severity, number>): string => {
 	return parts.length ? parts.join(" · ") : "no findings";
 };
 
+/** Heading prefix (`##`) and how many findings to list. */
+interface Layout {
+	readonly h: string;
+	readonly max: number;
+}
+
 export const toMarkdown = (
 	report: Report,
 	options: MarkdownOptions = {},
 ): string => {
-	const max = options.maxFindings ?? 100;
-	const h = "#".repeat(Math.min(4, Math.max(1, options.headingLevel ?? 2)));
-	const { summary } = report;
-	const out: string[] = [];
+	const layout: Layout = {
+		h: "#".repeat(Math.min(4, Math.max(1, options.headingLevel ?? 2))),
+		max: options.maxFindings ?? 100,
+	};
+	const out = [
+		...headerLines(report, layout),
+		...suppressedLines(options.suppressed ?? []),
+		...categoryLines(report.summary.categories),
+		...aiLines(report.ai, layout),
+		...findingsLines(sortedFindings(report), layout),
+		...auditorLines(report),
+	];
+	return `${out.join("\n").trimEnd()}\n`;
+};
 
-	out.push(`${h} openaudit: ${md(targetLabel(report))}`, "");
-	out.push(
+const headerLines = (report: Report, { h }: Layout): string[] => {
+	const { summary } = report;
+	return [
+		`${h} openaudit: ${md(targetLabel(report))}`,
+		"",
 		`**Score ${summary.score}/100 (${summary.grade})** · ${countsLine(summary.counts)} · ${plural(report.results.length, "auditor")} in ${formatDuration(report.durationMs)}`,
 		"",
-	);
+	];
+};
 
-	const suppressed = (options.suppressed ?? []).filter(hasSuppressionNotice);
-	for (const s of suppressed) {
-		out.push(`> **Note:** ${md(suppressionLine(s))}`);
-		for (const d of suppressionDetails(s)) out.push(`> - ${md(d)}`);
-	}
-	if (suppressed.length) out.push("");
+const suppressedLines = (all: ReadonlyArray<SuppressionSummary>): string[] => {
+	const suppressed = all.filter(hasSuppressionNotice);
+	if (!suppressed.length) return [];
+	return [
+		...suppressed.flatMap((s) => [
+			`> **Note:** ${md(suppressionLine(s))}`,
+			...suppressionDetails(s).map((d) => `> - ${md(d)}`),
+		]),
+		"",
+	];
+};
 
-	if (summary.categories.length) {
-		out.push(
-			"| Category | Score | Grade | Critical | High | Medium | Low | Info |",
-			"| --- | ---: | :---: | ---: | ---: | ---: | ---: | ---: |",
-		);
-		for (const c of summary.categories) {
+const categoryLines = (
+	categories: Report["summary"]["categories"],
+): string[] => {
+	if (!categories.length) return [];
+	return [
+		"| Category | Score | Grade | Critical | High | Medium | Low | Info |",
+		"| --- | ---: | :---: | ---: | ---: | ---: | ---: | ---: |",
+		...categories.map((c) => {
 			const n = c.counts;
-			out.push(
-				`| ${md(c.category)} | ${c.score} | ${md(c.grade)} | ${n.critical} | ${n.high} | ${n.medium} | ${n.low} | ${n.info} |`,
-			);
-		}
-		out.push("");
-	}
+			return `| ${md(c.category)} | ${c.score} | ${md(c.grade)} | ${n.critical} | ${n.high} | ${n.medium} | ${n.low} | ${n.info} |`;
+		}),
+		"",
+	];
+};
 
-	if (report.ai) {
-		out.push(`${h}# AI insights`, "", md(report.ai.summary), "");
-		report.ai.priorities.forEach((p, i) => {
-			out.push(
+const aiLines = (ai: AiInsights | undefined, { h }: Layout): string[] => {
+	if (!ai) return [];
+	return [
+		`${h}# AI insights`,
+		"",
+		md(ai.summary),
+		"",
+		...ai.priorities.map(
+			(p, i) =>
 				`${i + 1}. **${md(p.title)}**: ${md(p.why)} **Fix:** ${md(p.fix)}`,
-			);
-		});
-		out.push("");
-	}
+		),
+		"",
+	];
+};
 
-	const findings = sortedFindings(report);
+const findingsLines = (
+	findings: ReadonlyArray<Finding>,
+	layout: Layout,
+): string[] => {
+	if (findings.length === 0) return ["No findings.", ""];
 	const actionable = findings.filter((f) => f.severity !== "info");
 	const info = findings.filter((f) => f.severity === "info");
+	const { lines, shown } = severityGroups(actionable, layout);
+	const hidden = actionable.length - shown;
+	return [
+		...lines,
+		...(hidden > 0
+			? [
+					`_…and ${plural(hidden, "more finding")}. Use the JSON or HTML report for the full list._`,
+					"",
+				]
+			: []),
+		...infoDetails(info, layout),
+	];
+};
 
-	if (findings.length === 0) {
-		out.push("No findings.", "");
-	} else {
-		let shown = 0;
-		for (const severity of SEVERITIES) {
-			if (severity === "info") continue;
-			const group = actionable.filter((f) => f.severity === severity);
-			if (!group.length || shown >= max) continue;
-			out.push(`${h}# ${SEVERITY_LABEL[severity]} (${group.length})`, "");
-			for (const f of group.slice(0, max - shown)) out.push(...findingLines(f));
-			shown += Math.min(group.length, max - shown);
-			out.push("");
-		}
-		if (actionable.length > shown) {
-			out.push(
-				`_…and ${plural(actionable.length - shown, "more finding")}. Use the JSON or HTML report for the full list._`,
-				"",
-			);
-		}
-		if (info.length) {
-			out.push(
-				"<details>",
-				`<summary>Info (${info.length})</summary>`,
-				"",
-				...info.slice(0, max).flatMap(findingLines),
-				"",
-				"</details>",
-				"",
-			);
-		}
+const ACTIONABLE = SEVERITIES.filter((s) => s !== "info");
+
+/** A section per severity, listing at most `max` findings across them. */
+const severityGroups = (
+	actionable: ReadonlyArray<Finding>,
+	{ h, max }: Layout,
+): { readonly lines: string[]; readonly shown: number } => {
+	const lines: string[] = [];
+	let shown = 0;
+	for (const severity of ACTIONABLE) {
+		const group = actionable.filter((f) => f.severity === severity);
+		if (!group.length || shown >= max) continue;
+		lines.push(
+			`${h}# ${SEVERITY_LABEL[severity]} (${group.length})`,
+			"",
+			...group.slice(0, max - shown).flatMap(findingLines),
+			"",
+		);
+		shown += Math.min(group.length, max - shown);
 	}
+	return { lines, shown };
+};
 
-	// Skip reasons are install hints for whoever ran the audit; a reader of
-	// the file only needs to know what didn't run.
+const infoDetails = (
+	info: ReadonlyArray<Finding>,
+	{ max }: Layout,
+): string[] => {
+	if (!info.length) return [];
+	return [
+		"<details>",
+		`<summary>Info (${info.length})</summary>`,
+		"",
+		...info.slice(0, max).flatMap(findingLines),
+		"",
+		"</details>",
+		"",
+	];
+};
+
+// Skip reasons are install hints for whoever ran the audit; a reader of
+// the file only needs to know what didn't run.
+const auditorLines = (report: Report): string[] => {
+	const { auditors } = report.summary;
 	const ran = report.results.filter((r) => r.status !== "skipped");
 	const skipped = report.results.filter((r) => r.status === "skipped");
 	const errored = ran.filter((r) => r.status === "error");
-	out.push(
+	return [
 		"<details>",
-		`<summary>Auditors: ${summary.auditors.passed} passed, ${summary.auditors.failed} failed, ${summary.auditors.skipped} skipped, ${summary.auditors.error} errored</summary>`,
+		`<summary>Auditors: ${auditors.passed} passed, ${auditors.failed} failed, ${auditors.skipped} skipped, ${auditors.error} errored</summary>`,
 		"",
-	);
-	if (ran.length) {
-		out.push(
-			"| Auditor | Status | Findings | Duration | Note |",
-			"| --- | --- | ---: | ---: | --- |",
-			...ran.map(
-				(r) =>
-					`| ${code(r.auditor, { table: true })} | ${md(r.status)} | ${r.findings.length} | ${formatDuration(r.durationMs)} | ${md(r.message ?? "")} |`,
-			),
-			"",
-		);
-	}
-	if (skipped.length) {
-		out.push(`Skipped: ${skipped.map((r) => code(r.auditor)).join(", ")}`, "");
-	}
-	out.push("</details>", "");
-	if (errored.length) {
-		out.push(
-			`> Some auditors errored, so results may be incomplete: ${errored
-				.map((r) => code(r.auditor))
-				.join(", ")}`,
-			"",
-		);
-	}
+		...auditorTable(ran),
+		...(skipped.length
+			? [`Skipped: ${skipped.map((r) => code(r.auditor)).join(", ")}`, ""]
+			: []),
+		"</details>",
+		"",
+		...(errored.length
+			? [
+					`> Some auditors errored, so results may be incomplete: ${errored
+						.map((r) => code(r.auditor))
+						.join(", ")}`,
+					"",
+				]
+			: []),
+	];
+};
 
-	return `${out.join("\n").trimEnd()}\n`;
+const auditorTable = (ran: ReadonlyArray<AuditorResult>): string[] => {
+	if (!ran.length) return [];
+	return [
+		"| Auditor | Status | Findings | Duration | Note |",
+		"| --- | --- | ---: | ---: | --- |",
+		...ran.map(
+			(r) =>
+				`| ${code(r.auditor, { table: true })} | ${md(r.status)} | ${r.findings.length} | ${formatDuration(r.durationMs)} | ${md(r.message ?? "")} |`,
+		),
+		"",
+	];
 };
 
 /**
