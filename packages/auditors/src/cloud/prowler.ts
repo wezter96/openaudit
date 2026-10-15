@@ -4,7 +4,9 @@ import { join } from "node:path";
 import {
 	type AuditContext,
 	AuditorError,
+	type Category,
 	defineAuditor,
+	type ExecResult,
 	type FindingInput,
 	requireTool,
 	type Severity,
@@ -54,45 +56,83 @@ export interface ProwlerSettings {
 	readonly context?: string;
 }
 
+type RawSettings = Record<string, unknown> | undefined;
+type SettingKey = keyof ProwlerSettings;
+type AzureAuth = keyof typeof AZURE_AUTH;
+type DirPath = string;
+type CliFlag = `--${string}`;
+
 const list = (v: unknown): unknown[] =>
 	typeof v === "string" ? [v] : Array.isArray(v) ? v : [];
 
-/** Validates settings against the allowlist patterns; throws on a bad value. */
-export const readProwlerSettings = (
-	raw: Record<string, unknown> | undefined,
-): ProwlerSettings => {
-	const one = (key: string, re: RegExp): string | undefined => {
-		const v = raw?.[key];
-		if (v === undefined || v === null) return undefined;
-		if (typeof v !== "string" || !re.test(v))
-			throw new Error(`settings["${ID}"].${key} has an invalid value`);
+const matches = (v: unknown, re: RegExp): v is string =>
+	typeof v === "string" && re.test(v);
+
+/** One optional setting; throws when it is set but does not match `re`. */
+const one = (
+	raw: RawSettings,
+	key: SettingKey,
+	re: RegExp,
+): string | undefined => {
+	const v = raw?.[key];
+	if (v === undefined || v === null) return undefined;
+	if (!matches(v, re))
+		throw new Error(`settings["${ID}"].${key} has an invalid value`);
+	return v;
+};
+
+/** A string or list setting (at most 50 entries); every entry must match `re`. */
+const many = (raw: RawSettings, key: SettingKey, re: RegExp): string[] => {
+	const items = list(raw?.[key]);
+	if (items.length > 50)
+		throw new Error(`settings["${ID}"].${key} has too many entries (max 50)`);
+	return items.map((v) => {
+		if (!matches(v, re))
+			throw new Error(`settings["${ID}"].${key} has an invalid entry`);
 		return v;
-	};
-	const many = (key: string, re: RegExp): string[] => {
-		const items = list(raw?.[key]);
-		if (items.length > 50)
-			throw new Error(`settings["${ID}"].${key} has too many entries (max 50)`);
-		return items.map((v) => {
-			if (typeof v !== "string" || !re.test(v))
-				throw new Error(`settings["${ID}"].${key} has an invalid entry`);
-			return v;
-		});
-	};
+	});
+};
+
+const azureAuthOf = (raw: RawSettings): AzureAuth => {
 	const auth = raw?.azureAuth ?? "cli";
 	if (typeof auth !== "string" || !Object.hasOwn(AZURE_AUTH, auth))
 		throw new Error(
 			`settings["${ID}"].azureAuth must be one of ${Object.keys(AZURE_AUTH).join(", ")}`,
 		);
+	return auth as AzureAuth;
+};
+
+/** Validates settings against the allowlist patterns; throws on a bad value. */
+export const readProwlerSettings = (raw: RawSettings): ProwlerSettings => {
+	const azureAuth = azureAuthOf(raw);
 	return {
-		profile: one("profile", PROFILE),
-		regions: many("regions", REGION),
-		checks: many("checks", CHECK),
-		services: many("services", SERVICE),
-		compliance: one("compliance", COMPLIANCE),
-		azureAuth: auth as keyof typeof AZURE_AUTH,
-		projectIds: many("projectIds", GCP_PROJECT),
-		context: one("context", KUBE_CONTEXT),
+		profile: one(raw, "profile", PROFILE),
+		regions: many(raw, "regions", REGION),
+		checks: many(raw, "checks", CHECK),
+		services: many(raw, "services", SERVICE),
+		compliance: one(raw, "compliance", COMPLIANCE),
+		azureAuth,
+		projectIds: many(raw, "projectIds", GCP_PROJECT),
+		context: one(raw, "context", KUBE_CONTEXT),
 	};
+};
+
+/** `flag value` when the value is set. */
+const flagValue = (flag: CliFlag, value: string | undefined): string[] =>
+	value ? [flag, value] : [];
+
+/** `flag v1 v2 ...` when there are values. */
+const flagValues = (flag: CliFlag, values: ReadonlyArray<string>): string[] =>
+	values.length > 0 ? [flag, ...values] : [];
+
+const PROVIDER_ARGS: Record<Provider, (s: ProwlerSettings) => string[]> = {
+	aws: (s) => [
+		...flagValue("--profile", s.profile),
+		...flagValues("--filter-region", s.regions),
+	],
+	azure: (s) => [AZURE_AUTH[s.azureAuth]],
+	gcp: (s) => flagValues("--project-ids", s.projectIds),
+	kubernetes: (s) => flagValue("--context", s.context),
 };
 
 /**
@@ -103,35 +143,25 @@ export const readProwlerSettings = (
 export const prowlerArgs = (
 	provider: Provider,
 	s: ProwlerSettings,
-	outDir: string,
-): string[] => {
-	const args: string[] = [
-		provider,
-		"--output-formats",
-		"json-ocsf",
-		"--output-directory",
-		outDir,
-		"--output-filename",
-		"openaudit",
-		"--no-banner",
-		"--status",
-		"FAIL",
-		"--log-level",
-		"ERROR",
-	];
-	if (provider === "aws") {
-		if (s.profile) args.push("--profile", s.profile);
-		if (s.regions.length > 0) args.push("--filter-region", ...s.regions);
-	}
-	if (provider === "azure") args.push(AZURE_AUTH[s.azureAuth]);
-	if (provider === "gcp" && s.projectIds.length > 0)
-		args.push("--project-ids", ...s.projectIds);
-	if (provider === "kubernetes" && s.context) args.push("--context", s.context);
-	if (s.checks.length > 0) args.push("--checks", ...s.checks);
-	if (s.services.length > 0) args.push("--services", ...s.services);
-	if (s.compliance) args.push("--compliance", s.compliance);
-	return args;
-};
+	outDir: DirPath,
+): string[] => [
+	provider,
+	"--output-formats",
+	"json-ocsf",
+	"--output-directory",
+	outDir,
+	"--output-filename",
+	"openaudit",
+	"--no-banner",
+	"--status",
+	"FAIL",
+	"--log-level",
+	"ERROR",
+	...PROVIDER_ARGS[provider](s),
+	...flagValues("--checks", s.checks),
+	...flagValues("--services", s.services),
+	...flagValue("--compliance", s.compliance),
+];
 
 /* -------------------------------------------------------------------------- */
 /*                                   Parsing                                  */
@@ -170,6 +200,83 @@ const complianceTag = (framework: string) =>
 		.replace(/[^a-z0-9.]+/g, "-")
 		.replace(/^-+|-+$/g, "");
 
+type Json = Record<string, unknown>;
+
+const record = (v: unknown): Json => (isRecord(v) ? v : {});
+
+const isHttpUrl = (r: unknown): r is string =>
+	typeof r === "string" && /^https?:\/\//.test(r);
+
+/** A FAIL result that is not muted ("Suppressed"). */
+const isReportedFailure = (item: Json) =>
+	str(item.status_code)?.toUpperCase() === "FAIL" &&
+	str(item.status)?.toLowerCase() !== "suppressed";
+
+/** The risk, plus the region when there is one. */
+const messageOf = (item: Json, info: Json, resource: Json): string => {
+	const risk = str(item.risk_details) ?? str(info.desc);
+	const region = str(resource.region) ?? str(record(item.cloud).region);
+	return [risk, region ? `Region: ${region}.` : ""].filter(Boolean).join(" ");
+};
+
+const referencesOf = (remediation: Json, unmapped: Json): string[] => {
+	const refs = [
+		...arr(remediation.references).filter(isHttpUrl),
+		...[str(unmapped.related_url)].filter((r): r is string => !!r),
+	];
+	return [...new Set(refs)].slice(0, 6);
+};
+
+/** `prowler`, the cloud provider and the compliance frameworks. */
+const tagsOf = (item: Json, unmapped: Json): string[] => {
+	const provider = str(record(item.cloud).provider);
+	const compliance = isRecord(unmapped.compliance)
+		? Object.keys(unmapped.compliance)
+		: [];
+	return [
+		"prowler",
+		...(provider ? [provider.toLowerCase()] : []),
+		...compliance.map(complianceTag).filter(Boolean),
+	].slice(0, MAX_TAGS);
+};
+
+/** The check id, from the metadata or else the finding uid. */
+const checkOf = (meta: Json, info: Json) =>
+	str(meta.event_code) ?? str(info.uid)?.split("-")[2];
+
+const prowlerFinding = (
+	item: Json,
+	category: Category,
+): FindingInput | undefined => {
+	const meta = record(item.metadata);
+	const info = record(item.finding_info);
+	const check = checkOf(meta, info);
+	const title = str(info.title);
+	if (!check || !title) return undefined;
+	const resource = record(arr(item.resources)[0]);
+	const remediation = record(item.remediation);
+	const unmapped = record(item.unmapped);
+	const status = str(item.status_detail) ?? str(item.message);
+	return {
+		ruleId: `${ID}/${kebab(check)}`,
+		title: truncate(title, 200),
+		severity: severityOf(item),
+		category,
+		message: truncate(messageOf(item, info, resource) || title, 400),
+		location: {
+			url: str(resource.uid) ?? str(resource.name),
+			selector: str(resource.type),
+		},
+		evidence: status ? truncate(scrubLine(status), 240) : undefined,
+		remediation:
+			truncate(str(remediation.desc) ?? "", 500) ||
+			"See the Prowler check documentation.",
+		references: referencesOf(remediation, unmapped),
+		confidence: "high",
+		tags: tagsOf(item, unmapped),
+	};
+};
+
 /**
  * Maps Prowler `json-ocsf` output (an array of OCSF Detection Findings) to
  * findings. Only `status_code: "FAIL"` results are reported; PASS, MANUAL and
@@ -184,62 +291,12 @@ export const parseProwlerReport = (
 	json: unknown,
 	options: { readonly compliance?: boolean } = {},
 ): FindingInput[] => {
-	const findings: FindingInput[] = [];
-	for (const item of arr(json)) {
-		if (!isRecord(item)) continue;
-		if (str(item.status_code)?.toUpperCase() !== "FAIL") continue;
-		if (str(item.status)?.toLowerCase() === "suppressed") continue;
-		const meta = isRecord(item.metadata) ? item.metadata : {};
-		const info = isRecord(item.finding_info) ? item.finding_info : {};
-		const check = str(meta.event_code) ?? str(info.uid)?.split("-")[2];
-		const title = str(info.title);
-		if (!check || !title) continue;
-		const resource = isRecord(arr(item.resources)[0])
-			? (arr(item.resources)[0] as Record<string, unknown>)
-			: {};
-		const cloud = isRecord(item.cloud) ? item.cloud : {};
-		const provider = str(cloud.provider);
-		const region = str(resource.region) ?? str(cloud.region);
-		const remediation = isRecord(item.remediation) ? item.remediation : {};
-		const unmapped = isRecord(item.unmapped) ? item.unmapped : {};
-		const compliance = isRecord(unmapped.compliance)
-			? Object.keys(unmapped.compliance)
-			: [];
-		const status = str(item.status_detail) ?? str(item.message);
-		const risk = str(item.risk_details) ?? str(info.desc);
-		const refs = [
-			...arr(remediation.references).filter(
-				(r): r is string => typeof r === "string" && /^https?:\/\//.test(r),
-			),
-			...[str(unmapped.related_url)].filter((r): r is string => !!r),
-		];
-		const uid = str(resource.uid) ?? str(resource.name);
-		findings.push({
-			ruleId: `${ID}/${kebab(check)}`,
-			title: truncate(title, 200),
-			severity: severityOf(item),
-			category: options.compliance ? "compliance" : "security",
-			message: truncate(
-				[risk, region ? `Region: ${region}.` : ""].filter(Boolean).join(" ") ||
-					title,
-				400,
-			),
-			location: { url: uid, selector: str(resource.type) },
-			evidence: status ? truncate(scrubLine(status), 240) : undefined,
-			remediation:
-				truncate(str(remediation.desc) ?? "", 500) ||
-				"See the Prowler check documentation.",
-			references: [...new Set(refs)].slice(0, 6),
-			confidence: "high",
-			tags: [
-				"prowler",
-				...(provider ? [provider.toLowerCase()] : []),
-				...compliance.map(complianceTag).filter(Boolean),
-			].slice(0, MAX_TAGS),
-		});
-		if (findings.length >= MAX_FINDINGS) break;
-	}
-	return findings;
+	const category = options.compliance ? "compliance" : "security";
+	return arr(json)
+		.filter(isRecord)
+		.filter(isReportedFailure)
+		.flatMap((item) => prowlerFinding(item, category) ?? [])
+		.slice(0, MAX_FINDINGS);
 };
 
 /* -------------------------------------------------------------------------- */
@@ -248,6 +305,70 @@ export const parseProwlerReport = (
 
 const providerOf = (ctx: AuditContext): Provider | undefined =>
 	PROVIDERS.find((p) => p === ctx.target.cloud);
+
+/** Exit codes that still mean a finished scan. */
+const PROWLER_OK_CODES = new Set([0, 3]);
+
+interface ProwlerScan {
+	readonly bin: string;
+	readonly provider: Provider;
+	readonly settings: ProwlerSettings;
+	readonly dir: DirPath;
+}
+
+const settingsOf = (ctx: AuditContext) =>
+	Effect.try({
+		try: () => readProwlerSettings(ctx.options.settings?.[ID]),
+		catch: (cause) =>
+			new AuditorError({
+				message: cause instanceof Error ? cause.message : String(cause),
+			}),
+	});
+
+/** The report Prowler wrote into `dir`, if any. */
+const reportFileIn = (dir: DirPath) =>
+	Effect.promise(() => readdir(dir).catch(() => [] as string[])).pipe(
+		Effect.map(
+			(files) =>
+				files.find((f) => f.endsWith(".ocsf.json")) ??
+				files.find((f) => f.endsWith(".json")),
+		),
+	);
+
+const scanFailure = (res: ExecResult, file: string | undefined) =>
+	new AuditorError({
+		message: `prowler exited with code ${res.code}${file ? "" : " and wrote no report"}: ${truncate(scrubLine((res.stderr || res.stdout).trim()), 300)}`,
+	});
+
+const readReport = (path: string) =>
+	Effect.promise(() => readFile(path, "utf8")).pipe(
+		Effect.flatMap((body) =>
+			Effect.try({
+				try: () => parseOcsf(body),
+				catch: (cause) =>
+					new AuditorError({
+						message: "prowler produced an invalid JSON-OCSF report",
+						cause,
+					}),
+			}),
+		),
+	);
+
+const scan = (ctx: AuditContext, s: ProwlerScan) =>
+	Effect.gen(function* () {
+		const res = yield* ctx.exec.run(
+			[s.bin, ...prowlerArgs(s.provider, s.settings, s.dir)],
+			{ cwd: s.dir, timeoutMs: 60 * 60_000 },
+		);
+		const file = yield* reportFileIn(s.dir);
+		// Prowler exits 3 when it found failures; anything else with no report is an error.
+		if (!file || !PROWLER_OK_CODES.has(res.code))
+			return yield* Effect.fail(scanFailure(res, file));
+		const json = yield* readReport(join(s.dir, file));
+		return parseProwlerReport(json, {
+			compliance: s.settings.compliance !== undefined,
+		});
+	});
 
 export const prowler = defineAuditor({
 	id: ID,
@@ -271,49 +392,11 @@ export const prowler = defineAuditor({
 				"prowler",
 				"Install: pipx install prowler (https://docs.prowler.com/projects/prowler-open-source/en/latest/#installation).",
 			);
-			const settings = yield* Effect.try({
-				try: () => readProwlerSettings(ctx.options.settings?.[ID]),
-				catch: (cause) =>
-					new AuditorError({
-						message: cause instanceof Error ? cause.message : String(cause),
-					}),
-			});
+			const settings = yield* settingsOf(ctx);
 			const dir = yield* Effect.promise(() =>
 				mkdtemp(join(tmpdir(), "openaudit-prowler-")),
 			);
-			return yield* Effect.gen(function* () {
-				const res = yield* ctx.exec.run(
-					[bin, ...prowlerArgs(provider, settings, dir)],
-					{ cwd: dir, timeoutMs: 60 * 60_000 },
-				);
-				const files = yield* Effect.promise(() =>
-					readdir(dir).catch(() => [] as string[]),
-				);
-				const file =
-					files.find((f) => f.endsWith(".ocsf.json")) ??
-					files.find((f) => f.endsWith(".json"));
-				// Prowler exits 3 when it found failures; anything else with no report is an error.
-				if (!file || (res.code !== 0 && res.code !== 3))
-					return yield* Effect.fail(
-						new AuditorError({
-							message: `prowler exited with code ${res.code}${file ? "" : " and wrote no report"}: ${truncate(scrubLine((res.stderr || res.stdout).trim()), 300)}`,
-						}),
-					);
-				const body = yield* Effect.promise(() =>
-					readFile(join(dir, file), "utf8"),
-				);
-				const json = yield* Effect.try({
-					try: () => parseOcsf(body),
-					catch: (cause) =>
-						new AuditorError({
-							message: "prowler produced an invalid JSON-OCSF report",
-							cause,
-						}),
-				});
-				return parseProwlerReport(json, {
-					compliance: settings.compliance !== undefined,
-				});
-			}).pipe(
+			return yield* scan(ctx, { bin, provider, settings, dir }).pipe(
 				Effect.ensuring(
 					Effect.promise(() => rm(dir, { recursive: true, force: true })),
 				),
