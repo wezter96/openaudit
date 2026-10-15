@@ -5,6 +5,21 @@
  * at the root, so there is no base path here.
  */
 
+/** How specifically a media range matches text/html; absent when it does not. */
+const HTML_SPECIFICITY = new Map([
+	["text/html", 2],
+	["text/*", 1],
+	["*/*", 0],
+]);
+
+/** One range of an Accept header with its weight; undefined when q is not a number. */
+const mediaRange = (part: string) => {
+	const [range = "", ...params] = part.trim().toLowerCase().split(";");
+	const qParam = params.map((p) => p.trim()).find((p) => p.startsWith("q="));
+	const q = qParam ? Number(qParam.slice(2)) : 1;
+	return Number.isFinite(q) ? { type: range.trim(), q } : undefined;
+};
+
 /** Whether `accept` ranks text/markdown at least as high as text/html. */
 export const prefersMarkdown = (accept: string | null): boolean => {
 	if (!accept) return false;
@@ -12,21 +27,11 @@ export const prefersMarkdown = (accept: string | null): boolean => {
 	// The most specific range that matches text/html decides its weight.
 	let html = 0;
 	let htmlSpecificity = -1;
-	for (const part of accept.split(",")) {
-		const [range = "", ...params] = part.trim().toLowerCase().split(";");
-		const qParam = params.map((p) => p.trim()).find((p) => p.startsWith("q="));
-		const q = qParam ? Number(qParam.slice(2)) : 1;
-		if (!Number.isFinite(q)) continue;
-		const type = range.trim();
+	for (const { type, q } of accept
+		.split(",")
+		.flatMap((part) => mediaRange(part) ?? [])) {
 		if (type === "text/markdown") markdown = Math.max(markdown, q);
-		const specificity =
-			type === "text/html"
-				? 2
-				: type === "text/*"
-					? 1
-					: type === "*/*"
-						? 0
-						: -1;
+		const specificity = HTML_SPECIFICITY.get(type) ?? -1;
 		if (specificity > htmlSpecificity) {
 			htmlSpecificity = specificity;
 			html = q;
@@ -69,6 +74,27 @@ const JSON_TYPE = "application/json";
 const MARKDOWN = "text/markdown; charset=utf-8";
 const TEXT = "text/plain; charset=utf-8";
 
+/** Agent-facing files at fixed paths, with their content types. */
+const AGENT_PATHS = new Map([
+	[
+		"/.well-known/api-catalog",
+		'application/linkset+json; profile="https://www.rfc-editor.org/info/rfc9727"',
+	],
+	["/llms.txt", TEXT],
+	["/llms-full.txt", TEXT],
+	["/openapi.json", JSON_TYPE],
+]);
+
+/** Agent-facing files by folder and extension; "" is any folder. */
+const AGENT_EXTENSIONS: ReadonlyArray<
+	readonly [folder: string, extension: string, type: string]
+> = [
+	["", ".md", MARKDOWN],
+	["/data/", ".json", JSON_TYPE],
+	["/.well-known/", ".json", JSON_TYPE],
+	["/.well-known/", ".txt", TEXT],
+];
+
 /**
  * Content type and cross-origin access for agent-facing files, or undefined
  * when the path is not one of them. Everything listed is public and read-only.
@@ -76,21 +102,13 @@ const TEXT = "text/plain; charset=utf-8";
 export const agentFile = (
 	pathname: string,
 ): { readonly type: string } | undefined => {
-	if (pathname === "/.well-known/api-catalog")
-		return {
-			type: 'application/linkset+json; profile="https://www.rfc-editor.org/info/rfc9727"',
-		};
-	if (pathname === "/llms.txt" || pathname === "/llms-full.txt")
-		return { type: TEXT };
-	if (pathname.endsWith(".md")) return { type: MARKDOWN };
-	if (pathname === "/openapi.json") return { type: JSON_TYPE };
-	if (pathname.startsWith("/data/") && pathname.endsWith(".json"))
-		return { type: JSON_TYPE };
-	if (pathname.startsWith("/.well-known/")) {
-		if (pathname.endsWith(".json")) return { type: JSON_TYPE };
-		if (pathname.endsWith(".txt")) return { type: TEXT };
-	}
-	return undefined;
+	const type =
+		AGENT_PATHS.get(pathname) ??
+		AGENT_EXTENSIONS.find(
+			([folder, extension]) =>
+				pathname.startsWith(folder) && pathname.endsWith(extension),
+		)?.[2];
+	return type ? { type } : undefined;
 };
 
 /** Headers that let any origin read a public file. */
