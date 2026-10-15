@@ -12,7 +12,7 @@ import { Effect } from "effect";
 
 import { arr, jsonLines, num, parseJson, relPath, str } from "../../tool";
 import { baseName, extOf, isRecord, kebab, truncate } from "../util";
-import { dedupe, run, withTempDir } from "./shared";
+import { dedupe, type FilePath, run, withTempDir } from "./shared";
 
 /* -------------------------------------------------------------------------- */
 /*                                    ruff                                    */
@@ -40,61 +40,94 @@ const RUFF_SECURITY_LOW = new Set([
 	"S607",
 ]);
 
-const isRuffCode = (code: string | undefined): code is string =>
+/** A ruff rule code such as `F401`. */
+type RuffCode = string;
+
+const isRuffCode = (code: string | undefined): code is RuffCode =>
 	code !== undefined && /^[A-Z]{1,4}\d{1,4}$/.test(code);
 
+interface RuffClass {
+	readonly category: Category;
+	readonly severity: Severity;
+	readonly confidence: "high" | "medium" | "low";
+}
+
+const ruffClass = (code: RuffCode): RuffClass => {
+	if (code.startsWith("S"))
+		return {
+			category: "security",
+			severity: RUFF_SECURITY_LOW.has(code) ? "low" : "medium",
+			confidence: "medium",
+		};
+	if (RUFF_RELIABILITY_MEDIUM.test(code))
+		return { category: "reliability", severity: "medium", confidence: "high" };
+	if (code.startsWith("B"))
+		return { category: "reliability", severity: "low", confidence: "high" };
+	if (RUFF_INFO.test(code))
+		return {
+			category: "maintainability",
+			severity: "info",
+			confidence: "high",
+		};
+	return { category: "maintainability", severity: "low", confidence: "high" };
+};
+
+/** Rule id suffix, message, class and tags; diagnostics without a rule code are syntax errors. */
+const ruffRule = (code: string | undefined, name: string, message: string) =>
+	isRuffCode(code)
+		? {
+				rule: `${code.toLowerCase()}-${name}`,
+				message: `${message} (ruff ${code}: ${name})`,
+				tags: [code.toLowerCase()],
+				...ruffClass(code),
+			}
+		: {
+				rule: "syntax-error",
+				message,
+				tags: [],
+				category: "reliability" as const,
+				severity: "high" as const,
+				confidence: "high" as const,
+			};
+
+const ruffDiagnostic = (
+	d: Record<string, unknown>,
+	root: FilePath,
+): FindingInput => {
+	const code = str(d.code);
+	const name = str(d.name) ?? code ?? "diagnostic";
+	const message = str(d.message) ?? name;
+	const loc = isRecord(d.location) ? d.location : {};
+	const fixable = isRecord(d.fix);
+	const rule = ruffRule(code, name, message);
+	return {
+		ruleId: `code.ruff/${rule.rule}`,
+		title: truncate(message.replace(/\.$/, ""), 100),
+		severity: rule.severity,
+		category: rule.category,
+		message: rule.message,
+		location: {
+			file: relPath(root, str(d.filename)),
+			line: num(loc.row),
+			column: num(loc.column),
+		},
+		remediation: fixable
+			? "Apply the autofix with `ruff check --fix`, or review the rule documentation."
+			: "See the ruff rule documentation, or suppress a justified false positive with `# noqa: <code>`.",
+		references: str(d.url) ? [str(d.url) as string] : [],
+		confidence: rule.confidence,
+		tags: ["python", ...rule.tags, ...(fixable ? ["autofixable"] : [])],
+	};
+};
+
 /** Parses `ruff check --output-format json`. */
-export const parseRuffReport = (json: unknown, root: string): FindingInput[] =>
-	arr(json).flatMap((d): FindingInput[] => {
-		if (!isRecord(d)) return [];
-		const code = str(d.code);
-		const name = str(d.name) ?? code ?? "diagnostic";
-		const message = str(d.message) ?? name;
-		const loc = isRecord(d.location) ? d.location : {};
-		const file = relPath(root, str(d.filename));
-		const syntax = !isRuffCode(code);
-		const fixable = isRecord(d.fix);
-		let category: Category = "maintainability";
-		let severity: Severity = "low";
-		let confidence: "high" | "medium" | "low" = "high";
-		if (syntax) {
-			category = "reliability";
-			severity = "high";
-		} else if (code.startsWith("S")) {
-			category = "security";
-			severity = RUFF_SECURITY_LOW.has(code) ? "low" : "medium";
-			confidence = "medium";
-		} else if (RUFF_RELIABILITY_MEDIUM.test(code)) {
-			category = "reliability";
-			severity = "medium";
-		} else if (code.startsWith("B")) {
-			category = "reliability";
-			severity = "low";
-		} else if (RUFF_INFO.test(code)) {
-			severity = "info";
-		}
-		const rule = syntax ? "syntax-error" : `${code.toLowerCase()}-${name}`;
-		return [
-			{
-				ruleId: `code.ruff/${rule}`,
-				title: truncate(message.replace(/\.$/, ""), 100),
-				severity,
-				category,
-				message: syntax ? message : `${message} (ruff ${code}: ${name})`,
-				location: { file, line: num(loc.row), column: num(loc.column) },
-				remediation: fixable
-					? "Apply the autofix with `ruff check --fix`, or review the rule documentation."
-					: "See the ruff rule documentation, or suppress a justified false positive with `# noqa: <code>`.",
-				references: str(d.url) ? [str(d.url) as string] : [],
-				confidence,
-				tags: [
-					"python",
-					...(syntax ? [] : [code.toLowerCase()]),
-					...(fixable ? ["autofixable"] : []),
-				],
-			},
-		];
-	});
+export const parseRuffReport = (
+	json: unknown,
+	root: FilePath,
+): FindingInput[] =>
+	arr(json).flatMap((d): FindingInput[] =>
+		isRecord(d) ? [ruffDiagnostic(d, root)] : [],
+	);
 
 /** True when the project configures ruff itself (data files only). */
 const hasRuffConfig = (ws: Workspace, files: ReadonlyArray<string>) =>

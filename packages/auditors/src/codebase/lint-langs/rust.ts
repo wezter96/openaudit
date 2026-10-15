@@ -1,4 +1,5 @@
 import {
+	type AuditContext,
 	AuditorError,
 	type Category,
 	defineAuditor,
@@ -12,7 +13,15 @@ import { Effect } from "effect";
 
 import { arr, jsonLines, num, str } from "../../tool";
 import { isRecord, kebab, scrubLine, truncate } from "../util";
-import { dedupe, inRoot, manifestDirs, run, withTempDir } from "./shared";
+import {
+	dedupe,
+	type FilePath,
+	inRoot,
+	isMinor,
+	manifestDirs,
+	run,
+	withTempDir,
+} from "./shared";
 
 /* -------------------------------------------------------------------------- */
 /*                                   clippy                                   */
@@ -107,14 +116,17 @@ const CLIPPY_SECURITY = words(`
 	from_raw_with_void_ptr invalid_null_ptr_usage
 `);
 
-const clippyGroup = (name: string, level: string): ClippyGroup => {
-	if (CLIPPY_CORRECTNESS.has(name)) return "correctness";
-	if (CLIPPY_SUSPICIOUS.has(name)) return "suspicious";
-	if (CLIPPY_PERF.has(name)) return "perf";
-	if (CLIPPY_COMPLEXITY.has(name)) return "complexity";
-	// Deny-by-default lints that are not listed above are correctness lints.
-	return level === "error" ? "correctness" : "style";
-};
+const CLIPPY_GROUPS: ReadonlyArray<[ClippyGroup, Set<string>]> = [
+	["correctness", CLIPPY_CORRECTNESS],
+	["suspicious", CLIPPY_SUSPICIOUS],
+	["perf", CLIPPY_PERF],
+	["complexity", CLIPPY_COMPLEXITY],
+];
+
+// Deny-by-default lints that are not listed above are correctness lints.
+const clippyGroup = (name: string, level: string): ClippyGroup =>
+	CLIPPY_GROUPS.find(([, lints]) => lints.has(name))?.[0] ??
+	(level === "error" ? "correctness" : "style");
 
 /** rustc lints that point at a likely bug rather than tidiness. */
 const RUSTC_RELIABILITY = words(`
@@ -133,6 +145,177 @@ const CLIPPY_SEVERITY: Record<ClippyGroup, Severity> = {
 	other: "info",
 };
 
+/** Category of a clippy lint group, unless it is a security lint. */
+const CLIPPY_CATEGORY: Record<ClippyGroup, Category> = {
+	correctness: "reliability",
+	suspicious: "reliability",
+	perf: "performance",
+	complexity: "maintainability",
+	style: "maintainability",
+	other: "maintainability",
+};
+
+type Level = "warning" | "error";
+
+/** A compiler message with a primary span inside the workspace. */
+interface Diagnostic {
+	readonly level: Level;
+	readonly message: string;
+	readonly isClippy: boolean;
+	/** The lint name without `clippy::`, or a rustc code (`E0308`). */
+	readonly name: string | undefined;
+	readonly span: Record<string, unknown>;
+	readonly file: FilePath;
+}
+
+interface DiagnosticKind {
+	readonly category: Category;
+	readonly severity: Severity;
+	readonly message: string;
+	readonly remediation: string;
+	readonly references: string[];
+	readonly tags: string[];
+}
+
+const ERROR_CODE = /^E\d{4}$/;
+
+const isReported = (level: string | undefined): level is Level =>
+	level === "warning" || level === "error";
+
+const compilerMessage = (record: Record<string, unknown>) =>
+	record.reason === "compiler-message" && isRecord(record.message)
+		? record.message
+		: undefined;
+
+const primarySpan = (msg: Record<string, unknown>) =>
+	arr(msg.spans).find(
+		(s): s is Record<string, unknown> => isRecord(s) && s.is_primary === true,
+	);
+
+const codeOf = (msg: Record<string, unknown>) =>
+	isRecord(msg.code) ? str(msg.code.code) : undefined;
+
+/** The lint name of a `clippy::` code. */
+const clippyLint = (code: string | undefined) =>
+	code?.startsWith("clippy::") ? code.slice("clippy::".length) : undefined;
+
+const parseDiagnostic = (
+	record: Record<string, unknown>,
+	root: FilePath,
+): Diagnostic | undefined => {
+	const msg = compilerMessage(record);
+	if (!msg) return undefined;
+	const level = str(msg.level);
+	if (!isReported(level)) return undefined;
+	const span = primarySpan(msg);
+	if (!span) return undefined;
+	const file = inRoot(root, str(span.file_name));
+	if (!file) return undefined;
+	const code = codeOf(msg);
+	const lint = clippyLint(code);
+	return {
+		level,
+		message: str(msg.message) ?? "lint",
+		isClippy: lint !== undefined,
+		name: lint ?? code,
+		span,
+		file,
+	};
+};
+
+const isUnnamedError = (d: Diagnostic) => d.level === "error" && !d.name;
+
+/** A compile error (E0xxx) or a rustc error without a lint name. */
+const isCompileProblem = (d: Diagnostic) =>
+	!d.isClippy && (isUnnamedError(d) || ERROR_CODE.test(d.name ?? ""));
+
+// Deny-level configuration (`-D warnings`, `[lints.clippy]`) is the
+// project's own bar: never report it below low.
+const denyFloor = (level: Level, severity: Severity): Severity =>
+	level === "error" && severity === "info" ? "low" : severity;
+
+const clippyReferences = (lint: string | undefined) =>
+	lint
+		? [`https://rust-lang.github.io/rust-clippy/master/index.html#${lint}`]
+		: [];
+
+const clippyClass = (
+	lint: string | undefined,
+	group: ClippyGroup,
+	level: Level,
+): Pick<DiagnosticKind, "category" | "severity"> => {
+	const base = CLIPPY_SEVERITY[group];
+	const security = CLIPPY_SECURITY.has(lint ?? "");
+	return {
+		category: security ? "security" : CLIPPY_CATEGORY[group],
+		severity: denyFloor(level, security && isMinor(base) ? "medium" : base),
+	};
+};
+
+const clippyKind = (d: Diagnostic): DiagnosticKind => {
+	const lint = d.name ? d.name : undefined;
+	const group = lint ? clippyGroup(lint, d.level) : "other";
+	return {
+		...clippyClass(lint, group, d.level),
+		message: `${d.message} (clippy::${d.name}, ${group})`,
+		remediation:
+			"Apply the suggested change, or silence a justified false positive with a scoped `#[allow(clippy::...)]` that explains why.",
+		references: clippyReferences(lint),
+		tags: [`clippy-${group}`],
+	};
+};
+
+const rustcClass = (
+	d: Diagnostic,
+): Pick<DiagnosticKind, "category" | "severity"> => {
+	if (isCompileProblem(d))
+		return { category: "reliability", severity: "medium" };
+	if (d.level === "error") return { category: "reliability", severity: "high" };
+	if (d.name && RUSTC_RELIABILITY.has(d.name))
+		return { category: "reliability", severity: "low" };
+	return { category: "maintainability", severity: "info" };
+};
+
+const rustcKind = (d: Diagnostic): DiagnosticKind => ({
+	...rustcClass(d),
+	message: `${d.message} (rustc${d.name ? ` ${d.name}` : ""})`,
+	remediation: "Fix the diagnostic reported by the compiler.",
+	references: [],
+	tags: [],
+});
+
+const spanEvidence = (span: Record<string, unknown>) => {
+	const text = arr(span.text)
+		.map((t) => (isRecord(t) ? str(t.text) : undefined))
+		.find(Boolean);
+	return text ? truncate(scrubLine(text)) : undefined;
+};
+
+// A rustc diagnostic without a code is a compile error at `error` level.
+const clippyLabel = (d: Diagnostic) =>
+	d.name ?? (d.level === "error" ? "compile-error" : "diagnostic");
+
+const clippyFinding = (d: Diagnostic, prefix: FilePath): FindingInput => {
+	const kind = d.isClippy ? clippyKind(d) : rustcKind(d);
+	return {
+		ruleId: `code.clippy/${kebab(clippyLabel(d))}`,
+		title: truncate(d.message, 100),
+		severity: kind.severity,
+		category: kind.category,
+		message: kind.message,
+		location: {
+			file: prefix ? `${prefix}/${d.file}` : d.file,
+			line: num(d.span.line_start),
+			column: num(d.span.column_start),
+		},
+		evidence: spanEvidence(d.span),
+		remediation: kind.remediation,
+		references: kind.references,
+		confidence: isCompileProblem(d) ? "low" : "high",
+		tags: ["rust", ...kind.tags],
+	};
+};
+
 /**
  * Parses `cargo clippy --message-format=json` output (one JSON object per
  * line). Only `compiler-message` records with a primary span inside the
@@ -141,93 +324,61 @@ const CLIPPY_SEVERITY: Record<ClippyGroup, Severity> = {
  */
 export const parseClippyReport = (
 	stdout: string,
-	root: string,
-	prefix = "",
-): FindingInput[] => {
-	const findings: FindingInput[] = [];
-	for (const record of jsonLines(stdout)) {
-		if (record.reason !== "compiler-message") continue;
-		const msg = record.message;
-		if (!isRecord(msg)) continue;
-		const level = str(msg.level);
-		if (level !== "warning" && level !== "error") continue;
-		const span = arr(msg.spans).find(
-			(s): s is Record<string, unknown> => isRecord(s) && s.is_primary === true,
+	root: FilePath,
+	prefix: FilePath = "",
+): FindingInput[] =>
+	dedupe(
+		jsonLines(stdout).flatMap((record) => {
+			const d = parseDiagnostic(record, root);
+			return d ? [clippyFinding(d, prefix)] : [];
+		}),
+	);
+
+const hasLockfile = (files: ReadonlyArray<FilePath>, dir: FilePath) =>
+	files.includes(dir ? `${dir}/Cargo.lock` : "Cargo.lock");
+
+/** Runs clippy on one crate or workspace with a throwaway target dir. */
+const lintCrate = (
+	ctx: AuditContext,
+	cargo: FilePath,
+	cwd: FilePath,
+	dir: FilePath,
+) =>
+	Effect.gen(function* () {
+		const res = yield* withTempDir((target) =>
+			run(
+				ctx,
+				[
+					cargo,
+					"clippy",
+					"--message-format=json",
+					"--all-targets",
+					"--workspace",
+					"--locked",
+					"--offline",
+					"--target-dir",
+					target,
+				],
+				{
+					cwd,
+					// 101 = a lint at deny level or a compile error.
+					okCodes: [0, 101],
+					env: {
+						CARGO_TERM_COLOR: "never",
+						CARGO_NET_OFFLINE: "true",
+					},
+				},
+			),
 		);
-		if (!span) continue;
-		const file = inRoot(root, str(span.file_name));
-		if (!file) continue;
-		const code = isRecord(msg.code) ? str(msg.code.code) : undefined;
-		const message = str(msg.message) ?? "lint";
-		const isClippy = code?.startsWith("clippy::") === true;
-		const name = isClippy ? (code as string).slice("clippy::".length) : code;
-		// A compile error (E0xxx) or a rustc lint without clippy's group.
-		const isCompileError = level === "error" && !isClippy && !name;
-		const compileCode = !isClippy && name && /^E\d{4}$/.test(name);
-		const group = isClippy && name ? clippyGroup(name, level) : "other";
-		const security = isClippy && name && CLIPPY_SECURITY.has(name);
-		let category: Category;
-		let severity: Severity;
-		if (isClippy) {
-			severity = CLIPPY_SEVERITY[group];
-			if (security) {
-				category = "security";
-				if (severity === "info" || severity === "low") severity = "medium";
-			} else if (group === "perf") category = "performance";
-			else if (group === "correctness" || group === "suspicious")
-				category = "reliability";
-			else category = "maintainability";
-			// Deny-level configuration (`-D warnings`, `[lints.clippy]`) is the
-			// project's own bar: never report it below low.
-			if (level === "error" && severity === "info") severity = "low";
-		} else if (isCompileError || compileCode) {
-			category = "reliability";
-			severity = "medium";
-		} else if (level === "error") {
-			category = "reliability";
-			severity = "high";
-		} else if (name && RUSTC_RELIABILITY.has(name)) {
-			category = "reliability";
-			severity = "low";
-		} else {
-			category = "maintainability";
-			severity = "info";
-		}
-		const lineNo = num(span.line_start);
-		const column = num(span.column_start);
-		const sourceText = arr(span.text)
-			.map((t) => (isRecord(t) ? str(t.text) : undefined))
-			.find(Boolean);
-		const label = name ?? (isCompileError ? "compile-error" : "diagnostic");
-		findings.push({
-			ruleId: `code.clippy/${kebab(label)}`,
-			title: truncate(message, 100),
-			severity,
-			category,
-			message: isClippy
-				? `${message} (clippy::${name}, ${group})`
-				: `${message} (rustc${name ? ` ${name}` : ""})`,
-			location: {
-				file: prefix ? `${prefix}/${file}` : file,
-				line: lineNo,
-				column,
-			},
-			evidence: sourceText ? truncate(scrubLine(sourceText)) : undefined,
-			remediation: isClippy
-				? "Apply the suggested change, or silence a justified false positive with a scoped `#[allow(clippy::...)]` that explains why."
-				: "Fix the diagnostic reported by the compiler.",
-			references:
-				isClippy && name
-					? [
-							`https://rust-lang.github.io/rust-clippy/master/index.html#${name}`,
-						]
-					: [],
-			confidence: isCompileError || compileCode ? "low" : "high",
-			tags: ["rust", ...(isClippy ? [`clippy-${group}`] : [])],
-		});
-	}
-	return dedupe(findings);
-};
+		// Resolution failures print to stderr and never reach build-finished.
+		if (!res.stdout.includes('"reason":"build-finished"'))
+			return yield* Effect.fail(
+				new AuditorError({
+					message: `cargo clippy failed: ${truncate(res.stderr || res.stdout, 300)}`,
+				}),
+			);
+		return parseClippyReport(res.stdout, cwd, dir);
+	});
 
 export const clippy = defineAuditor({
 	id: "code.clippy",
@@ -246,9 +397,7 @@ export const clippy = defineAuditor({
 			const crates = manifestDirs(files, "Cargo.toml", false);
 			if (crates.length === 0)
 				return yield* skip("No Cargo.toml in the workspace");
-			const locked = crates.filter((d) =>
-				files.includes(d ? `${d}/Cargo.lock` : "Cargo.lock"),
-			);
+			const locked = crates.filter((d) => hasLockfile(files, d));
 			if (locked.length === 0)
 				return yield* skip(
 					"No Cargo.lock next to Cargo.toml: clippy runs --locked --offline and would otherwise have to resolve (download) dependencies",
@@ -264,43 +413,10 @@ export const clippy = defineAuditor({
 				"Install: rustup component add clippy.",
 			);
 			const findings: FindingInput[] = [];
-			for (const dir of locked) {
-				const res = yield* withTempDir((target) =>
-					run(
-						ctx,
-						[
-							cargo,
-							"clippy",
-							"--message-format=json",
-							"--all-targets",
-							"--workspace",
-							"--locked",
-							"--offline",
-							"--target-dir",
-							target,
-						],
-						{
-							cwd: ws.absolute(dir || "."),
-							// 101 = a lint at deny level or a compile error.
-							okCodes: [0, 101],
-							env: {
-								CARGO_TERM_COLOR: "never",
-								CARGO_NET_OFFLINE: "true",
-							},
-						},
-					),
-				);
-				// Resolution failures print to stderr and never reach build-finished.
-				if (!res.stdout.includes('"reason":"build-finished"'))
-					return yield* Effect.fail(
-						new AuditorError({
-							message: `cargo clippy failed: ${truncate(res.stderr || res.stdout, 300)}`,
-						}),
-					);
+			for (const dir of locked)
 				findings.push(
-					...parseClippyReport(res.stdout, ws.absolute(dir || "."), dir),
+					...(yield* lintCrate(ctx, cargo, ws.absolute(dir || "."), dir)),
 				);
-			}
 			return findings;
 		}),
 });

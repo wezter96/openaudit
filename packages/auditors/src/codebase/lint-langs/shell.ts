@@ -12,7 +12,7 @@ import { Effect } from "effect";
 
 import { arr, num, parseJson, relPath, str } from "../../tool";
 import { baseName, extOf, isGeneratedPath, isRecord, truncate } from "../util";
-import { dedupe, run, SHELL_FILE_LIMIT } from "./shared";
+import { dedupe, type FilePath, run, SHELL_FILE_LIMIT } from "./shared";
 
 /* -------------------------------------------------------------------------- */
 /*                                 shellcheck                                 */
@@ -50,44 +50,56 @@ export const findShellScripts = (ws: Workspace) =>
 		return scripts.slice(0, SHELL_FILE_LIMIT);
 	});
 
+const SHELLCHECK_SEVERITY = new Map<string, Severity>([
+	["error", "medium"],
+	["warning", "low"],
+]);
+
+const shellcheckSeverity = (level: string, security: boolean): Severity => {
+	const severity = SHELLCHECK_SEVERITY.get(level) ?? "info";
+	// Quoting bugs are injection and globbing hazards.
+	return security && severity === "info" ? "low" : severity;
+};
+
+const shellcheckComment = (
+	c: Record<string, unknown>,
+	code: number,
+	root: FilePath,
+): FindingInput => {
+	const level = str(c.level) ?? "style";
+	const message = str(c.message) ?? `SC${code}`;
+	const security = SHELLCHECK_SECURITY.has(code);
+	return {
+		ruleId: `code.shellcheck/sc${code}`,
+		title: truncate(message, 100),
+		severity: shellcheckSeverity(level, security),
+		category: security ? "security" : "reliability",
+		message: `${message} (SC${code}, ${level})`,
+		location: {
+			file: relPath(root, str(c.file)),
+			line: num(c.line),
+			column: num(c.column),
+		},
+		remediation: isRecord(c.fix)
+			? `Apply the suggested quoting/rewrite; see https://www.shellcheck.net/wiki/SC${code}.`
+			: `See https://www.shellcheck.net/wiki/SC${code}, or disable a justified false positive with \`# shellcheck disable=SC${code}\`.`,
+		references: [`https://www.shellcheck.net/wiki/SC${code}`],
+		confidence: "high",
+		tags: ["shell", `sc${code}`],
+	};
+};
+
 /** Parses `shellcheck -f json1` output. */
 export const parseShellcheckReport = (
 	json: unknown,
-	root: string,
+	root: FilePath,
 ): FindingInput[] => {
 	if (!isRecord(json)) return [];
 	return dedupe(
 		arr(json.comments).flatMap((c): FindingInput[] => {
 			if (!isRecord(c)) return [];
 			const code = num(c.code);
-			if (code === undefined) return [];
-			const level = str(c.level) ?? "style";
-			const message = str(c.message) ?? `SC${code}`;
-			const security = SHELLCHECK_SECURITY.has(code);
-			let severity: Severity =
-				level === "error" ? "medium" : level === "warning" ? "low" : "info";
-			// Quoting bugs are injection and globbing hazards.
-			if (security && severity === "info") severity = "low";
-			return [
-				{
-					ruleId: `code.shellcheck/sc${code}`,
-					title: truncate(message, 100),
-					severity,
-					category: security ? "security" : "reliability",
-					message: `${message} (SC${code}, ${level})`,
-					location: {
-						file: relPath(root, str(c.file)),
-						line: num(c.line),
-						column: num(c.column),
-					},
-					remediation: isRecord(c.fix)
-						? `Apply the suggested quoting/rewrite; see https://www.shellcheck.net/wiki/SC${code}.`
-						: `See https://www.shellcheck.net/wiki/SC${code}, or disable a justified false positive with \`# shellcheck disable=SC${code}\`.`,
-					references: [`https://www.shellcheck.net/wiki/SC${code}`],
-					confidence: "high",
-					tags: ["shell", `sc${code}`],
-				},
-			];
+			return code === undefined ? [] : [shellcheckComment(c, code, root)];
 		}),
 	);
 };

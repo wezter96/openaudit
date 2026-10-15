@@ -14,7 +14,14 @@ import { Effect } from "effect";
 
 import { arr, num, parseJson, str } from "../../tool";
 import { extOf, isRecord, kebab, truncate } from "../util";
-import { dedupe, inRoot, run, withTempDir } from "./shared";
+import {
+	dedupe,
+	type FilePath,
+	inRoot,
+	isMinor,
+	run,
+	withTempDir,
+} from "./shared";
 
 /* -------------------------------------------------------------------------- */
 /*                                    PMD                                     */
@@ -55,89 +62,99 @@ const PMD_CWE: Record<string, string> = {
 	InsecureCryptoIv: "cwe-329",
 };
 
-/** Parses `pmd check -f json`, including files PMD could not parse. */
-export const parsePmdReport = (json: unknown, root: string): FindingInput[] => {
-	if (!isRecord(json)) return [];
-	const violations = arr(json.files).flatMap((f): FindingInput[] => {
-		if (!isRecord(f)) return [];
-		const file = inRoot(root, str(f.filename));
-		if (!file) return [];
-		return arr(f.violations).flatMap((v): FindingInput[] => {
-			if (!isRecord(v)) return [];
-			const rule = str(v.rule) ?? "violation";
-			const ruleset = str(v.ruleset) ?? "";
-			const description = str(v.description) ?? rule;
-			const category = PMD_CATEGORY[ruleset] ?? "maintainability";
-			let severity = PMD_SEVERITY[num(v.priority) ?? 3] ?? "low";
-			// Both security rules are priority 3, but a hardcoded key is not a nit.
-			if (
-				category === "security" &&
-				(severity === "low" || severity === "info")
-			)
-				severity = "medium";
-			const url = str(v.externalInfoUrl);
-			const cwe = PMD_CWE[rule];
-			return [
-				{
-					ruleId: `${ID}/${kebab(rule)}`,
-					title: truncate(description.replace(/\.$/, ""), 100),
-					severity,
-					category,
-					message: `${description} (PMD ${ruleset ? `${ruleset}: ` : ""}${rule})`,
-					location: {
-						file,
-						line: num(v.beginline),
-						column: num(v.begincolumn),
-					},
-					remediation:
-						'See the PMD rule documentation, or suppress a justified false positive with `@SuppressWarnings("PMD.<Rule>")` or a `// NOPMD` comment and a reason.',
-					references: url ? [url] : [],
-					confidence: "high",
-					tags: [
-						"java",
-						...(ruleset ? [`pmd-${kebab(ruleset)}`] : []),
-						...(cwe ? [cwe] : []),
-					],
-				},
-			];
-		});
-	});
-	const parseErrors = arr(json.processingErrors).flatMap(
-		(e): FindingInput[] => {
-			if (!isRecord(e)) return [];
-			const file = inRoot(root, str(e.filename));
-			if (!file) return [];
-			const raw = str(e.message) ?? "";
-			const at = /at line (\d+), column (\d+):\s*([\s\S]*)/.exec(raw);
-			const detail = (at?.[3] ?? raw).split("\n")[0]?.trim() ?? "";
-			return [
-				{
-					ruleId: `${ID}/parse-error`,
-					title: "Java file could not be parsed",
-					severity: "low",
-					category: "reliability",
-					message: truncate(
-						`PMD could not parse this file${detail ? `: ${detail}` : ""}`,
-						300,
-					),
-					location: {
-						file,
-						line: at ? Number(at[1]) : undefined,
-						column: at ? Number(at[2]) : undefined,
-					},
-					remediation:
-						"Fix the syntax error. If the file uses a Java version PMD does not support yet, it was skipped by every rule.",
-					confidence: "low",
-					tags: ["java", "parse-error"],
-				},
-			];
+const pmdSeverity = (v: Record<string, unknown>, category: Category) => {
+	const severity = PMD_SEVERITY[num(v.priority) ?? 3] ?? "low";
+	// Both security rules are priority 3, but a hardcoded key is not a nit.
+	return category === "security" && isMinor(severity) ? "medium" : severity;
+};
+
+const pmdViolation = (
+	v: Record<string, unknown>,
+	file: FilePath,
+): FindingInput => {
+	const rule = str(v.rule) ?? "violation";
+	const ruleset = str(v.ruleset) ?? "";
+	const description = str(v.description) ?? rule;
+	const category = PMD_CATEGORY[ruleset] ?? "maintainability";
+	const url = str(v.externalInfoUrl);
+	const cwe = PMD_CWE[rule];
+	return {
+		ruleId: `${ID}/${kebab(rule)}`,
+		title: truncate(description.replace(/\.$/, ""), 100),
+		severity: pmdSeverity(v, category),
+		category,
+		message: `${description} (PMD ${ruleset ? `${ruleset}: ` : ""}${rule})`,
+		location: {
+			file,
+			line: num(v.beginline),
+			column: num(v.begincolumn),
 		},
+		remediation:
+			'See the PMD rule documentation, or suppress a justified false positive with `@SuppressWarnings("PMD.<Rule>")` or a `// NOPMD` comment and a reason.',
+		references: url ? [url] : [],
+		confidence: "high",
+		tags: [
+			"java",
+			...(ruleset ? [`pmd-${kebab(ruleset)}`] : []),
+			...(cwe ? [cwe] : []),
+		],
+	};
+};
+
+const pmdFileViolations = (f: unknown, root: FilePath): FindingInput[] => {
+	if (!isRecord(f)) return [];
+	const file = inRoot(root, str(f.filename));
+	if (!file) return [];
+	return arr(f.violations).flatMap((v): FindingInput[] =>
+		isRecord(v) ? [pmdViolation(v, file)] : [],
+	);
+};
+
+const pmdParseError = (e: unknown, root: FilePath): FindingInput[] => {
+	if (!isRecord(e)) return [];
+	const file = inRoot(root, str(e.filename));
+	if (!file) return [];
+	const raw = str(e.message) ?? "";
+	const at = /at line (\d+), column (\d+):\s*([\s\S]*)/.exec(raw);
+	const detail = (at?.[3] ?? raw).split("\n")[0]?.trim() ?? "";
+	return [
+		{
+			ruleId: `${ID}/parse-error`,
+			title: "Java file could not be parsed",
+			severity: "low",
+			category: "reliability",
+			message: truncate(
+				`PMD could not parse this file${detail ? `: ${detail}` : ""}`,
+				300,
+			),
+			location: {
+				file,
+				line: at ? Number(at[1]) : undefined,
+				column: at ? Number(at[2]) : undefined,
+			},
+			remediation:
+				"Fix the syntax error. If the file uses a Java version PMD does not support yet, it was skipped by every rule.",
+			confidence: "low",
+			tags: ["java", "parse-error"],
+		},
+	];
+};
+
+/** Parses `pmd check -f json`, including files PMD could not parse. */
+export const parsePmdReport = (
+	json: unknown,
+	root: FilePath,
+): FindingInput[] => {
+	if (!isRecord(json)) return [];
+	const violations = arr(json.files).flatMap((f) => pmdFileViolations(f, root));
+	const parseErrors = arr(json.processingErrors).flatMap((e) =>
+		pmdParseError(e, root),
 	);
 	return dedupe([...violations, ...parseErrors]);
 };
 
 /** PMD splits `--file-list` entries on commas and newlines. */
-const listable = (path: string) => !/[,\r\n]/.test(path);
+const listable = (path: FilePath) => !/[,\r\n]/.test(path);
 
 export const pmd = defineAuditor({
 	id: ID,

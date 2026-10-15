@@ -1,6 +1,7 @@
 import { lstat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+	type AuditContext,
 	AuditorError,
 	type Category,
 	defineAuditor,
@@ -15,7 +16,14 @@ import { Effect } from "effect";
 
 import { arr, num, parseJson, str } from "../../tool";
 import { extOf, isRecord, kebab, truncate } from "../util";
-import { dedupe, inRoot, manifestDirs, run, withTempDir } from "./shared";
+import {
+	dedupe,
+	type FilePath,
+	inRoot,
+	manifestDirs,
+	run,
+	withTempDir,
+} from "./shared";
 
 /* -------------------------------------------------------------------------- */
 /*                                  PHPStan                                   */
@@ -26,18 +34,18 @@ const ID = "code.phpstan";
 /** Level 5 adds argument type checks; 6+ mostly asks for missing typehints. */
 export const PHPSTAN_DEFAULT_LEVEL = 5;
 
+/** The integer levels PHPStan accepts, 0 to 10. */
+const PHPSTAN_LEVELS = new Set<unknown>(
+	Array.from({ length: 11 }, (_, i) => i),
+);
+
 /** `settings["code.phpstan"].level`: an integer 0-10 or "max". */
 export const phpstanLevel = (
 	settings: Record<string, unknown> | undefined,
 ): string => {
 	const level = settings?.level;
 	if (level === "max") return "max";
-	return typeof level === "number" &&
-		Number.isInteger(level) &&
-		level >= 0 &&
-		level <= 10
-		? String(level)
-		: String(PHPSTAN_DEFAULT_LEVEL);
+	return String(PHPSTAN_LEVELS.has(level) ? level : PHPSTAN_DEFAULT_LEVEL);
 };
 
 /** A NEON double-quoted string; `%` would otherwise expand DI parameters. */
@@ -107,49 +115,63 @@ const phpstanClass = (
 	return { category: "reliability", severity: "medium" };
 };
 
+const phpstanRemediation = (missing: boolean, tip: string | undefined) =>
+	[
+		missing
+			? "The project's dependencies are not loaded, so this may be a symbol from an uninstalled package."
+			: "Fix the reported type or logic error, or suppress a justified false positive with `// @phpstan-ignore <identifier>` and a reason.",
+		tip ? `Tip: ${tip.replace(/<[^>]*>/g, "")}` : "",
+	]
+		.filter(Boolean)
+		.join(" ");
+
+const phpstanMessage = (
+	m: Record<string, unknown>,
+	file: FilePath,
+): FindingInput => {
+	const message = str(m.message) ?? "PHPStan error";
+	const identifier = str(m.identifier);
+	const { category, severity } = phpstanClass(identifier);
+	const missing =
+		identifier !== undefined && PHPSTAN_SYMBOL_NOT_FOUND.has(identifier);
+	return {
+		ruleId: `${ID}/${identifier ? kebab(identifier) : "error"}`,
+		title: truncate(message.replace(/\.$/, ""), 100),
+		severity,
+		category,
+		message: identifier ? `${message} [${identifier}]` : message,
+		location: { file, line: num(m.line) },
+		remediation: phpstanRemediation(missing, str(m.tip)),
+		references: identifier
+			? [`https://phpstan.org/error-identifiers/${identifier}`]
+			: [],
+		confidence: missing ? "low" : "high",
+		tags: ["php", ...(identifier ? [kebab(identifier)] : [])],
+	};
+};
+
+const phpstanFile = (
+	path: FilePath,
+	entry: unknown,
+	root: FilePath,
+): FindingInput[] => {
+	const file = inRoot(root, path);
+	if (!file || !isRecord(entry)) return [];
+	return arr(entry.messages).flatMap((m): FindingInput[] =>
+		isRecord(m) ? [phpstanMessage(m, file)] : [],
+	);
+};
+
 /** Parses `phpstan analyse --error-format=json`; general (non-file) errors are dropped. */
 export const parsePhpstanReport = (
 	json: unknown,
-	root: string,
+	root: FilePath,
 ): FindingInput[] => {
 	if (!isRecord(json) || !isRecord(json.files)) return [];
 	return dedupe(
-		Object.entries(json.files).flatMap(([path, entry]): FindingInput[] => {
-			const file = inRoot(root, path);
-			if (!file || !isRecord(entry)) return [];
-			return arr(entry.messages).flatMap((m): FindingInput[] => {
-				if (!isRecord(m)) return [];
-				const message = str(m.message) ?? "PHPStan error";
-				const identifier = str(m.identifier);
-				const tip = str(m.tip);
-				const { category, severity } = phpstanClass(identifier);
-				const missing =
-					identifier !== undefined && PHPSTAN_SYMBOL_NOT_FOUND.has(identifier);
-				return [
-					{
-						ruleId: `${ID}/${identifier ? kebab(identifier) : "error"}`,
-						title: truncate(message.replace(/\.$/, ""), 100),
-						severity,
-						category,
-						message: identifier ? `${message} [${identifier}]` : message,
-						location: { file, line: num(m.line) },
-						remediation: [
-							missing
-								? "The project's dependencies are not loaded, so this may be a symbol from an uninstalled package."
-								: "Fix the reported type or logic error, or suppress a justified false positive with `// @phpstan-ignore <identifier>` and a reason.",
-							tip ? `Tip: ${tip.replace(/<[^>]*>/g, "")}` : "",
-						]
-							.filter(Boolean)
-							.join(" "),
-						references: identifier
-							? [`https://phpstan.org/error-identifiers/${identifier}`]
-							: [],
-						confidence: missing ? "low" : "high",
-						tags: ["php", ...(identifier ? [kebab(identifier)] : [])],
-					},
-				];
-			});
-		}),
+		Object.entries(json.files).flatMap(([path, entry]) =>
+			phpstanFile(path, entry, root),
+		),
 	);
 };
 
@@ -174,7 +196,85 @@ const vendorDirs = (ws: Workspace, dirs: ReadonlyArray<string>) =>
  * PHPStan treats paths with a backslash as Windows separators, and a path it
  * cannot find aborts the whole run.
  */
-const analysable = (path: string) => !/[\\\r\n]/.test(path);
+const analysable = (path: FilePath) => !/[\\\r\n]/.test(path);
+
+interface PhpstanRun {
+	readonly ctx: AuditContext;
+	readonly bin: FilePath;
+	readonly tmp: FilePath;
+	readonly level: string;
+	readonly scanDirectories: ReadonlyArray<FilePath>;
+	readonly root: FilePath;
+}
+
+const writeConfig = (config: FilePath, neon: string) =>
+	Effect.tryPromise({
+		try: () => writeFile(config, neon),
+		catch: (cause) =>
+			new AuditorError({
+				message: "Could not write the PHPStan config",
+				cause,
+			}),
+	});
+
+const analyse = (
+	opts: PhpstanRun,
+	paths: ReadonlyArray<FilePath>,
+	pass: number,
+) =>
+	Effect.gen(function* () {
+		const { ctx, bin, tmp } = opts;
+		const config = join(tmp, `phpstan-${pass}.neon`);
+		yield* writeConfig(
+			config,
+			phpstanNeon({
+				level: opts.level,
+				tmpDir: join(tmp, "cache"),
+				paths,
+				scanDirectories: opts.scanDirectories,
+			}),
+		);
+		const res = yield* run(
+			ctx,
+			[
+				bin,
+				"analyse",
+				"-c",
+				config,
+				"--error-format=json",
+				"--no-progress",
+				"--no-interaction",
+				"--memory-limit=2G",
+			],
+			// 1 = errors found. The temp cwd keeps PHPStan from finding the
+			// project's config and Composer autoloader.
+			{ cwd: tmp, okCodes: [0, 1] },
+		);
+		if (!res.stdout.trim())
+			return yield* new AuditorError({
+				message: `phpstan exited with code ${res.code}: ${truncate(res.stderr, 300)}`,
+			});
+		return parsePhpstanReport(
+			yield* parseJson(res.stdout, "phpstan"),
+			opts.root,
+		);
+	});
+
+/** A parse error makes PHPStan stop before analysing anything else. */
+const analyseWithRetry = (
+	opts: PhpstanRun,
+	sources: ReadonlyArray<FilePath>,
+	absolute: (file: FilePath) => FilePath,
+) =>
+	Effect.gen(function* () {
+		const first = yield* analyse(opts, sources, 1);
+		const parse = first.filter((f) => f.ruleId === `${ID}/phpstan-parse`);
+		if (parse.length === 0) return first;
+		const broken = new Set(parse.map((f) => absolute(f.location?.file ?? "")));
+		const rest = sources.filter((s) => !broken.has(s));
+		if (rest.length === 0) return parse;
+		return [...parse, ...(yield* analyse(opts, rest, 2))];
+	});
 
 export const phpstan = defineAuditor({
 	id: ID,
@@ -205,61 +305,12 @@ export const phpstan = defineAuditor({
 				ws,
 				manifestDirs(files, "composer.json", true),
 			);
-			return yield* withTempDir((tmp) => {
-				const analyse = (paths: ReadonlyArray<string>, pass: number) =>
-					Effect.gen(function* () {
-						const config = join(tmp, `phpstan-${pass}.neon`);
-						const neon = phpstanNeon({
-							level,
-							tmpDir: join(tmp, "cache"),
-							paths,
-							scanDirectories,
-						});
-						yield* Effect.tryPromise({
-							try: () => writeFile(config, neon),
-							catch: (cause) =>
-								new AuditorError({
-									message: "Could not write the PHPStan config",
-									cause,
-								}),
-						});
-						const res = yield* run(
-							ctx,
-							[
-								bin,
-								"analyse",
-								"-c",
-								config,
-								"--error-format=json",
-								"--no-progress",
-								"--no-interaction",
-								"--memory-limit=2G",
-							],
-							// 1 = errors found. The temp cwd keeps PHPStan from finding the
-							// project's config and Composer autoloader.
-							{ cwd: tmp, okCodes: [0, 1] },
-						);
-						if (!res.stdout.trim())
-							return yield* new AuditorError({
-								message: `phpstan exited with code ${res.code}: ${truncate(res.stderr, 300)}`,
-							});
-						return parsePhpstanReport(
-							yield* parseJson(res.stdout, "phpstan"),
-							ws.root,
-						);
-					});
-				return Effect.gen(function* () {
-					const first = yield* analyse(sources, 1);
-					// A parse error makes PHPStan stop before analysing anything else.
-					const parse = first.filter((f) => f.ruleId === `${ID}/phpstan-parse`);
-					if (parse.length === 0) return first;
-					const broken = new Set(
-						parse.map((f) => ws.absolute(f.location?.file ?? "")),
-					);
-					const rest = sources.filter((s) => !broken.has(s));
-					if (rest.length === 0) return parse;
-					return [...parse, ...(yield* analyse(rest, 2))];
-				});
-			});
+			return yield* withTempDir((tmp) =>
+				analyseWithRetry(
+					{ ctx, bin, tmp, level, scanDirectories, root: ws.root },
+					sources,
+					(file) => ws.absolute(file),
+				),
+			);
 		}),
 });
