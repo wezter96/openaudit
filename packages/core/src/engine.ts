@@ -8,13 +8,21 @@ import {
 	type Category,
 	type Finding,
 	type FindingInput,
+	type Location,
 	type Report,
 	SCHEMA_VERSION,
 	severityRank,
+	type TargetInfo,
 	type TargetKind,
 } from "./model";
 import { summarize } from "./scoring";
-import { Exec, Http, ignoredPathMatcher, Workspaces } from "./services";
+import {
+	Exec,
+	Http,
+	ignoredPathMatcher,
+	type Workspace,
+	Workspaces,
+} from "./services";
 import { resolveTarget } from "./target";
 
 export const VERSION = "0.2.1";
@@ -71,49 +79,66 @@ export const selectAuditors = (
 	selection: Selection = {},
 	options: AuditOptions = {},
 ): ReadonlyArray<Auditor> =>
-	auditors.filter((a) => {
-		if (!a.targets.some((t) => kinds.includes(t))) return false;
-		if (selection.exclude?.some((p) => matchesPattern(a.id, p))) return false;
-		if (
-			selection.categories?.length &&
-			!a.categories.some((c) => selection.categories?.includes(c))
-		)
-			return false;
-		if (
-			selection.narrow?.length &&
-			!selection.narrow.some((p) => matchesPattern(a.id, p))
-		)
-			return false;
-		if (selection.only?.length)
-			return selection.only.some((p) => matchesPattern(a.id, p));
-		// Opt-in agentic auditors (e.g. ones that spend money per run) need
-		// `--agentic` and an explicit selection.
-		if (a.engine === "agentic")
-			return options.agentic === true && a.defaultEnabled !== false;
-		return a.defaultEnabled !== false;
-	});
+	auditors.filter((a) => isSelected(a, kinds, selection, options));
+
+type Patterns = ReadonlyArray<string> | undefined;
+
+const matchesAny = (id: string, patterns: Patterns): boolean =>
+	patterns?.some((p) => matchesPattern(id, p)) ?? false;
+
+/** An empty or missing list of patterns does not narrow anything. */
+const narrowedTo = (id: string, patterns: Patterns): boolean =>
+	!patterns?.length || matchesAny(id, patterns);
+
+const inCategories = (
+	a: Auditor,
+	categories: ReadonlyArray<Category> | undefined,
+): boolean =>
+	!categories?.length || a.categories.some((c) => categories.includes(c));
+
+// Opt-in agentic auditors (e.g. ones that spend money per run) need
+// `--agentic` and an explicit selection.
+const enabledByDefault = (a: Auditor, options: AuditOptions): boolean => {
+	if (a.defaultEnabled === false) return false;
+	return a.engine !== "agentic" || options.agentic === true;
+};
+
+const isSelected = (
+	a: Auditor,
+	kinds: ReadonlyArray<TargetKind>,
+	selection: Selection,
+	options: AuditOptions,
+): boolean => {
+	if (!a.targets.some((t) => kinds.includes(t))) return false;
+	if (matchesAny(a.id, selection.exclude)) return false;
+	if (!inCategories(a, selection.categories)) return false;
+	if (!narrowedTo(a.id, selection.narrow)) return false;
+	if (selection.only?.length) return matchesAny(a.id, selection.only);
+	return enabledByDefault(a, options);
+};
 
 /** Stable 16-hex-char fingerprint. */
 export const fingerprintOf = (auditor: string, f: FindingInput): string => {
-	const loc = f.location;
+	const loc: Location = f.location ?? {};
 	const key = [
 		auditor,
 		f.ruleId,
-		loc?.file ?? "",
-		loc?.url ?? "",
-		loc?.selector ?? "",
-		f.evidence ?? loc?.line ?? "",
+		loc.file ?? "",
+		loc.url ?? "",
+		loc.selector ?? "",
+		f.evidence ?? loc.line ?? "",
 	].join("|");
 	return new Bun.CryptoHasher("sha256").update(key).digest("hex").slice(0, 16);
 };
 
-const isSuppressed = (f: Finding, s: Suppressions | undefined): boolean => {
-	if (!s) return false;
-	if (s.fingerprints?.includes(f.fingerprint)) return true;
-	if (s.rules?.some((p) => matchesPattern(f.ruleId, p))) return true;
-	const file = f.location?.file;
-	if (file && s.paths?.some((g) => new Bun.Glob(g).match(file))) return true;
-	return false;
+const isSuppressed = (f: Finding, s: Suppressions = {}): boolean =>
+	(s.fingerprints?.includes(f.fingerprint) ?? false) ||
+	matchesAny(f.ruleId, s.rules) ||
+	inGlobs(f.location?.file, s.paths);
+
+const inGlobs = (file: string | undefined, globs: Patterns): boolean => {
+	if (!file) return false;
+	return globs?.some((g) => new Bun.Glob(g).match(file)) ?? false;
 };
 
 /** Drops findings in gitignored files and counts them. */
@@ -121,6 +146,14 @@ interface IgnoredFilter {
 	readonly matches: (path: string) => boolean;
 	dropped: number;
 }
+
+/** True, and counted, when the finding is in an ignored file. */
+const dropsIgnored = (filter: IgnoredFilter, f: Finding): boolean => {
+	const file = f.location?.file;
+	if (!file || !filter.matches(file)) return false;
+	filter.dropped++;
+	return true;
+};
 
 const finalize = (
 	auditor: Auditor,
@@ -136,17 +169,20 @@ const finalize = (
 		if (seen.has(fingerprint)) continue;
 		seen.add(fingerprint);
 		const f: Finding = { ...input, auditor: auditor.id, fingerprint };
-		const file = f.location?.file;
-		if (filter && file && filter.matches(file)) {
-			filter.dropped++;
-			continue;
-		}
+		if (filter && dropsIgnored(filter, f)) continue;
 		if (!isSuppressed(f, suppress)) out.push(f);
 	}
 	return out.sort(
 		(a, b) => severityRank(a.severity) - severityRank(b.severity),
 	);
 };
+
+/** Agentic auditors get 20 minutes, the others 5. */
+const defaultTimeoutMs = (auditor: Auditor): number =>
+	auditor.engine === "agentic" ? 20 * 60_000 : 5 * 60_000;
+
+const statusOf = (findings: ReadonlyArray<Finding>): AuditorResult["status"] =>
+	findings.some((f) => f.severity !== "info") ? "failed" : "passed";
 
 const runOne = (
 	auditor: Auditor,
@@ -160,9 +196,7 @@ const runOne = (
 		engine: auditor.engine,
 		categories: [...auditor.categories],
 	};
-	const timeoutMs =
-		input.timeoutMs ??
-		(auditor.engine === "agentic" ? 20 * 60_000 : 5 * 60_000);
+	const timeoutMs = input.timeoutMs ?? defaultTimeoutMs(auditor);
 	const started = performance.now();
 	const elapsed = () => Math.round(performance.now() - started);
 
@@ -189,9 +223,7 @@ const runOne = (
 			const findings = finalize(auditor, inputs, input.suppress, ignored);
 			return {
 				...base,
-				status: findings.some((f) => f.severity !== "info")
-					? "failed"
-					: "passed",
+				status: statusOf(findings),
 				durationMs: elapsed(),
 				findings,
 			};
@@ -199,8 +231,9 @@ const runOne = (
 		Effect.catch((error) =>
 			Effect.succeed<AuditorResult>({
 				...base,
-				status: error._tag === "SkipAudit" ? "skipped" : "error",
-				message: error._tag === "SkipAudit" ? error.reason : error.message,
+				...(error._tag === "SkipAudit"
+					? { status: "skipped", message: error.reason }
+					: { status: "error", message: error.message }),
 				durationMs: elapsed(),
 				findings: [],
 			}),
@@ -217,6 +250,66 @@ const runOne = (
 		),
 	);
 };
+
+/**
+ * User-supplied headers (often credentials) only go to the exact target
+ * origin; a prefix check would also match `https://target.com.evil.net`.
+ */
+const isOrigin = (url: string, origin: string | undefined): boolean => {
+	try {
+		return origin !== undefined && new URL(url).origin === origin;
+	} catch {
+		return false;
+	}
+};
+
+const targetHttp = (
+	http: { readonly request: AuditContext["http"] },
+	info: TargetInfo,
+	options: AuditOptions,
+): AuditContext["http"] => {
+	const targetOrigin = info.url ? new URL(info.url).origin : undefined;
+	return (url, init = {}) =>
+		http.request(url, {
+			...init,
+			headers: isOrigin(url, targetOrigin)
+				? { ...options.headers, ...init.headers }
+				: init.headers,
+		});
+};
+
+// Wrapped tools walk the folder themselves; findings in files git
+// ignores are dropped here, whichever tool reported them.
+const ignoredFilterOf = (
+	workspace: Workspace | undefined,
+): Effect.Effect<IgnoredFilter | undefined> =>
+	Effect.gen(function* () {
+		if (!workspace) return undefined;
+		const ignoredPaths = yield* workspace.ignored.pipe(
+			Effect.catch(() => Effect.succeed([] as ReadonlyArray<string>)),
+		);
+		if (!ignoredPaths.length) return undefined;
+		return {
+			matches: ignoredPathMatcher(workspace.root, ignoredPaths),
+			dropped: 0,
+		};
+	});
+
+const gitignoreSuppressed = (
+	ignored: IgnoredFilter | undefined,
+): Pick<Report, "suppressed"> =>
+	ignored?.dropped
+		? {
+				suppressed: [
+					{
+						source: ".gitignore",
+						rules: 0,
+						paths: ignored.dropped,
+						fingerprints: 0,
+					},
+				],
+			}
+		: {};
 
 /**
  * Resolves the target, selects applicable auditors, runs them concurrently and
@@ -241,49 +334,15 @@ export const runAudit = (
 		);
 		emit({ type: "target", target: info });
 
-		// User-supplied headers (often credentials) only go to the exact target
-		// origin; a prefix check would also match `https://target.com.evil.net`.
-		const targetOrigin = info.url ? new URL(info.url).origin : undefined;
-		const isTargetOrigin = (url: string) => {
-			try {
-				return (
-					targetOrigin !== undefined && new URL(url).origin === targetOrigin
-				);
-			} catch {
-				return false;
-			}
-		};
-
 		const ctx: AuditContext = {
 			target: info,
 			options,
 			workspace: root ? workspaces.open(root) : undefined,
-			http: (url, init) =>
-				http.request(url, {
-					...init,
-					headers: isTargetOrigin(url)
-						? { ...options.headers, ...init?.headers }
-						: init?.headers,
-				}),
+			http: targetHttp(http, info, options),
 			exec,
 			log: (message) => Effect.logDebug(message),
 		};
-
-		// Wrapped tools walk the folder themselves; findings in files git
-		// ignores are dropped here, whichever tool reported them.
-		const workspace = ctx.workspace;
-		const ignoredPaths = workspace
-			? yield* workspace.ignored.pipe(
-					Effect.catch(() => Effect.succeed([] as ReadonlyArray<string>)),
-				)
-			: [];
-		const ignored: IgnoredFilter | undefined =
-			workspace && ignoredPaths.length
-				? {
-						matches: ignoredPathMatcher(workspace.root, ignoredPaths),
-						dropped: 0,
-					}
-				: undefined;
+		const ignored = yield* ignoredFilterOf(ctx.workspace);
 
 		const selected = selectAuditors(
 			input.auditors,
@@ -315,18 +374,7 @@ export const runAudit = (
 			durationMs: finishedAt.getTime() - startedAt.getTime(),
 			summary: summarize(results),
 			results,
-			...(ignored?.dropped
-				? {
-						suppressed: [
-							{
-								source: ".gitignore",
-								rules: 0,
-								paths: ignored.dropped,
-								fingerprints: 0,
-							},
-						],
-					}
-				: {}),
+			...gitignoreSuppressed(ignored),
 		} satisfies Report;
 	});
 
