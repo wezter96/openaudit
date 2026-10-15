@@ -1,0 +1,205 @@
+---
+import Base from "../../layouts/Base.astro";
+import { REPO } from "../../lib/site";
+
+const description =
+	"A free openaudit badge for open source projects. We scan your public repo every week ourselves, so the score can't be faked, and link it to the full report.";
+---
+
+<Base title="Verified openaudit badge" description={description} markdown={false}>
+	<header class="page-head frame">
+		<p class="eyebrow">Free during the beta</p>
+		<h1>A badge that can't be faked</h1>
+		<p class="lede">
+			We scan your public repo ourselves, every week, and put the score on your README. Anyone can click through to the full report it came from.
+		</p>
+	</header>
+
+	<div class="frame">
+		<div class="prose">
+			<h2>How it works</h2>
+			<ol>
+				<li>Sign up below with your GitHub repo, and your website if you like.</li>
+				<li>Prove it's yours: commit a file with the code we give you.</li>
+				<li>We scan it soon after, then every 7 days.</li>
+				<li>Paste the badge into your README. It links to a public page with every report.</li>
+			</ol>
+			<p>
+				We run openaudit's default auditors and nothing from your repo gets installed or run. A score older than 14 days turns grey, so a stale badge shows it.
+			</p>
+
+			<h2 id="sign-up">Get your badge</h2>
+			<p class="nojs">The sign up form needs JavaScript. You can also use the JSON API at <code>/api/badges</code>.</p>
+			<form class="badge-form needs-js" data-register novalidate>
+				<div class="field">
+					<label for="b-repo">GitHub repo</label>
+					<input id="b-repo" name="repo" type="text" required placeholder="owner/name" autocomplete="off" spellcheck="false" />
+				</div>
+				<div class="field">
+					<label for="b-site">Website <span class="opt">(optional)</span></label>
+					<input id="b-site" name="site" type="url" placeholder="https://example.com" autocomplete="off" spellcheck="false" />
+				</div>
+				<button class="btn primary" type="submit">Sign up</button>
+				<p class="status" role="status" aria-live="polite" data-status></p>
+			</form>
+
+			<section class="step" hidden data-step="verify" aria-labelledby="verify-title">
+				<h3 id="verify-title">Prove it's yours</h3>
+				<p>Add a file named <code>.openaudit-badge</code> to your default branch. It holds this code:</p>
+				<pre><code data-code></code></pre>
+				<div data-site-steps hidden>
+					<p>For the website, do one of these:</p>
+					<ul>
+						<li>Serve the code at <code data-site-file></code>.</li>
+						<li>Or add a DNS TXT record named <code data-dns></code> with the code as its value.</li>
+					</ul>
+					<p>An unverified site isn't scanned. The repo still is.</p>
+				</div>
+				<div data-token-box hidden>
+					<p><strong>Save your manage token now.</strong> We show it once and only keep a hash. You need it to rescan or remove the badge.</p>
+					<pre><code data-token></code></pre>
+				</div>
+				<button class="btn primary" type="button" data-verify>Check now</button>
+				<p class="status" role="status" aria-live="polite" data-verify-status></p>
+			</section>
+
+			<section class="step" hidden data-step="embed" aria-labelledby="embed-title">
+				<h3 id="embed-title">Your badge</h3>
+				<p>You're verified. The first scan starts soon. Until then the badge says pending.</p>
+				<p><img alt="openaudit badge preview" data-preview height="20" /></p>
+				<p>Markdown for your README:</p>
+				<pre><code data-markdown></code></pre>
+				<p>HTML, for a website:</p>
+				<pre><code data-html></code></pre>
+				<p>Want the bigger card? Swap <code>.svg</code> for <code>/card.svg</code>. Your verification page: <a href="#sign-up" data-page>open it</a>.</p>
+			</section>
+
+			<h2>Manage your badge</h2>
+			<p>Ask for a rescan once a day, or remove the badge and every report, with your token:</p>
+			<pre><code>curl -X POST https://openaudit.se/api/badges/&lt;id&gt;/rescan \
+  -H "Authorization: Bearer &lt;token&gt;"
+curl -X DELETE https://openaudit.se/api/badges/&lt;id&gt; \
+  -H "Authorization: Bearer &lt;token&gt;"</code></pre>
+
+			<h2>Beta limits</h2>
+			<ul>
+				<li>It's free. Up to 100 projects while we're in beta.</li>
+				<li>Public GitHub repos up to 500 MB.</li>
+				<li>A scan every 7 days, plus one manual rescan a day.</li>
+				<li>Projects that don't verify within a week are dropped.</li>
+			</ul>
+			<p>Questions or ideas? <a href={`${REPO}/issues`}>Open an issue</a>.</p>
+		</div>
+	</div>
+</Base>
+
+<script>
+	import "../../scripts/badge";
+</script>
+
+<style>
+	.eyebrow {
+		margin: 0 0 0.5rem;
+		font-family: var(--mono);
+		font-size: 0.8125rem;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--graphite);
+	}
+
+	:global(.js) .nojs {
+		display: none;
+	}
+
+	.badge-form {
+		display: grid;
+		gap: 1rem;
+		padding: 1.25rem;
+		background: var(--paper-2);
+		border: 1px solid var(--hair);
+		border-radius: 10px;
+	}
+
+	.field {
+		display: grid;
+		gap: 0.35rem;
+	}
+
+	.field label {
+		font-size: 0.875rem;
+		font-weight: 600;
+	}
+
+	.opt {
+		font-weight: 400;
+		color: var(--graphite);
+	}
+
+	input {
+		font: inherit;
+		font-size: 0.9375rem;
+		color: var(--ink);
+		background: var(--paper);
+		border: 1px solid var(--hair);
+		border-radius: 7px;
+		padding: 0.5rem 0.7rem;
+		min-height: 2.6rem;
+		width: 100%;
+		transition: border-color 0.2s, box-shadow 0.2s;
+	}
+
+	input:hover {
+		border-color: var(--graphite);
+	}
+
+	input:focus {
+		border-color: var(--accent);
+		outline: none;
+		box-shadow: 0 0 0 3px var(--accent-soft);
+	}
+
+	.badge-form .btn {
+		justify-self: start;
+	}
+
+	.status {
+		margin: 0;
+		min-height: 1.5em;
+		font-size: 0.9375rem;
+		color: var(--graphite);
+	}
+
+	.status[data-tone="error"] {
+		color: var(--t-critical);
+	}
+
+	.status[data-tone="ok"] {
+		color: var(--ok);
+	}
+
+	.step {
+		margin-top: 1.5rem;
+		padding: 1.25rem;
+		border: 1px solid var(--hair);
+		border-left: 2px solid var(--accent);
+		border-radius: 0 10px 10px 0;
+	}
+
+	.step > * + * {
+		margin-top: 0.9rem;
+	}
+
+	.step h3 {
+		margin: 0;
+	}
+
+	pre {
+		overflow-x: auto;
+		padding: 0.75rem 0.9rem;
+		background: var(--paper-2);
+		border: 1px solid var(--hair);
+		border-radius: 7px;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+</style>

@@ -37,14 +37,14 @@ export interface FakeD1 extends D1 {
 
 export const fakeD1 = (): FakeD1 => {
 	const sqlite = new Database(":memory:");
-	sqlite.exec(schema);
+	sqlite.run(schema);
 	return {
 		sqlite,
 		prepare: (sql) => new Statement(sqlite, sql),
 		batch: async (statements) => {
-			sqlite.exec("BEGIN");
+			sqlite.run("BEGIN");
 			for (const s of statements) await s.run();
-			sqlite.exec("COMMIT");
+			sqlite.run("COMMIT");
 			return [];
 		},
 	};
