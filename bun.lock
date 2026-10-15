@@ -18,7 +18,7 @@
     },
     "apps/cli": {
       "name": "@openaudit/cli",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "bin": {
         "openaudit": "bin/openaudit.js",
       },
@@ -163,12 +163,12 @@
         "effect": "4.0.3",
         "fflate": "^0.8.2",
         "htmlparser2": "^10.0.0",
+        "typescript": "catalog:",
         "yaml": "^2.8.1",
       },
       "devDependencies": {
         "@openaudit/config": "workspace:*",
         "@types/bun": "catalog:",
-        "typescript": "catalog:",
       },
       "optionalDependencies": {
         "axe-core": "^4.14.0",

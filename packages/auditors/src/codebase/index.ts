@@ -6,6 +6,8 @@ import { api } from "./api";
 import { dependencies } from "./dependencies";
 import { dependencyHealth } from "./dependency-health";
 import { gitleaks, osvScanner, semgrep, trivyFs } from "./external";
+import { codeHealth } from "./health";
+import { codeHistory } from "./history";
 import { hygiene } from "./hygiene";
 import { licenses } from "./licenses";
 import { lintJsAuditors } from "./lint-js";
@@ -47,6 +49,8 @@ export const codebaseAuditors: ReadonlyArray<Auditor> = [
 	accessibility,
 	performanceAuditor,
 	quality,
+	codeHealth,
+	codeHistory,
 	strictness,
 	api,
 	codePrivacy,

@@ -14,6 +14,7 @@
 		"effect": "4.0.3",
 		"fflate": "^0.8.2",
 		"htmlparser2": "^10.0.0",
+		"typescript": "catalog:",
 		"yaml": "^2.8.1"
 	},
 	"optionalDependencies": {
@@ -22,7 +23,6 @@
 	},
 	"devDependencies": {
 		"@openaudit/config": "workspace:*",
-		"@types/bun": "catalog:",
-		"typescript": "catalog:"
+		"@types/bun": "catalog:"
 	}
 }
