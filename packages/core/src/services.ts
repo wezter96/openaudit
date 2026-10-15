@@ -1,3 +1,4 @@
+import type { Dirent } from "node:fs";
 import { lstat, readdir, realpath, stat } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { Context, Effect, Layer } from "effect";
@@ -62,26 +63,48 @@ export interface Workspace {
 	readonly absolute: (path: string) => string;
 }
 
-const toPosix = (p: string) => p.split(sep).join("/");
+/** A directory or file on disk, absolute or relative to the cwd. */
+type FsPath = string;
+/** A POSIX path relative to the workspace root. */
+type RelPath = string;
+type Url = string;
+type ByteCount = number;
 
-const walk = async (root: string): Promise<string[]> => {
-	const out: string[] = [];
-	const ignored = new Set(DEFAULT_IGNORES);
-	const visit = async (dir: string): Promise<void> => {
-		if (out.length >= MAX_FILES) return;
-		const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
-		for (const entry of entries) {
-			if (out.length >= MAX_FILES) return;
-			const full = join(dir, entry.name);
-			if (entry.isDirectory()) {
-				if (!ignored.has(entry.name)) await visit(full);
-			} else if (entry.isFile()) {
-				out.push(toPosix(relative(root, full)));
-			}
-		}
-	};
-	await visit(root);
-	return out;
+const toPosix = (p: FsPath) => p.split(sep).join("/");
+
+/** A walk of the tree under `root`, collecting files until `MAX_FILES`. */
+interface Walk {
+	readonly root: FsPath;
+	readonly ignored: ReadonlySet<string>;
+	readonly out: RelPath[];
+}
+
+const walk = async (root: FsPath): Promise<string[]> => {
+	const w: Walk = { root, ignored: new Set(DEFAULT_IGNORES), out: [] };
+	await visitDir(w, root);
+	return w.out;
+};
+
+const visitDir = async (w: Walk, dir: FsPath): Promise<void> => {
+	if (w.out.length >= MAX_FILES) return;
+	const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+	for (const entry of entries) {
+		if (w.out.length >= MAX_FILES) return;
+		await visitEntry(w, dir, entry);
+	}
+};
+
+const visitEntry = async (
+	w: Walk,
+	dir: FsPath,
+	entry: Dirent,
+): Promise<void> => {
+	const full = join(dir, entry.name);
+	if (entry.isDirectory()) {
+		if (!w.ignored.has(entry.name)) await visitDir(w, full);
+	} else if (entry.isFile()) {
+		w.out.push(toPosix(relative(w.root, full)));
+	}
 };
 
 /** Variables that would point git at another repository than the target. */
@@ -102,7 +125,7 @@ const GIT_LOCATION_VARS = [
  * point it at another repository.
  */
 const lsFiles = async (
-	root: string,
+	root: FsPath,
 	args: ReadonlyArray<string>,
 ): Promise<string[] | undefined> => {
 	try {
@@ -134,7 +157,7 @@ const lsFiles = async (
 };
 
 /** Lists files via git so .gitignore is honoured. */
-const gitFiles = async (root: string): Promise<string[] | undefined> => {
+const gitFiles = async (root: FsPath): Promise<string[] | undefined> => {
 	try {
 		const listed = await lsFiles(root, ["-co"]);
 		if (!listed) return undefined;
@@ -162,7 +185,7 @@ const devNull = process.platform === "win32" ? "NUL" : "/dev/null";
  * `./` or be absolute under `root`.
  */
 export const ignoredPathMatcher = (
-	root: string,
+	root: FsPath,
 	ignored: ReadonlyArray<string>,
 ): ((path: string) => boolean) => {
 	const files = new Set<string>();
@@ -183,16 +206,16 @@ export const ignoredPathMatcher = (
 /** Max bytes `readBytes` will load (mobile artifacts can be large). */
 export const MAX_BINARY_BYTES = 512 * 1024 * 1024;
 
-export const makeWorkspace = (rootInput: string): Workspace => {
+export const makeWorkspace = (rootInput: FsPath): Workspace => {
 	const root = resolve(rootInput);
-	const absolute = (p: string) => join(root, p);
+	const absolute = (p: RelPath) => join(root, p);
 	let realRoot: Promise<string> | undefined;
 
 	/**
 	 * Resolves a workspace-relative path and refuses anything that escapes the
 	 * root, either lexically (`../`) or through a symlink.
 	 */
-	const safePath = async (p: string): Promise<string> => {
+	const safePath = async (p: RelPath): Promise<string> => {
 		const full = resolve(root, p);
 		if (full !== root && !full.startsWith(root + sep))
 			throw new Error(`Path escapes workspace: ${p}`);
@@ -229,8 +252,8 @@ export const makeWorkspace = (rootInput: string): Workspace => {
 			new AuditorError({ message: `Failed to list files in ${root}`, cause }),
 	});
 	const readFile = <A>(
-		p: string,
-		max: number,
+		p: RelPath,
+		max: ByteCount,
 		read: (file: ReturnType<typeof Bun.file>) => Promise<A>,
 	) =>
 		Effect.tryPromise({
@@ -320,7 +343,7 @@ export interface HttpResponse {
 const MAX_REDIRECTS = 10;
 
 /** Reads at most `max` bytes, cancelling the stream beyond that. */
-const readCapped = async (res: Response, max: number) => {
+const readCapped = async (res: Response, max: ByteCount) => {
 	const chunks: Uint8Array[] = [];
 	let total = 0;
 	const reader = res.body?.getReader();
@@ -339,8 +362,87 @@ const readCapped = async (res: Response, max: number) => {
 	return { bytes: Buffer.concat(chunks), total };
 };
 
+/** Request state that changes as redirects are followed. */
+interface Hop {
+	readonly url: Url;
+	readonly method: string;
+	readonly headers: Record<string, string>;
+	readonly body: string | undefined;
+}
+
+const BASE_HEADERS = { "user-agent": USER_AGENT };
+
+const isRedirect = (res: Response): boolean =>
+	res.status >= 300 && res.status < 400;
+
+/** Where a 3xx response points, unless the caller handles redirects. */
+const redirectTarget = (
+	res: Response,
+	init: HttpRequest,
+): string | undefined => {
+	if (init.redirect === "manual" || !isRedirect(res)) return undefined;
+	return res.headers.get("location") || undefined;
+};
+
+/** Per the fetch spec, 301/302 after POST and every 303 become GET. */
+const becomesGet = (res: Response, hop: Hop): boolean =>
+	res.status === 303 ||
+	(hop.method === "POST" && (res.status === 301 || res.status === 302));
+
+const WEB_PROTOCOLS = new Set(["http:", "https:"]);
+
+const nextHop = (
+	hop: Hop,
+	location: string,
+	res: Response,
+	first: Url,
+): Hop => {
+	const next = new URL(location, hop.url);
+	if (!WEB_PROTOCOLS.has(next.protocol))
+		throw new Error(`Refusing redirect to ${next.protocol}`);
+	const get = becomesGet(res, hop);
+	return {
+		url: next.toString(),
+		headers: next.origin === new URL(first).origin ? hop.headers : BASE_HEADERS,
+		method: get ? "GET" : hop.method,
+		body: get ? undefined : hop.body,
+	};
+};
+
+/**
+ * Redirects are followed manually. Caller headers may carry credentials
+ * under any name (X-Api-Key, custom tokens), so once a redirect leaves the
+ * original origin only the user agent is kept.
+ */
+const fetchFollowing = async (
+	url: Url,
+	init: HttpRequest,
+	signal: AbortSignal,
+): Promise<{ res: Response; url: Url; redirected: boolean }> => {
+	let hop: Hop = {
+		url,
+		method: init.method ?? "GET",
+		headers: { ...BASE_HEADERS, ...init.headers },
+		body: init.body,
+	};
+	for (let n = 0; ; n++) {
+		const res = await fetch(hop.url, {
+			method: hop.method,
+			headers: hop.headers,
+			body: hop.body,
+			redirect: "manual",
+			signal,
+		});
+		const location = redirectTarget(res, init);
+		if (!location) return { res, url: hop.url, redirected: n > 0 };
+		if (n >= MAX_REDIRECTS) throw new Error("Too many redirects");
+		await res.body?.cancel();
+		hop = nextHop(hop, location, res, url);
+	}
+};
+
 const httpRequest = (
-	url: string,
+	url: Url,
 	init: HttpRequest = {},
 ): Effect.Effect<HttpResponse, AuditorError> =>
 	Effect.tryPromise({
@@ -353,65 +455,21 @@ const httpRequest = (
 			);
 			const started = performance.now();
 			try {
-				// Redirects are followed manually. Caller headers may carry
-				// credentials under any name (X-Api-Key, custom tokens), so once a
-				// redirect leaves the original origin only the user agent is kept.
-				const baseHeaders = { "user-agent": USER_AGENT };
-				let current = url;
-				let headers: Record<string, string> = {
-					...baseHeaders,
-					...init.headers,
-				};
-				let method = init.method ?? "GET";
-				let body = init.body;
-				let redirected = false;
-				let res: Response;
-				for (let hop = 0; ; hop++) {
-					res = await fetch(current, {
-						method,
-						headers,
-						body,
-						redirect: "manual",
-						signal: controller.signal,
-					});
-					const location = res.headers.get("location");
-					if (
-						init.redirect === "manual" ||
-						res.status < 300 ||
-						res.status >= 400 ||
-						!location
-					)
-						break;
-					if (hop >= MAX_REDIRECTS) throw new Error("Too many redirects");
-					await res.body?.cancel();
-					const next = new URL(location, current);
-					if (next.protocol !== "http:" && next.protocol !== "https:")
-						throw new Error(`Refusing redirect to ${next.protocol}`);
-					if (next.origin !== new URL(url).origin) headers = baseHeaders;
-					// Per the fetch spec, 301/302 after POST and every 303 become GET.
-					if (
-						res.status === 303 ||
-						((res.status === 301 || res.status === 302) && method === "POST")
-					) {
-						method = "GET";
-						body = undefined;
-					}
-					current = next.toString();
-					redirected = true;
-				}
+				const final = await fetchFollowing(url, init, controller.signal);
+				const { res } = final;
 				const ttfbMs = performance.now() - started;
 				const { bytes, total } = await readCapped(
 					res,
 					init.maxBytes ?? 5 * 1024 * 1024,
 				);
 				return {
-					url: current,
+					url: final.url,
 					status: res.status,
 					headers: res.headers,
 					cookies: res.headers.getSetCookie(),
 					body: new TextDecoder().decode(bytes),
 					bytes: total,
-					redirected,
+					redirected: final.redirected,
 					ttfbMs,
 					totalMs: performance.now() - started,
 				};
