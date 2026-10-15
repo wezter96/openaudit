@@ -19,6 +19,7 @@
     "apps/badge-scanner": {
       "name": "@openaudit/badge-scanner",
       "dependencies": {
+        "@openaudit/badge": "workspace:*",
         "@openaudit/core": "workspace:*",
         "effect": "4.0.3",
       },

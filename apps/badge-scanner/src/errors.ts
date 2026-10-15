@@ -1,5 +1,4 @@
-/** The API stores at most this many characters of a scan error. */
-export const MAX_ERROR_LENGTH = 500;
+import { MAX_ERROR_LENGTH } from "@openaudit/badge/api";
 
 /** A failure with a message that is safe to publish on the verification page. */
 export class ScanError extends Error {

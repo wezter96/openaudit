@@ -1,3 +1,5 @@
+import { MAX_REPORT_BYTES as MAX_UPLOAD_BYTES } from "@openaudit/badge/api";
+
 import {
 	CODEBASE_TIMEOUT_MS,
 	type OpenauditCommand,
@@ -11,8 +13,8 @@ import { assertPublicSite, dnsResolver, type Resolver } from "./site";
 import type { Job, JobResult, ProcessRunner, ReportPair } from "./types";
 import { type Workdir, withWorkdir } from "./workdir";
 
-/** The Worker accepts 25 MB; leave room for the JSON envelope. */
-export const MAX_REPORT_BYTES = 24 * 1024 * 1024;
+/** What the Worker accepts, less room for the JSON envelope and escaping. */
+export const MAX_REPORT_BYTES = MAX_UPLOAD_BYTES - 2 * 1024 * 1024;
 
 /** Everything a job touches outside its own logic. */
 export interface JobDeps {

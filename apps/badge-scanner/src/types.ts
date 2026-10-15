@@ -1,31 +1,11 @@
+import type { Job, JobReport, ReportFiles } from "@openaudit/badge/api";
+
 /** A claimed scan, as `POST /api/scanner/claim` returns it. */
-export interface Job {
-	/** The scan id. */
-	readonly id: string;
-	readonly projectId: string;
-	/** `owner/name` on GitHub. */
-	readonly repo: string;
-	/** Only present when the site is verified. */
-	readonly site?: string | undefined;
-	/** The verification code the repo's `.openaudit-badge` must contain. */
-	readonly code: string;
-}
-
-/** The JSON and HTML report of one openaudit run. */
-export interface ReportPair {
-	readonly json: string;
-	readonly html: string;
-}
-
+export type { Job };
 /** The body of `POST /api/scanner/jobs/:id`. */
-export interface JobResult {
-	readonly status: "ok" | "failed";
-	readonly error?: string;
-	readonly commit?: string;
-	readonly openauditVersion?: string;
-	readonly codebase?: ReportPair;
-	readonly site?: ReportPair;
-}
+export type JobResult = JobReport;
+/** The JSON and HTML report of one openaudit run. */
+export type ReportPair = ReportFiles;
 
 /** The scanner half of the badge API. */
 export interface ScannerClient {

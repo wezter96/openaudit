@@ -11,6 +11,7 @@ const JOB: Job = {
 	id: "scan-1",
 	projectId: "wezter96-openaudit",
 	repo: "wezter96/openaudit",
+	site: null,
 	code: "oa-code-42",
 };
 

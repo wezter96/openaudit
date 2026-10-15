@@ -1,0 +1,31 @@
+# The openaudit badge scanner on Dokploy. It only makes outbound requests
+# (the badge API, GitHub and the sites it scans), so it publishes no ports.
+# The fixed subnet lets the host firewall drop its traffic to private ranges.
+services:
+  scanner:
+    build:
+      context: ../..
+      dockerfile: apps/badge-scanner/Dockerfile
+    image: openaudit-badge-scanner
+    restart: unless-stopped
+    mem_limit: 4g
+    cpus: 2
+    # Scans clone and write reports under /tmp.
+    read_only: false
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      SCANNER_TOKEN: ${SCANNER_TOKEN:?SCANNER_TOKEN is required}
+      API_URL: ${API_URL:-https://openaudit.se}
+    networks:
+      - openaudit-scanner
+
+networks:
+  openaudit-scanner:
+    name: openaudit-scanner
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.77.0/24

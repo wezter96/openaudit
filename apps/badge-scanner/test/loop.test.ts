@@ -17,6 +17,7 @@ const JOB: Job = {
 	id: "scan-7",
 	projectId: "a-b",
 	repo: "a/b",
+	site: null,
 	code: "code-7",
 };
 

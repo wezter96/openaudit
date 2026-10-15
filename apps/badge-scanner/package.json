@@ -9,6 +9,7 @@
 		"test": "bun test"
 	},
 	"dependencies": {
+		"@openaudit/badge": "workspace:*",
 		"@openaudit/core": "workspace:*",
 		"effect": "4.0.3"
 	},
