@@ -118,6 +118,8 @@ const AAB_LAYOUT: ArtifactLayout = {
  * so they are identified by their root element.
  */
 const wantedArtifactXml = (layout: ArtifactLayout) => {
+	// The prefix is one of the fixed layouts above.
+	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 	const xmlRe = new RegExp(
 		`^${layout.prefix}res/(xml[^/]*/[^/]+|[^/]+)\\.xml$`,
 	);

@@ -74,6 +74,8 @@ const npmRegistryName = (
 
 /** 1-based line declaring `"name":` in the manifest, or 1 when not found. */
 const declarationLine = (rows: ReadonlyArray<string>, name: PackageName) => {
+	// The package name is escaped with escapeRe.
+	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 	const key = new RegExp(`(?:^|[{,\\s])"${escapeRe(name)}"\\s*:`);
 	return rows.findIndex((row) => key.test(row)) + 1 || 1;
 };

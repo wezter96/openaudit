@@ -60,7 +60,7 @@ const walk = async (dir: string): Promise<string[]> => {
 const files = await walk(dist);
 const html = files.filter((f) => f.endsWith(".html"));
 /** Pages copied in from the CLI, served under their own CSP. */
-const copied = (f: string) => /^report\//.test(relative(dist, f));
+const copied = (f: string) => relative(dist, f).startsWith("report/");
 
 /* ---------------------------------------------------------------- render */
 

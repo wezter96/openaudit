@@ -51,11 +51,11 @@ interface PythonScan {
 const named = (scan: PythonScan, ...names: string[]) =>
 	scan.files.filter((f) => names.includes(baseName(f))).sort(byDepth);
 
-const useTypeChecker = (cfg: PythonConfig, name: ToolName) => {
+const recordTypeChecker = (cfg: PythonConfig, name: ToolName) => {
 	cfg.typeChecker ??= name;
 };
 
-const useLinter = (cfg: PythonConfig, name: ToolName) => {
+const recordLinter = (cfg: PythonConfig, name: ToolName) => {
 	cfg.linter ??= name;
 };
 
@@ -67,7 +67,7 @@ const iniMypy = (path: FilePath, text: SourceText) => ({
 const scanMypyIni = (scan: PythonScan) =>
 	Effect.gen(function* () {
 		for (const p of named(scan, "mypy.ini", ".mypy.ini").slice(0, 5)) {
-			useTypeChecker(scan.cfg, "mypy");
+			recordTypeChecker(scan.cfg, "mypy");
 			const text = yield* readOrEmpty(scan.ws, p);
 			scan.cfg.mypy ??= iniMypy(p, text);
 		}
@@ -76,7 +76,7 @@ const scanMypyIni = (scan: PythonScan) =>
 const scanPyrightConfig = (scan: PythonScan) =>
 	Effect.gen(function* () {
 		for (const p of named(scan, "pyrightconfig.json").slice(0, 5)) {
-			useTypeChecker(scan.cfg, "pyright");
+			recordTypeChecker(scan.cfg, "pyright");
 			const text = yield* readOrEmpty(scan.ws, p);
 			const mode = /"typeCheckingMode"\s*:\s*"(\w+)"/.exec(text)?.[1];
 			scan.cfg.pyright ??= { path: p, mode: mode ?? "standard" };
@@ -85,20 +85,21 @@ const scanPyrightConfig = (scan: PythonScan) =>
 
 const scanLinterFiles = (scan: PythonScan) => {
 	if (named(scan, "ruff.toml", ".ruff.toml").length > 0)
-		useLinter(scan.cfg, "ruff");
-	if (named(scan, ".flake8").length > 0) useLinter(scan.cfg, "flake8");
+		recordLinter(scan.cfg, "ruff");
+	if (named(scan, ".flake8").length > 0) recordLinter(scan.cfg, "flake8");
 	if (named(scan, ".pylintrc", "pylintrc").length > 0)
-		useLinter(scan.cfg, "pylint");
+		recordLinter(scan.cfg, "pylint");
 };
 
 /** mypy, flake8 and pylint sections of a setup.cfg or tox.ini. */
 const applyIni = (cfg: PythonConfig, path: FilePath, text: SourceText) => {
 	if (hasSection(text, "mypy")) {
-		useTypeChecker(cfg, "mypy");
+		recordTypeChecker(cfg, "mypy");
 		cfg.mypy ??= iniMypy(path, text);
 	}
-	if (hasSection(text, "flake8")) useLinter(cfg, "flake8");
-	if (/^\s*\[(pylint|MESSAGES CONTROL)/im.test(text)) useLinter(cfg, "pylint");
+	if (hasSection(text, "flake8")) recordLinter(cfg, "flake8");
+	if (/^\s*\[(pylint|MESSAGES CONTROL)/im.test(text))
+		recordLinter(cfg, "pylint");
 };
 
 const scanIniFiles = (scan: PythonScan) =>
@@ -128,24 +129,24 @@ const applyTypeCheckers = (
 ) => {
 	const mypyTool = tool.mypy;
 	if (isRecord(mypyTool)) {
-		useTypeChecker(cfg, "mypy");
+		recordTypeChecker(cfg, "mypy");
 		cfg.mypy ??= { path, strict: mypyTool.strict === true };
 	}
 	for (const name of PYRIGHTS) {
 		const t = tool[name];
 		if (!isRecord(t)) continue;
-		useTypeChecker(cfg, name);
+		recordTypeChecker(cfg, name);
 		cfg.pyright ??= { path, mode: pyrightMode(name, t) };
 	}
 	for (const name of ["ty", "pyrefly"].filter((n) => isRecord(tool[n])))
-		useTypeChecker(cfg, name);
+		recordTypeChecker(cfg, name);
 };
 
 /** `[tool.*]` linters of a pyproject.toml. */
 const applyLinters = (cfg: PythonConfig, tool: Record<string, unknown>) => {
-	if (isRecord(tool.ruff)) useLinter(cfg, "ruff");
-	if (isRecord(tool.pylint)) useLinter(cfg, "pylint");
-	if (isRecord(tool.flake8)) useLinter(cfg, "flake8");
+	if (isRecord(tool.ruff)) recordLinter(cfg, "ruff");
+	if (isRecord(tool.pylint)) recordLinter(cfg, "pylint");
+	if (isRecord(tool.flake8)) recordLinter(cfg, "flake8");
 };
 
 const scanPyproject = (scan: PythonScan) =>

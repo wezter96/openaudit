@@ -200,7 +200,6 @@ export const asArray = (v: unknown): ReadonlyArray<unknown> =>
 export const SECRET_NAME_RE =
 	/pass(word|wd)?$|passwd|secret|token|api[_-]?key|private[_-]?key|access[_-]?key|credentials?$/i;
 
-/** True when a value is empty, a variable reference or an obvious placeholder. */
 /**
  * `${VAR}` or `${VAR:?message}`: the value comes from the environment (the
  * message is only an error text). `${VAR:-default}` and `${VAR:+alt}` count
@@ -209,7 +208,6 @@ export const SECRET_NAME_RE =
  */
 const COMPOSE_INTERPOLATION =
 	/^\$\{[A-Za-z_]\w*(?::?\?[^}]*|:?[-+]([^}]*))?\}$/;
-/^\$\{[A-Za-z_]\w*(?:(:?[?+])[^}]*|:?-([^}]*))?\}$/;
 
 const isInterpolation = (v: string): boolean => {
 	const m = COMPOSE_INTERPOLATION.exec(v);
@@ -218,6 +216,7 @@ const isInterpolation = (v: string): boolean => {
 	return fallback === undefined || isPlaceholderValue(fallback);
 };
 
+/** True when a value is empty, a variable reference or an obvious placeholder. */
 export const isPlaceholderValue = (value: string): boolean => {
 	const v = value.trim().replace(/^["']|["']$/g, "");
 	return (

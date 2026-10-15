@@ -86,7 +86,9 @@ interface CiExpansion {
 	readonly added: Set<string>;
 }
 
+// The script name is escaped with escapeRe.
 const invokesScript = (text: SourceText, name: ScriptName) =>
+	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 	new RegExp(
 		`(?:\\b(?:npm|pnpm|yarn|bun|bunx|npx|turbo|nx|lerna|make|nr)\\b[^\\n]*?[ "'=:])${escapeRe(name)}(?![\\w:.-])`,
 	).test(text);
