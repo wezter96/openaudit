@@ -1,6 +1,7 @@
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import { Button } from "@openaudit/ui/components/button";
+import { slotElement } from "@openaudit/ui/lib/slot";
 import { cn } from "@openaudit/ui/lib/utils";
 import { cva, type VariantProps } from "class-variance-authority";
 import type * as React from "react";
@@ -78,70 +79,29 @@ function AttachmentMedia({
 	);
 }
 
-function AttachmentContent({
-	className,
-	...props
-}: React.ComponentProps<"div">) {
-	return (
-		<div
-			data-slot="attachment-content"
-			className={cn(
-				"min-w-0 max-w-full flex-1 leading-tight group-data-[orientation=vertical]/attachment:px-1",
-				className,
-			)}
-			{...props}
-		/>
-	);
-}
+const AttachmentContent = slotElement(
+	"div",
+	"attachment-content",
+	"min-w-0 max-w-full flex-1 leading-tight group-data-[orientation=vertical]/attachment:px-1",
+);
 
-function AttachmentTitle({
-	className,
-	...props
-}: React.ComponentProps<"span">) {
-	return (
-		<span
-			data-slot="attachment-title"
-			className={cn(
-				"group-data-[state=processing]/attachment:shimmer group-data-[state=uploading]/attachment:shimmer block min-w-0 max-w-full truncate font-medium",
-				className,
-			)}
-			{...props}
-		/>
-	);
-}
+const AttachmentTitle = slotElement(
+	"span",
+	"attachment-title",
+	"group-data-[state=processing]/attachment:shimmer group-data-[state=uploading]/attachment:shimmer block min-w-0 max-w-full truncate font-medium",
+);
 
-function AttachmentDescription({
-	className,
-	...props
-}: React.ComponentProps<"span">) {
-	return (
-		<span
-			data-slot="attachment-description"
-			className={cn(
-				"mt-0.5 block min-w-0 truncate text-muted-foreground text-xs group-data-[state=error]/attachment:text-destructive/80",
-				"max-w-full",
-				className,
-			)}
-			{...props}
-		/>
-	);
-}
+const AttachmentDescription = slotElement(
+	"span",
+	"attachment-description",
+	"mt-0.5 block min-w-0 truncate text-muted-foreground text-xs group-data-[state=error]/attachment:text-destructive/80 max-w-full",
+);
 
-function AttachmentActions({
-	className,
-	...props
-}: React.ComponentProps<"div">) {
-	return (
-		<div
-			data-slot="attachment-actions"
-			className={cn(
-				"relative z-20 flex shrink-0 items-center group-data-[orientation=vertical]/attachment:absolute group-data-[orientation=vertical]/attachment:top-3 group-data-[orientation=vertical]/attachment:right-3 group-data-[orientation=vertical]/attachment:gap-1",
-				className,
-			)}
-			{...props}
-		/>
-	);
-}
+const AttachmentActions = slotElement(
+	"div",
+	"attachment-actions",
+	"relative z-20 flex shrink-0 items-center group-data-[orientation=vertical]/attachment:absolute group-data-[orientation=vertical]/attachment:top-3 group-data-[orientation=vertical]/attachment:right-3 group-data-[orientation=vertical]/attachment:gap-1",
+);
 
 function AttachmentAction({
 	className,
@@ -184,18 +144,11 @@ function AttachmentTrigger({
 	});
 }
 
-function AttachmentGroup({ className, ...props }: React.ComponentProps<"div">) {
-	return (
-		<div
-			data-slot="attachment-group"
-			className={cn(
-				"scroll-fade-x scrollbar-none flex min-w-0 snap-x snap-mandatory scroll-px-1 gap-3 overflow-x-auto overscroll-x-contain py-1 *:data-[slot=attachment]:flex-none *:data-[slot=attachment]:snap-start",
-				className,
-			)}
-			{...props}
-		/>
-	);
-}
+const AttachmentGroup = slotElement(
+	"div",
+	"attachment-group",
+	"scroll-fade-x scrollbar-none flex min-w-0 snap-x snap-mandatory scroll-px-1 gap-3 overflow-x-auto overscroll-x-contain py-1 *:data-[slot=attachment]:flex-none *:data-[slot=attachment]:snap-start",
+);
 
 export {
 	Attachment,

@@ -1,3 +1,4 @@
+import { slotElement } from "@openaudit/ui/lib/slot";
 import { cn } from "@openaudit/ui/lib/utils";
 import type * as React from "react";
 
@@ -19,77 +20,37 @@ function Card({
 	);
 }
 
-function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
-	return (
-		<div
-			data-slot="card-header"
-			className={cn(
-				"group/card-header @container/card-header grid auto-rows-min items-start gap-1 rounded-none px-(--card-spacing) has-data-[slot=card-action]:grid-cols-[1fr_auto] has-data-[slot=card-description]:grid-rows-[auto_auto] [.border-b]:pb-(--card-spacing)",
-				className,
-			)}
-			{...props}
-		/>
-	);
-}
+const CardHeader = slotElement(
+	"div",
+	"card-header",
+	"group/card-header @container/card-header grid auto-rows-min items-start gap-1 rounded-none px-(--card-spacing) has-data-[slot=card-action]:grid-cols-[1fr_auto] has-data-[slot=card-description]:grid-rows-[auto_auto] [.border-b]:pb-(--card-spacing)",
+);
 
-function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
-	return (
-		<div
-			data-slot="card-title"
-			className={cn(
-				"cn-font-heading font-medium text-sm group-data-[size=sm]/card:text-sm",
-				className,
-			)}
-			{...props}
-		/>
-	);
-}
+const CardTitle = slotElement(
+	"div",
+	"card-title",
+	"cn-font-heading font-medium text-sm group-data-[size=sm]/card:text-sm",
+);
 
-function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
-	return (
-		<div
-			data-slot="card-description"
-			className={cn("text-muted-foreground text-xs/relaxed", className)}
-			{...props}
-		/>
-	);
-}
+const CardDescription = slotElement(
+	"div",
+	"card-description",
+	"text-muted-foreground text-xs/relaxed",
+);
 
-function CardAction({ className, ...props }: React.ComponentProps<"div">) {
-	return (
-		<div
-			data-slot="card-action"
-			className={cn(
-				"col-start-2 row-span-2 row-start-1 self-start justify-self-end",
-				className,
-			)}
-			{...props}
-		/>
-	);
-}
+const CardAction = slotElement(
+	"div",
+	"card-action",
+	"col-start-2 row-span-2 row-start-1 self-start justify-self-end",
+);
 
-function CardContent({ className, ...props }: React.ComponentProps<"div">) {
-	return (
-		<div
-			data-slot="card-content"
-			className={cn("px-(--card-spacing)", className)}
-			{...props}
-		/>
-	);
-}
+const CardContent = slotElement("div", "card-content", "px-(--card-spacing)");
 
-function CardFooter({ className, ...props }: React.ComponentProps<"div">) {
-	return (
-		<div
-			data-slot="card-footer"
-			className={cn(
-				"flex items-center rounded-none border-t p-(--card-spacing)",
-				className,
-			)}
-			{...props}
-		/>
-	);
-}
+const CardFooter = slotElement(
+	"div",
+	"card-footer",
+	"flex items-center rounded-none border-t p-(--card-spacing)",
+);
 
 export {
 	Card,

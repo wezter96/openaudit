@@ -1,28 +1,18 @@
+import { slotElement } from "@openaudit/ui/lib/slot";
 import { cn } from "@openaudit/ui/lib/utils";
 import { cva, type VariantProps } from "class-variance-authority";
 
-function Empty({ className, ...props }: React.ComponentProps<"div">) {
-	return (
-		<div
-			data-slot="empty"
-			className={cn(
-				"flex w-full min-w-0 flex-1 flex-col items-center justify-center gap-4 text-balance rounded-none border-dashed p-6 text-center md:p-12",
-				className,
-			)}
-			{...props}
-		/>
-	);
-}
+const Empty = slotElement(
+	"div",
+	"empty",
+	"flex w-full min-w-0 flex-1 flex-col items-center justify-center gap-4 text-balance rounded-none border-dashed p-6 text-center md:p-12",
+);
 
-function EmptyHeader({ className, ...props }: React.ComponentProps<"div">) {
-	return (
-		<div
-			data-slot="empty-header"
-			className={cn("flex max-w-sm flex-col items-center gap-2", className)}
-			{...props}
-		/>
-	);
-}
+const EmptyHeader = slotElement(
+	"div",
+	"empty-header",
+	"flex max-w-sm flex-col items-center gap-2",
+);
 
 const emptyMediaVariants = cva(
 	"mb-2 flex shrink-0 items-center justify-center [&_svg]:pointer-events-none [&_svg]:shrink-0",
@@ -54,18 +44,11 @@ function EmptyMedia({
 	);
 }
 
-function EmptyTitle({ className, ...props }: React.ComponentProps<"div">) {
-	return (
-		<div
-			data-slot="empty-title"
-			className={cn(
-				"cn-font-heading font-medium text-sm tracking-tight",
-				className,
-			)}
-			{...props}
-		/>
-	);
-}
+const EmptyTitle = slotElement(
+	"div",
+	"empty-title",
+	"cn-font-heading font-medium text-sm tracking-tight",
+);
 
 function EmptyDescription({ className, ...props }: React.ComponentProps<"p">) {
 	return (
@@ -80,18 +63,11 @@ function EmptyDescription({ className, ...props }: React.ComponentProps<"p">) {
 	);
 }
 
-function EmptyContent({ className, ...props }: React.ComponentProps<"div">) {
-	return (
-		<div
-			data-slot="empty-content"
-			className={cn(
-				"flex w-full min-w-0 max-w-sm flex-col items-center gap-4 text-balance text-sm",
-				className,
-			)}
-			{...props}
-		/>
-	);
-}
+const EmptyContent = slotElement(
+	"div",
+	"empty-content",
+	"flex w-full min-w-0 max-w-sm flex-col items-center gap-4 text-balance text-sm",
+);
 
 export {
 	Empty,
