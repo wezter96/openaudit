@@ -19,20 +19,28 @@ const INJECTION_DOCS =
 
 const UNTRUSTED_RE = /potentially untrusted/i;
 
+type Classification = { category: Category; severity: Severity };
+
+/** Kinds whose classification does not depend on the message. */
+const KIND_CLASSES = new Map<string, Classification>([
+	["credentials", { category: "security", severity: "high" }],
+	["permissions", { category: "security", severity: "medium" }],
+	["pyflakes", { category: "best-practices", severity: "low" }],
+	["deprecated-commands", { category: "best-practices", severity: "medium" }],
+]);
+
+/** An untrusted expression expanded inside a script. */
+const isInjection = (kind: string, message: string): boolean =>
+	kind === "expression" && UNTRUSTED_RE.test(message);
+
 /**
  * actionlint only reports errors, so most kinds map to medium reliability.
  * Script injection (an untrusted expression in `run:`) and credential
  * problems are real security findings; ShellCheck/pyflakes output is advisory.
  */
-const classify = (
-	kind: string,
-	message: string,
-): { category: Category; severity: Severity } => {
-	if (kind === "expression" && UNTRUSTED_RE.test(message))
+const classify = (kind: string, message: string): Classification => {
+	if (isInjection(kind, message))
 		return { category: "security", severity: "high" };
-	if (kind === "credentials") return { category: "security", severity: "high" };
-	if (kind === "permissions")
-		return { category: "security", severity: "medium" };
 	if (kind === "shellcheck")
 		return {
 			category: /SC2086|SC2046|SC2091|SC2006/.test(message)
@@ -40,11 +48,9 @@ const classify = (
 				: "best-practices",
 			severity: "low",
 		};
-	if (kind === "pyflakes")
-		return { category: "best-practices", severity: "low" };
-	if (kind === "deprecated-commands")
-		return { category: "best-practices", severity: "medium" };
-	return { category: "reliability", severity: "medium" };
+	return (
+		KIND_CLASSES.get(kind) ?? { category: "reliability", severity: "medium" }
+	);
 };
 
 /** Parses `actionlint -format '{{json .}}'` output (a JSON array, or null). */
@@ -57,7 +63,7 @@ export const parseActionlintReport = (
 		const kind = str(raw.kind) ?? "unknown";
 		const message = str(raw.message) ?? kind;
 		const { category, severity } = classify(kind, message);
-		const injection = kind === "expression" && UNTRUSTED_RE.test(message);
+		const injection = isInjection(kind, message);
 		const snippet = str(raw.snippet)?.split("\n")[0];
 		return [
 			{

@@ -21,6 +21,75 @@ const SEVERITY: Record<string, Severity> = {
 	INFO: "info",
 };
 
+type FilePath = string;
+type Framework = string;
+type CheckovCheck = Record<string, unknown> & { check_id: string };
+
+const optionalString = (value: unknown): string | undefined =>
+	typeof value === "string" ? value : undefined;
+
+/** First line of the reported range, or 1 when it is missing or invalid. */
+const startLine = (range: unknown): number => {
+	const first = asArray(range)[0];
+	return typeof first === "number" && first > 0 ? first : 1;
+};
+
+const severityOf = (severity: unknown): Severity =>
+	(typeof severity === "string"
+		? SEVERITY[severity.toUpperCase()]
+		: undefined) ?? "medium";
+
+/**
+ * Checkov treats any path containing "dockerfile" as one, source files such
+ * as dockerfile.ts included.
+ */
+const isMisdetectedDockerfile = (
+	framework: Framework,
+	file: FilePath | undefined,
+): boolean => {
+	if (framework !== "dockerfile" || !file) return false;
+	return !DOCKERFILE_RE.test(file);
+};
+
+const checkovFinding = (
+	c: CheckovCheck,
+	framework: Framework,
+	file: FilePath | undefined,
+): FindingInput => {
+	const resource = optionalString(c.resource);
+	const title = optionalString(c.check_name) ?? c.check_id;
+	const guideline = optionalString(c.guideline);
+	return {
+		ruleId: `iac.checkov/${c.check_id.toLowerCase().replace(/_/g, "-")}`,
+		title,
+		severity: severityOf(c.severity),
+		category: "security",
+		message: `${title}${resource ? ` (${resource})` : ""} [${c.check_id}, ${framework}]`,
+		remediation: guideline
+			? `Follow the Checkov guideline: ${guideline}`
+			: `See the Checkov policy ${c.check_id}.`,
+		location: { file, line: startLine(c.file_line_range) },
+		evidence: resource,
+		references: guideline ? [guideline] : undefined,
+		tags: ["checkov", framework, c.check_id],
+		confidence: c.severity ? "high" : "medium",
+	};
+};
+
+/** Findings for the failed checks of one framework report. */
+const reportFindings = (report: unknown): FindingInput[] => {
+	const rec = asRecord(report);
+	const failed = asArray(asRecord(rec?.results)?.failed_checks);
+	const framework = optionalString(rec?.check_type) ?? "iac";
+	return failed.flatMap((raw): FindingInput[] => {
+		const c = asRecord(raw);
+		if (typeof c?.check_id !== "string") return [];
+		const file = optionalString(c.file_path)?.replace(/^\.?\//, "");
+		if (isMisdetectedDockerfile(framework, file)) return [];
+		return [checkovFinding(c as CheckovCheck, framework, file)];
+	});
+};
+
 /**
  * Parses `checkov -o json` output: a single report object, an array of them
  * (one per framework), or a bare summary when nothing was scanned.
@@ -32,52 +101,7 @@ export const parseCheckovOutput = (
 	if (start === -1) return [];
 	const parsed: unknown = JSON.parse(stdout.slice(start));
 	const reports = Array.isArray(parsed) ? parsed : [parsed];
-	const findings: FindingInput[] = [];
-	for (const report of reports) {
-		const rec = asRecord(report);
-		const failed = asArray(asRecord(rec?.results)?.failed_checks);
-		const framework =
-			typeof rec?.check_type === "string" ? rec.check_type : "iac";
-		for (const raw of failed) {
-			const c = asRecord(raw);
-			if (!c || typeof c.check_id !== "string") continue;
-			const range = asArray(c.file_line_range);
-			const line = typeof range[0] === "number" && range[0] > 0 ? range[0] : 1;
-			const file =
-				typeof c.file_path === "string"
-					? c.file_path.replace(/^\.?\//, "")
-					: undefined;
-			// Checkov treats any path containing "dockerfile" as one, source files
-			// such as dockerfile.ts included.
-			if (framework === "dockerfile" && file && !DOCKERFILE_RE.test(file))
-				continue;
-			const resource = typeof c.resource === "string" ? c.resource : undefined;
-			const title =
-				typeof c.check_name === "string" ? c.check_name : c.check_id;
-			const guideline =
-				typeof c.guideline === "string" ? c.guideline : undefined;
-			const severity =
-				(typeof c.severity === "string"
-					? SEVERITY[c.severity.toUpperCase()]
-					: undefined) ?? "medium";
-			findings.push({
-				ruleId: `iac.checkov/${c.check_id.toLowerCase().replace(/_/g, "-")}`,
-				title,
-				severity,
-				category: "security",
-				message: `${title}${resource ? ` (${resource})` : ""} [${c.check_id}, ${framework}]`,
-				remediation: guideline
-					? `Follow the Checkov guideline: ${guideline}`
-					: `See the Checkov policy ${c.check_id}.`,
-				location: { file, line },
-				evidence: resource,
-				references: guideline ? [guideline] : undefined,
-				tags: ["checkov", framework, c.check_id],
-				confidence: c.severity ? "high" : "medium",
-			});
-		}
-	}
-	return findings;
+	return reports.flatMap(reportFindings);
 };
 
 /** Wraps Checkov for broad IaC policy coverage (Terraform, K8s, CloudFormation, ...). */
