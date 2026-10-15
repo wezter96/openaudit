@@ -340,10 +340,18 @@ const response = (url: string, status: number, body: string) => ({
 	totalMs: 0,
 });
 
-type Entry = { request: Record<string, Record<string, string>> };
+type BatchKey = Record<string, Record<string, string>>;
+type Entry = { request: BatchKey };
+type KeyOf = (r: BatchKey) => string;
 
-/** Replays recorded deps.dev responses for whatever the auditor asks. */
-const fakeDepsDev = async (calls: Call[], options: FakeOptions = {}) => {
+interface Recordings {
+	readonly versionEntries: Entry[];
+	readonly projectEntries: Entry[];
+	/** Package responses keyed by fixture file name. */
+	readonly packages: Map<string, string>;
+}
+
+const loadRecordings = async (): Promise<Recordings> => {
 	const versionEntries = (
 		(await api("versionbatch.json")) as { responses: Entry[] }
 	).responses;
@@ -354,36 +362,69 @@ const fakeDepsDev = async (calls: Call[], options: FakeOptions = {}) => {
 	for (const name of await readdir(API_DIR))
 		if (name.startsWith("package-"))
 			packages.set(name, await readFile(join(API_DIR, name), "utf8"));
+	return { versionEntries, projectEntries, packages };
+};
 
-	const batch = (
-		url: string,
-		init: HttpRequest | undefined,
-		entries: Entry[],
-		keyOf: (r: Record<string, Record<string, string>>) => string,
-	) => {
-		const body = JSON.parse(init?.body ?? "{}") as {
-			requests: Array<Record<string, Record<string, string>>>;
-			pageToken?: string;
-		};
-		const all = body.requests.map((r) => {
-			const entry = entries.find((e) => keyOf(e.request) === keyOf(r));
-			if (!entry) throw new Error(`no recorded response for ${keyOf(r)}`);
-			return entry;
-		});
-		const size = options.pageSize ?? 100;
-		const page = body.pageToken ? Number(body.pageToken.slice(5)) : 0;
-		const responses = all.slice(page * size, (page + 1) * size);
-		const more = (page + 1) * size < all.length;
-		return response(
-			url,
-			200,
-			JSON.stringify({
-				responses,
-				nextPageToken: more ? `page-${page + 1}` : "",
-			}),
-		);
+interface ReplayRequest {
+	readonly url: string;
+	readonly init: HttpRequest | undefined;
+	readonly pageSize: number;
+}
+
+const recordedEntry = (entries: Entry[], keyOf: KeyOf) => (r: BatchKey) => {
+	const entry = entries.find((e) => keyOf(e.request) === keyOf(r));
+	if (!entry) throw new Error(`no recorded response for ${keyOf(r)}`);
+	return entry;
+};
+
+/** One page of recorded batch responses, paged the way deps.dev pages. */
+const replayBatch = (req: ReplayRequest, entries: Entry[], keyOf: KeyOf) => {
+	const body = JSON.parse(req.init?.body ?? "{}") as {
+		requests: BatchKey[];
+		pageToken?: string;
 	};
+	const all = body.requests.map(recordedEntry(entries, keyOf));
+	const size = req.pageSize;
+	const page = body.pageToken ? Number(body.pageToken.slice(5)) : 0;
+	const responses = all.slice(page * size, (page + 1) * size);
+	const more = (page + 1) * size < all.length;
+	return response(
+		req.url,
+		200,
+		JSON.stringify({
+			responses,
+			nextPageToken: more ? `page-${page + 1}` : "",
+		}),
+	);
+};
 
+const PACKAGE_URL =
+	/^https:\/\/api\.deps\.dev\/v3\/systems\/(\w+)\/packages\/([^/]+)$/;
+
+const replayPackage = (url: string, packages: Map<string, string>) => {
+	const m = PACKAGE_URL.exec(url);
+	const body = m
+		? packages.get(`package-${m[1]}-${decodeURIComponent(m[2] ?? "")}.json`)
+		: undefined;
+	return body
+		? response(url, 200, body)
+		: response(url, 404, '{"code":5,"message":"package not found"}');
+};
+
+const versionKey: KeyOf = (r) => Object.values(r.versionKey ?? {}).join("|");
+const projectKey: KeyOf = (r) => r.projectKey?.id ?? "";
+
+const replay = (req: ReplayRequest, recordings: Recordings) => {
+	if (req.url === "https://api.deps.dev/v3alpha/versionbatch")
+		return replayBatch(req, recordings.versionEntries, versionKey);
+	if (req.url === "https://api.deps.dev/v3alpha/projectbatch")
+		return replayBatch(req, recordings.projectEntries, projectKey);
+	return replayPackage(req.url, recordings.packages);
+};
+
+/** Replays recorded deps.dev responses for whatever the auditor asks. */
+const fakeDepsDev = async (calls: Call[], options: FakeOptions = {}) => {
+	const recordings = await loadRecordings();
 	return Layer.succeed(Http, {
 		request: (url: string, init?: HttpRequest) =>
 			Effect.sync(() => {
@@ -391,29 +432,8 @@ const fakeDepsDev = async (calls: Call[], options: FakeOptions = {}) => {
 				const failure = options.fail?.(url);
 				if (failure === "invalid-json") return response(url, 200, "{oops");
 				if (failure !== undefined) return response(url, failure, "{}");
-				if (url === "https://api.deps.dev/v3alpha/versionbatch")
-					return batch(url, init, versionEntries, (r) =>
-						Object.values(r.versionKey ?? {}).join("|"),
-					);
-				if (url === "https://api.deps.dev/v3alpha/projectbatch")
-					return batch(
-						url,
-						init,
-						projectEntries,
-						(r) => r.projectKey?.id ?? "",
-					);
-				const m =
-					/^https:\/\/api\.deps\.dev\/v3\/systems\/(\w+)\/packages\/([^/]+)$/.exec(
-						url,
-					);
-				const body = m
-					? packages.get(
-							`package-${m[1]}-${decodeURIComponent(m[2] ?? "")}.json`,
-						)
-					: undefined;
-				return body
-					? response(url, 200, body)
-					: response(url, 404, '{"code":5,"message":"package not found"}');
+				const pageSize = options.pageSize ?? 100;
+				return replay({ url, init, pageSize }, recordings);
 			}),
 	});
 };

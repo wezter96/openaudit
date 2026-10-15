@@ -73,13 +73,17 @@ func f() {
 	}),
 };
 
+const writeFiles = (root: string, files: Record<string, string>) => {
+	for (const [path, text] of Object.entries(files)) {
+		mkdirSync(dirname(join(root, path)), { recursive: true });
+		writeFileSync(join(root, path), text);
+	}
+};
+
 let dir: string;
 beforeAll(() => {
 	dir = mkdtempSync(join(tmpdir(), "openaudit-privacy-"));
-	for (const [path, text] of Object.entries(FILES)) {
-		mkdirSync(dirname(join(dir, path)), { recursive: true });
-		writeFileSync(join(dir, path), text);
-	}
+	writeFiles(dir, FILES);
 });
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -209,10 +213,7 @@ describe("code.privacy", () => {
 		};
 		const root = mkdtempSync(join(tmpdir(), "openaudit-privacy-pii-"));
 		try {
-			for (const [path, text] of Object.entries(files)) {
-				mkdirSync(dirname(join(root, path)), { recursive: true });
-				writeFileSync(join(root, path), text);
-			}
+			writeFiles(root, files);
 			const findings = (await runAuditor(privacy, root)).results.flatMap(
 				(r) => r.findings,
 			);

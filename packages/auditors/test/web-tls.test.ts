@@ -39,6 +39,23 @@ const pageOf = (url: string, html: string): Page => ({
 	},
 });
 
+/**
+ * A TLS server on 127.0.0.1 that answers anything with a tiny page. It joins
+ * `servers` before it starts listening, so it is closed even if that fails.
+ */
+const listenTls = (servers: nodeTls.Server[], options: nodeTls.TlsOptions) =>
+	new Promise<nodeTls.Server>((resolve) => {
+		const server = nodeTls.createServer(options, (socket) => {
+			socket.on("error", () => {});
+			socket.end(
+				"HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: 2\r\n\r\nok",
+			);
+		});
+		server.on("tlsClientError", () => {});
+		servers.push(server);
+		server.listen(0, "127.0.0.1", () => resolve(server));
+	});
+
 describe("web.tls", () => {
 	test("flags active and passive mixed content on https pages", () => {
 		const html = `<html><head><script src="http://cdn.example.com/a.js"></script></head>
@@ -207,32 +224,18 @@ describe("web.tls", () => {
 				"subjectAltName=DNS:example.test",
 				...validity,
 			]).exitCode === 0;
-		const listen = (
+		const listen = async (
 			name: string,
 			certName: string,
 			options: nodeTls.TlsOptions = {},
-		) =>
-			new Promise<void>((resolve) => {
-				const server = nodeTls.createServer(
-					{
-						cert: readFileSync(join(dir ?? "", `${certName}.pem`)),
-						key: readFileSync(join(dir ?? "", `${certName}.key`)),
-						...options,
-					},
-					(socket) => {
-						socket.on("error", () => {});
-						socket.end(
-							"HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: 2\r\n\r\nok",
-						);
-					},
-				);
-				server.on("tlsClientError", () => {});
-				servers.push(server);
-				server.listen(0, "127.0.0.1", () => {
-					ports[name] = (server.address() as AddressInfo).port;
-					resolve();
-				});
+		) => {
+			const server = await listenTls(servers, {
+				cert: readFileSync(join(dir ?? "", `${certName}.pem`)),
+				key: readFileSync(join(dir ?? "", `${certName}.key`)),
+				...options,
 			});
+			ports[name] = (server.address() as AddressInfo).port;
+		};
 
 		beforeAll(async () => {
 			if (!Bun.which("openssl")) return;

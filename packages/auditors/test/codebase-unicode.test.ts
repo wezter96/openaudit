@@ -22,6 +22,70 @@ const byFile = (
 	return out;
 };
 
+const MB = 1024 * 1024;
+const fill = (unit: string, bytes = MB) =>
+	unit.repeat(Math.ceil(bytes / unit.length));
+
+/** Inputs that would take quadratic time in a naive scanner. */
+const HOSTILE_INPUTS: Record<string, SourceFile> = {
+	"one comment line full of zero-width spaces": {
+		path: "a.ts",
+		text: `// ${fill("a\u200B")}`,
+	},
+	"one string full of zero-width spaces": {
+		path: "a.ts",
+		text: `const s = "${fill("a\u200B")}";`,
+	},
+	"a zero-width space on every line": {
+		path: "a.ts",
+		text: fill("a\u200Bb\n"),
+	},
+	"look-alike identifiers with Latin twins": {
+		path: "a.js",
+		text: fill("\u0441\u043E\u0440 cop "),
+	},
+	"one huge mixed-script identifier": {
+		path: "a.js",
+		text: `const ${fill("a\u0430")} = 1;`,
+	},
+	"regex-looking slashes that never close": {
+		path: "a.js",
+		text: `x${fill("=/[")}\u200B`,
+	},
+	"deeply nested template literals": {
+		path: "a.js",
+		text: `${fill("`${")}\u200B`,
+	},
+	"one run of tag characters": {
+		path: "AGENTS.md",
+		text: fill("\u{E0041}"),
+	},
+	"one run of variation selectors": {
+		path: "a.js",
+		text: `"\u{1F642}${fill("\u{E0100}")}"`,
+	},
+	"bidi controls everywhere": {
+		path: "a.js",
+		text: fill("\u202Ea\u2066\n"),
+	},
+	"PHP comments full of closing tags": {
+		path: "a.php",
+		text: fill("// \u200B ?>\n"),
+	},
+	"Java comments full of escapes": {
+		path: "A.java",
+		text: fill("// \u200B \\u000a\n"),
+	},
+	"Rust lifetimes and strings on every line": {
+		path: "a.rs",
+		text: fill('fn f<\'a>() { "\u200B" }\n'),
+	},
+	"Ruby format strings everywhere": {
+		path: "a.rb",
+		text: fill('"%s\u200B" '),
+	},
+};
+
 describe("code.unicode", () => {
 	test("flags hidden Unicode and leaves legitimate text alone", async () => {
 		const root = writeUnicodeFixtures(
@@ -249,67 +313,6 @@ describe("code.unicode", () => {
 	});
 
 	describe("bounded work on hostile input", () => {
-		const MB = 1024 * 1024;
-		const fill = (unit: string, bytes = MB) =>
-			unit.repeat(Math.ceil(bytes / unit.length));
-		const cases: Record<string, SourceFile> = {
-			"one comment line full of zero-width spaces": {
-				path: "a.ts",
-				text: `// ${fill("a\u200B")}`,
-			},
-			"one string full of zero-width spaces": {
-				path: "a.ts",
-				text: `const s = "${fill("a\u200B")}";`,
-			},
-			"a zero-width space on every line": {
-				path: "a.ts",
-				text: fill("a\u200Bb\n"),
-			},
-			"look-alike identifiers with Latin twins": {
-				path: "a.js",
-				text: fill("\u0441\u043E\u0440 cop "),
-			},
-			"one huge mixed-script identifier": {
-				path: "a.js",
-				text: `const ${fill("a\u0430")} = 1;`,
-			},
-			"regex-looking slashes that never close": {
-				path: "a.js",
-				text: `x${fill("=/[")}\u200B`,
-			},
-			"deeply nested template literals": {
-				path: "a.js",
-				text: `${fill("`${")}\u200B`,
-			},
-			"one run of tag characters": {
-				path: "AGENTS.md",
-				text: fill("\u{E0041}"),
-			},
-			"one run of variation selectors": {
-				path: "a.js",
-				text: `"\u{1F642}${fill("\u{E0100}")}"`,
-			},
-			"bidi controls everywhere": {
-				path: "a.js",
-				text: fill("\u202Ea\u2066\n"),
-			},
-			"PHP comments full of closing tags": {
-				path: "a.php",
-				text: fill("// \u200B ?>\n"),
-			},
-			"Java comments full of escapes": {
-				path: "A.java",
-				text: fill("// \u200B \\u000a\n"),
-			},
-			"Rust lifetimes and strings on every line": {
-				path: "a.rs",
-				text: fill('fn f<\'a>() { "\u200B" }\n'),
-			},
-			"Ruby format strings everywhere": {
-				path: "a.rb",
-				text: fill('"%s\u200B" '),
-			},
-		};
 		// Bounds are loose on purpose: CI runners are several times slower than
 		// a laptop, and the quadratic behaviour these guard against takes minutes.
 		test("a 16 MB file in quick mode", () => {
@@ -320,7 +323,7 @@ describe("code.unicode", () => {
 			expect(findings).toHaveLength(40);
 		});
 
-		for (const [name, file] of Object.entries(cases))
+		for (const [name, file] of Object.entries(HOSTILE_INPUTS))
 			test(name, () => {
 				const start = performance.now();
 				const findings = scanUnicode(file, { mode: "thorough" });

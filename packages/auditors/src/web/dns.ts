@@ -4,14 +4,25 @@ import {
 	AuditorError,
 	defineAuditor,
 	type FindingInput,
-	type HttpResponse,
 	requireUrl,
 	type Severity,
 	skip,
 } from "@openaudit/core";
 import { Effect } from "effect";
 
+import { type DomainScope, domainScope } from "./dns-domain";
+import {
+	matchesTakeoverFingerprint,
+	type TakeoverService,
+	takeoverServiceFor,
+} from "./dns-takeover";
 import { truncate } from "./util";
+
+export { type DomainScope, domainScope } from "./dns-domain";
+export {
+	matchesTakeoverFingerprint,
+	takeoverServiceFor,
+} from "./dns-takeover";
 
 /* -------------------------------------------------------------------------- */
 /*                                  Resolver                                  */
@@ -106,93 +117,6 @@ export const systemResolver = (): Resolver => {
 				.catch(emptyAs(undefined)),
 		nameExists: (name) => nameExistsVia(dns, name),
 	};
-};
-
-/* -------------------------------------------------------------------------- */
-/*                              Registrable domain                            */
-/* -------------------------------------------------------------------------- */
-
-/**
- * No public-suffix list is bundled. Instead: a short list of common two-label
- * public suffixes (`co.uk`, `com.au`, ...), otherwise the last two labels.
- * Uncommon multi-label suffixes (e.g. `k12.ca.us`) are therefore mis-split; the
- * DNS checks are then run against the suffix and will mostly report nothing.
- */
-const TWO_LABEL_SUFFIXES = new Set(
-	`co.uk org.uk me.uk ac.uk gov.uk ltd.uk plc.uk net.uk sch.uk
-com.au net.au org.au edu.au gov.au co.nz org.nz net.nz govt.nz ac.nz
-co.jp ne.jp or.jp ac.jp go.jp co.in net.in org.in gov.in ac.in
-com.br net.br org.br gov.br com.cn net.cn org.cn gov.cn
-com.mx com.ar com.co com.pe com.ve com.tr com.sg com.hk com.tw com.my com.ph com.vn
-co.kr or.kr co.za org.za co.il co.id co.th co.ke com.ng com.pk com.bd com.eg com.sa
-com.ua com.pl com.ru`.split(/\s+/),
-);
-
-/**
- * Hosting platforms whose subdomains belong to customers. The platform owns
- * the parent zone, so mail/CAA findings there are not the customer's to fix.
- */
-const SHARED_SUFFIXES = [
-	"github.io",
-	"gitlab.io",
-	"herokuapp.com",
-	"vercel.app",
-	"netlify.app",
-	"pages.dev",
-	"workers.dev",
-	"azurewebsites.net",
-	"cloudfront.net",
-	"amazonaws.com",
-	"appspot.com",
-	"web.app",
-	"firebaseapp.com",
-	"onrender.com",
-	"fly.dev",
-	"railway.app",
-	"surge.sh",
-	"ngrok.io",
-	"ngrok-free.app",
-	"trycloudflare.com",
-	"myshopify.com",
-	"wordpress.com",
-	"blogspot.com",
-	"azurestaticapps.net",
-	"cloudapp.azure.com",
-	"trafficmanager.net",
-	"readthedocs.io",
-];
-
-const isIp = (host: DnsName) => /^[\d.]+$/.test(host) || host.includes(":");
-
-export type DomainScope =
-	| { readonly kind: "domain"; readonly host: string; readonly domain: string }
-	| { readonly kind: "shared" | "none"; readonly host: string };
-
-/** Suffixes of names that never resolve in public DNS. */
-const LOCAL_SUFFIXES = [".localhost", ".local", ".internal"];
-
-/** Single labels, IP addresses, localhost and local-only names. */
-const isLocalName = (host: DnsName) =>
-	!host.includes(".") ||
-	isIp(host) ||
-	host === "localhost" ||
-	LOCAL_SUFFIXES.some((suffix) => host.endsWith(suffix));
-
-const isSharedHost = (host: DnsName) =>
-	SHARED_SUFFIXES.some((s) => host === s || host.endsWith(`.${s}`));
-
-export const domainScope = (hostname: DnsName): DomainScope => {
-	const host = hostname
-		.toLowerCase()
-		.replace(/^\[|\]$/g, "")
-		.replace(/\.$/, "");
-	if (isLocalName(host)) return { kind: "none", host };
-	if (isSharedHost(host)) return { kind: "shared", host };
-	const labels = host.split(".");
-	const last2 = labels.slice(-2).join(".");
-	const take = TWO_LABEL_SUFFIXES.has(last2) ? 3 : 2;
-	if (labels.length < take) return { kind: "none", host };
-	return { kind: "domain", host, domain: labels.slice(-take).join(".") };
 };
 
 /* -------------------------------------------------------------------------- */
@@ -303,117 +227,6 @@ export const parseMtaSts = (body: TxtRecord): Map<string, string[]> => {
 	}
 	return out;
 };
-
-/* -------------------------------------------------------------------------- */
-/*                              Subdomain takeover                            */
-/* -------------------------------------------------------------------------- */
-
-interface TakeoverService {
-	readonly name: string;
-	/** CNAME targets (suffix match on the dot-separated name). */
-	readonly suffixes: ReadonlyArray<string>;
-	/** Unclaimed-resource page, per can-i-take-over-xyz. Absent: NXDOMAIN is the signal. */
-	readonly fingerprint?: RegExp;
-}
-
-/**
- * Fingerprints follow https://github.com/EdOverflow/can-i-take-over-xyz.
- * CloudFront, Netlify and Fastly are left out on purpose: their "unknown
- * domain" pages also appear on healthy, merely misconfigured, setups and
- * those platforms verify domain ownership, so reporting them would be noise.
- */
-const TAKEOVER_SERVICES: ReadonlyArray<TakeoverService> = [
-	{
-		name: "Heroku",
-		suffixes: ["herokuapp.com", "herokudns.com"],
-		fingerprint: /No such app/,
-	},
-	{
-		name: "GitHub Pages",
-		suffixes: ["github.io"],
-		fingerprint: /There isn't a GitHub Pages site here\./,
-	},
-	{
-		name: "AWS S3",
-		suffixes: ["s3.amazonaws.com"],
-		fingerprint: /The specified bucket does not exist/,
-	},
-	{
-		name: "Shopify",
-		suffixes: ["myshopify.com"],
-		fingerprint: /Sorry, this shop is currently unavailable\./,
-	},
-	{
-		name: "Surge.sh",
-		suffixes: ["surge.sh"],
-		fingerprint: /project not found/i,
-	},
-	{
-		name: "Bitbucket",
-		suffixes: ["bitbucket.io"],
-		fingerprint: /Repository not found/,
-	},
-	{
-		name: "Tumblr",
-		suffixes: ["domains.tumblr.com"],
-		fingerprint: /Whatever you were looking for doesn't currently exist/,
-	},
-	{
-		name: "Pantheon",
-		suffixes: ["pantheonsite.io"],
-		fingerprint:
-			/The gods are wise, but do not know of the site which you seek/,
-	},
-	{
-		name: "Ghost",
-		suffixes: ["ghost.io"],
-		fingerprint:
-			/The thing you were looking for is no longer here, or never was/,
-	},
-	// Azure resources are released with their DNS name, so a CNAME to a name
-	// that no longer resolves is the whole signal.
-	{
-		name: "Azure App Service",
-		suffixes: ["azurewebsites.net"],
-	},
-	{
-		name: "Azure Cloud Services",
-		suffixes: ["cloudapp.net", "cloudapp.azure.com"],
-	},
-	{
-		name: "Azure Traffic Manager",
-		suffixes: ["trafficmanager.net"],
-	},
-	{
-		name: "Azure Blob Storage",
-		suffixes: ["blob.core.windows.net"],
-	},
-];
-
-const S3_HOST = /(^|\.)s3([.-][a-z0-9-]+)?\.amazonaws\.com$/i;
-
-export const takeoverServiceFor = (
-	target: DnsName,
-): TakeoverService | undefined => {
-	const name = target.toLowerCase().replace(/\.$/, "");
-	if (
-		S3_HOST.test(name) ||
-		/\.s3-website[.-][a-z0-9-]+\.amazonaws\.com$/.test(name)
-	)
-		return TAKEOVER_SERVICES.find((s) => s.name === "AWS S3");
-	return TAKEOVER_SERVICES.find((s) =>
-		s.suffixes.some((suffix) => name === suffix || name.endsWith(`.${suffix}`)),
-	);
-};
-
-/** Does an HTTP response look like the service's "nothing here" page? */
-export const matchesTakeoverFingerprint = (
-	service: TakeoverService,
-	res: Pick<HttpResponse, "status" | "body">,
-): boolean =>
-	service.fingerprint !== undefined &&
-	res.status === 404 &&
-	service.fingerprint.test(res.body);
 
 /* -------------------------------------------------------------------------- */
 /*                                  Auditor                                   */
