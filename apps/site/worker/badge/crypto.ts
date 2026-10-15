@@ -24,8 +24,8 @@ export const sha256 = async (text: string): Promise<string> =>
 /** A new manage token: 32 random bytes, base64url. */
 export const newManageToken = (): Token => `oam_${base64url(random(32))}`;
 
-/** A new public verification code. */
-export const newCode = (): string => `openaudit-verify-${hex(random(12))}`;
+/** A new public verification code: 128 random bits, so it can't be guessed. */
+export const newCode = (): string => `openaudit-verify-${hex(random(16))}`;
 
 /** Compares two strings in time independent of where they differ. */
 export const constantTimeEqual = (a: string, b: string): boolean => {

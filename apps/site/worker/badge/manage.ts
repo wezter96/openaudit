@@ -56,9 +56,21 @@ const check = async (row: ProjectRow) => ({
 	site: await checkSite(row),
 });
 
+/** The project, when the request's bearer token is its manage token. */
+const authorised = (req: BadgeRequest, id: ProjectId) =>
+	Effect.gen(function* () {
+		const token = yield* ManageToken;
+		const row = yield* liveProject(req, id);
+		const hash = yield* promise(() => sha256(Redacted.value(token)));
+		if (!constantTimeEqual(hash, row.manage_hash))
+			return yield* new Unauthorized({ message: "Wrong manage token." });
+		return row;
+	});
+
+/** Only the registrant, with the manage token, can ask for a check. */
 export const verify = (req: BadgeRequest, id: ProjectId) =>
 	Effect.gen(function* () {
-		const row = yield* liveProject(req, id);
+		const row = yield* authorised(req, id);
 		if (recentlyChecked(row, req.now)) return resultOf(row);
 		const verified = yield* promise(() => check(row));
 		yield* promise(() =>
@@ -77,17 +89,6 @@ export const getState = (req: BadgeRequest, id: ProjectId) =>
 		const row = yield* liveProject(req, id);
 		const scans = yield* promise(() => finishedScans(req.env.BADGES, id));
 		return stateOf(row, scans);
-	});
-
-/** The project, when the request's bearer token is its manage token. */
-const authorised = (req: BadgeRequest, id: ProjectId) =>
-	Effect.gen(function* () {
-		const token = yield* ManageToken;
-		const row = yield* liveProject(req, id);
-		const hash = yield* promise(() => sha256(Redacted.value(token)));
-		if (!constantTimeEqual(hash, row.manage_hash))
-			return yield* new Unauthorized({ message: "Wrong manage token." });
-		return row;
 	});
 
 export const rescan = (req: BadgeRequest, id: ProjectId) =>

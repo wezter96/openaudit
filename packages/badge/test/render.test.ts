@@ -16,7 +16,7 @@ const summary = (
 	categories: [{ category: "security", score, grade }],
 	auditors: { passed: 30, failed: 4, skipped: 12, error: 0 },
 	suppressed: 3,
-	configApplied: true,
+	hiddenBy: [{ kind: "path", value: "test/**", reason: "Fixtures", count: 3 }],
 	openauditVersion: "0.3.0",
 });
 
@@ -128,7 +128,9 @@ describe("verifyPageHtml", () => {
 		expect(html).toContain('href="/v/acme-widgets/report"');
 		expect(html).toContain('href="/v/acme-widgets/site-report"');
 		expect(html).toContain(`?scan=${latest.id}`);
-		expect(html).toContain("The repo&#39;s own openaudit config applied.");
+		expect(html).toContain("Hidden by the project&#39;s config: 3 findings");
+		expect(html).toContain("<code>path test/**</code> (3): Fixtures");
+		expect(html).not.toContain("config applied");
 		expect(html).toContain(
 			"[![openaudit](https://openaudit.se/badge/acme-widgets.svg)](https://openaudit.se/v/acme-widgets)",
 		);
@@ -176,5 +178,96 @@ describe("svg helpers", () => {
 		expect(textWidth("openaudit")).toBeGreaterThan(40);
 		expect(textWidth("mmm")).toBeGreaterThan(textWidth("iii"));
 		expect(formatDate(NOW)).toBe("15 Oct 2026");
+	});
+});
+
+const HOSTILE = `<script>alert(1)</script>"'\u202Ejavascript:alert(1)\u2066x\u0000`;
+const RAW = ["<script", "\"'", "\u202E", "\u2066", "\u0000"];
+
+const hostileSummary = (): TargetSummary => ({
+	...summary(96, "A"),
+	grade: HOSTILE as TargetSummary["grade"],
+	score: HOSTILE as unknown as number,
+	categories: [{ category: HOSTILE, score: 1, grade: "A" }],
+	hiddenBy: [{ kind: HOSTILE, value: HOSTILE, reason: HOSTILE, count: 1 }],
+	openauditVersion: HOSTILE,
+});
+
+const hostileProject = (): ProjectState => {
+	const bad = scan({
+		error: HOSTILE,
+		commit: HOSTILE,
+		openauditVersion: HOSTILE,
+		codebase: hostileSummary(),
+		site: hostileSummary(),
+		id: HOSTILE,
+	});
+	return project({
+		repo: HOSTILE,
+		site: `javascript:alert(1)//${HOSTILE}`,
+		latest: bad,
+		lastScan: bad,
+	});
+};
+
+describe("hostile values", () => {
+	const expectSafe = (out: string) => {
+		for (const raw of RAW) expect(out).not.toContain(raw);
+		expect(out).not.toMatch(/href="javascript:/i);
+		expect(out).not.toMatch(/\son[a-z]+=/i);
+	};
+
+	test("the page escapes and refuses to link them", () => {
+		const p = hostileProject();
+		const html = verifyPageHtml({
+			badge: viewOf(p, NOW),
+			scans: p.lastScan ? [p.lastScan] : [],
+			origin: 'https://evil.example/"><script>',
+		});
+		expectSafe(html);
+		expect(html).toContain(
+			"&lt;script&gt;alert(1)&lt;/script&gt;&quot;&#39;\ufffd",
+		);
+		expect(html).not.toContain('href="https://github.com/');
+		expect(html).toContain("https://openaudit.se/v/acme-widgets");
+	});
+
+	test("the badge and card escape them", () => {
+		const view = viewOf(hostileProject(), NOW);
+		expectSafe(badgeSvg(view));
+		expectSafe(cardSvg(view));
+		expect(cardSvg(view)).toContain("&lt;script&gt;");
+	});
+
+	test("an ok scan with a site note shows it, and the site as unavailable", () => {
+		const noted = scan({ error: "site: <b>timed out</b>" });
+		const html = verifyPageHtml({
+			badge: viewOf(
+				project({ site: "https://acme.dev/", latest: noted, lastScan: noted }),
+				NOW,
+			),
+			scans: [noted],
+			origin: "https://openaudit.se",
+		});
+		expect(html).toContain(
+			"From this scan: site: &lt;b&gt;timed out&lt;/b&gt;",
+		);
+		expect(html).toContain("The website wasn't available in this scan.");
+		expect(html).toContain("ok, with a note");
+		expect(
+			badgeSvg(viewOf(project({ latest: noted, lastScan: noted }), NOW)),
+		).toContain(">96 A<");
+	});
+
+	test("config wording never claims more than the report says", () => {
+		const none = scan({
+			codebase: { ...summary(96, "A"), suppressed: 0, hiddenBy: [] },
+		});
+		const view = viewOf(project({ latest: none, lastScan: none }), NOW);
+		expect(cardSvg(view)).toContain(">Nothing hidden by config<");
+		const one = scan({ codebase: { ...summary(96, "A"), suppressed: 1 } });
+		expect(
+			cardSvg(viewOf(project({ latest: one, lastScan: one }), NOW)),
+		).toContain("Hidden by the project&#39;s config: 1 finding<");
 	});
 });

@@ -29,7 +29,7 @@ const loadView = async (env: BadgeBindings, id: ProjectId) => {
 
 const SVG_HEADERS = {
 	"Content-Type": "image/svg+xml; charset=utf-8",
-	"Cache-Control": "public, max-age=3600",
+	"Cache-Control": "public, max-age=900",
 	"Access-Control-Allow-Origin": "*",
 	"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
 	"X-Content-Type-Options": "nosniff",

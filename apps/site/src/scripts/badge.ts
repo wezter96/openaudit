@@ -78,12 +78,17 @@ const errorOf = async (res: Response) => {
 		: "That didn't work. Check the details and try again.";
 };
 
-const post = (path: ApiPath, body?: unknown) =>
+const post = (path: ApiPath, body?: unknown, token?: ManageToken) =>
 	fetch(path, {
 		method: "POST",
-		headers: { "content-type": "application/json" },
+		headers: {
+			"content-type": "application/json",
+			...(token ? { authorization: `Bearer ${token}` } : {}),
+		},
 		body: body === undefined ? null : JSON.stringify(body),
 	});
+
+const tokenInput = () => find<HTMLInputElement>("[data-token-input]");
 
 const showSiteSteps = (project: Pending) => {
 	const site = project.site;
@@ -101,6 +106,8 @@ const showVerify = (project: Pending, token?: ManageToken) => {
 	showSiteSteps(project);
 	show("[data-token-box]", token !== undefined);
 	if (token) setText("[data-token]", token);
+	const input = tokenInput();
+	if (token && input) input.value = token;
 	show('[data-step="verify"]', true);
 };
 
@@ -147,9 +154,18 @@ const verifyText = (result: { status: string; siteVerified: boolean }) => {
 const verify = async () => {
 	const project = recall();
 	if (!project) return;
+	const token = tokenInput()?.value.trim() ?? "";
+	if (!token)
+		return say(
+			"[data-verify-status]",
+			"Paste your manage token first.",
+			"error",
+		);
 	say("[data-verify-status]", "Checking…");
 	const res = await post(
 		`/api/badges/${encodeURIComponent(project.id)}/verify`,
+		undefined,
+		token,
 	);
 	if (!res.ok) return say("[data-verify-status]", await errorOf(res), "error");
 	const result = (await res.json()) as {

@@ -39,10 +39,11 @@ const block = (
 	x: number,
 	grey: boolean,
 ) => {
-	const score = String(summary.score);
+	const score = escapeXml(String(summary.score));
+	const grade = escapeXml(summary.grade);
 	const cx = x + score.length * 21 + 18;
 	const colour = grey ? GREY : gradeColour(summary.grade);
-	return `<text x="${x}" y="104" font-size="36" font-weight="700" fill="${grey ? GREY : INK}">${score}</text><circle cx="${cx}" cy="92" r="13" fill="${colour}"/><text x="${cx}" y="97" font-size="14" font-weight="700" fill="#fff" text-anchor="middle">${summary.grade}</text><text x="${x}" y="126" font-size="12" fill="${MUTED}">${name}</text>`;
+	return `<text x="${x}" y="104" font-size="36" font-weight="700" fill="${grey ? GREY : INK}">${score}</text><circle cx="${cx}" cy="92" r="13" fill="${colour}"/><text x="${cx}" y="97" font-size="14" font-weight="700" fill="#fff" text-anchor="middle">${grade}</text><text x="${x}" y="126" font-size="12" fill="${MUTED}">${escapeXml(name)}</text>`;
 };
 
 const SEVERITY_COLOURS = {
@@ -57,9 +58,18 @@ const severities = (summary: TargetSummary) =>
 		.map(([name, colour], i) => {
 			const count = summary.severities[name as keyof typeof SEVERITY_COLOURS];
 			const y = 78 + i * 18;
-			return `<circle cx="306" cy="${y - 4}" r="4" fill="${colour}"/><text x="316" y="${y}" font-size="12" fill="${MUTED}">${count} ${name}</text>`;
+			return `<circle cx="306" cy="${y - 4}" r="4" fill="${colour}"/><text x="316" y="${y}" font-size="12" fill="${MUTED}">${escapeXml(`${count} ${name}`)}</text>`;
 		})
 		.join("");
+
+/** What the report says the project's config hid; never more than that. */
+export const hiddenText = (summary: TargetSummary): Text =>
+	summary.suppressed === 0
+		? "Nothing hidden by config"
+		: `Hidden by the project's config: ${summary.suppressed} ${summary.suppressed === 1 ? "finding" : "findings"}`;
+
+const hidden = (summary: TargetSummary) =>
+	`<text x="20" y="154" font-size="12" fill="${MUTED}">${escapeXml(hiddenText(summary))}</text>`;
 
 const scores = (view: BadgeView) => {
 	const grey = view.state === "stale";
@@ -70,7 +80,7 @@ const scores = (view: BadgeView) => {
 		site ? block("Website", site, codebase ? 150 : 20, grey) : "",
 	].join("");
 	const top = headline(view);
-	return blocks + (top ? severities(top) : "");
+	return blocks + (top ? severities(top) + hidden(top) : "");
 };
 
 const body = (view: BadgeView) =>
@@ -90,5 +100,5 @@ export const cardSvg = (view: BadgeView): Text => {
 	const repo = view.project?.repo ?? "";
 	const label = ariaLabel(view, repo);
 	const top = corner(view);
-	return `<svg xmlns="http://www.w3.org/2000/svg" width="440" height="150" viewBox="0 0 440 150" role="img" aria-label="${label}"><title>${label}</title><rect x=".5" y=".5" width="439" height="149" rx="10" fill="#fff" stroke="#d0d7de"/><g font-family="${FONT}"><text x="20" y="30" font-size="12" font-weight="600" fill="${MUTED}">openaudit verified</text><text x="420" y="30" font-size="12" fill="${top.colour}" text-anchor="end">${escapeXml(top.text)}</text><text x="20" y="56" font-size="16" font-weight="700" fill="${INK}">${escapeXml(truncate(repo, 44))}</text>${body(view)}</g></svg>`;
+	return `<svg xmlns="http://www.w3.org/2000/svg" width="440" height="170" viewBox="0 0 440 170" role="img" aria-label="${label}"><title>${label}</title><rect x=".5" y=".5" width="439" height="169" rx="10" fill="#fff" stroke="#d0d7de"/><g font-family="${FONT}"><text x="20" y="30" font-size="12" font-weight="600" fill="${MUTED}">openaudit verified</text><text x="420" y="30" font-size="12" fill="${top.colour}" text-anchor="end">${escapeXml(top.text)}</text><text x="20" y="56" font-size="16" font-weight="700" fill="${INK}">${escapeXml(truncate(repo, 44))}</text>${body(view)}</g></svg>`;
 };

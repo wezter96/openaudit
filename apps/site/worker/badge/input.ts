@@ -28,15 +28,18 @@ const PRIVATE_SUFFIXES = [
 	".home.arpa",
 ];
 
-const IPV4 = /^\d{1,3}(?:\.\d{1,3}){3}$/;
+/**
+ * A DNS name of two or more labels whose last label starts with a letter.
+ * The URL parser has already turned every IPv4 form (decimal, octal, hex,
+ * short) into dotted decimal, which this rejects, as it does bracketed IPv6.
+ */
+const DNS_NAME =
+	/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
 /** A public DNS name: no IP literal, no single label, no private suffix. */
-const isPublicHost = (host: string) => {
-	if (host.startsWith("[") || IPV4.test(host)) return false;
-	if (host.endsWith(".")) return false;
-	if (host === "localhost" || !host.includes(".")) return false;
-	return !PRIVATE_SUFFIXES.some((suffix) => host.endsWith(suffix));
-};
+const isPublicHost = (host: string) =>
+	DNS_NAME.test(host) &&
+	!PRIVATE_SUFFIXES.some((suffix) => host.endsWith(suffix));
 
 const toUrl = (input: Input) => {
 	try {

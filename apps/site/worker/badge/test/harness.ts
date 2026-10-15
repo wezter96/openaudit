@@ -81,6 +81,8 @@ export const activeProject = async (h: Harness, repo = "acme/widgets") => {
 		verification: { code: string };
 	};
 	Object.assign(h.routes, repoFile(repo, reg.verification.code));
-	await h.call("POST", `/api/badges/${reg.id}/verify`);
+	await h.call("POST", `/api/badges/${reg.id}/verify`, {
+		token: reg.manageToken,
+	});
 	return reg;
 };

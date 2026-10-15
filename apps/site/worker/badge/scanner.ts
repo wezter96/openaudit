@@ -117,7 +117,8 @@ export const report = (req: BadgeRequest, id: ScanId, body: JobReport) =>
 		const scan = yield* runningScan(req, id);
 		const ok = body.status === "ok";
 		const summaries = ok ? yield* storeReports(req, scan, body) : NO_REPORTS;
-		const error = ok ? null : (body.error ?? "scan failed");
+		// An ok scan may carry a note, such as why the site wasn't scanned.
+		const error = body.error ?? (ok ? null : "scan failed");
 		yield* promise(() =>
 			finishScan(req.env.BADGES, {
 				scan,

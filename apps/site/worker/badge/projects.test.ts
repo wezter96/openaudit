@@ -55,6 +55,16 @@ describe("input", () => {
 			"https://db.internal/",
 			"https://nas.lan/",
 			"https://intranet/",
+			"https://2130706433/",
+			"https://0x7f000001/",
+			"https://017700000001/",
+			"https://0x7f.1/",
+			"https://127.1/",
+			"https://[::ffff:127.0.0.1]/",
+			"https://example.123/",
+			"https://x.localhost/",
+			"https://router.home.arpa/",
+			"https://evil.com./",
 			"javascript:alert(1)",
 			"not a url",
 		])
@@ -73,7 +83,7 @@ describe("registration", () => {
 		expect(body.id).toBe("acme-widgets");
 		expect(body.site).toBe("https://acme.dev/");
 		expect(body.verification).toEqual({
-			code: expect.stringMatching(/^openaudit-verify-[0-9a-f]{24}$/),
+			code: expect.stringMatching(/^openaudit-verify-[0-9a-f]{32}$/),
 			repoFile: ".openaudit-badge",
 			siteFile: "/.well-known/openaudit-badge.txt",
 			dnsName: "_openaudit-badge.acme.dev",
@@ -152,27 +162,47 @@ describe("registration", () => {
 		expect(((await res.json()) as { _tag: string })._tag).toBe("Full");
 	});
 
+	test("sends no CORS headers, so other sites can't call it from a browser", async () => {
+		const res = await register({ repo: "acme/widgets" });
+		expect(res.headers.get("access-control-allow-origin")).toBeNull();
+		expect(res.headers.get("access-control-allow-credentials")).toBeNull();
+		const preflight = await h.call("OPTIONS", "/api/badges");
+		expect(preflight.headers.get("access-control-allow-origin")).toBeNull();
+	});
+
+	test("refuses long URLs", async () => {
+		const res = await h.call("GET", `/api/badges/${"a".repeat(600)}`);
+		expect(res.status).toBe(414);
+	});
+
 	test("refuses oversized bodies", async () => {
 		const res = await register({
 			repo: "acme/widgets",
-			site: "x".repeat(20_000),
+			site: "x".repeat(5_000),
 		});
 		expect(res.status).toBe(413);
 	});
 });
 
+interface Signed {
+	id: string;
+	manageToken: string;
+	verification: { code: string };
+}
+
+const signUp = async (body: unknown) =>
+	(await (await register(body)).json()) as Signed;
+
+const verifyAs = (reg: Signed, token = reg.manageToken) =>
+	h.call("POST", `/api/badges/${reg.id}/verify`, { token });
+
 describe("verification", () => {
 	test("activates once the repo file has the code, and makes it due", async () => {
-		const res = await register({
+		const reg = await signUp({
 			repo: "acme/widgets",
 			site: "https://acme.dev",
 		});
-		const reg = (await res.json()) as {
-			id: string;
-			verification: { code: string };
-		};
-		const verify = () => h.call("POST", `/api/badges/${reg.id}/verify`);
-		expect(await (await verify()).json()).toEqual({
+		expect(await (await verifyAs(reg)).json()).toEqual({
 			status: "pending",
 			repoVerified: false,
 			siteVerified: false,
@@ -184,52 +214,108 @@ describe("verification", () => {
 		h.routes["https://acme.dev/.well-known/openaudit-badge.txt"] = () =>
 			new Response(reg.verification.code);
 		at(T0 + 11);
-		expect(await (await verify()).json()).toEqual({
+		expect(await (await verifyAs(reg)).json()).toEqual({
 			status: "active",
 			repoVerified: true,
 			siteVerified: true,
 		});
 		const state = (await (
 			await h.call("GET", `/api/badges/${reg.id}`)
-		).json()) as {
-			nextScanAt: number;
-			status: string;
-		};
+		).json()) as { nextScanAt: number; status: string };
 		expect(state).toMatchObject({ status: "active", nextScanAt: T0 + 11 });
 	});
 
-	test("accepts the site code from DNS", async () => {
-		const res = await register({
+	test("only the manage token can ask for a check", async () => {
+		const reg = await signUp({ repo: "acme/widgets" });
+		Object.assign(h.routes, repoFile("acme/widgets", reg.verification.code));
+		const anonymous = await h.call("POST", `/api/badges/${reg.id}/verify`);
+		expect(anonymous.status).toBe(401);
+		expect((await verifyAs(reg, "oam_guess")).status).toBe(401);
+		expect(h.net.calls.some((u) => u.includes("raw.githubusercontent"))).toBe(
+			false,
+		);
+		expect((await verifyAs(reg)).status).toBe(200);
+	});
+
+	test("accepts the site code from DNS, with the name encoded", async () => {
+		const reg = await signUp({
 			repo: "acme/widgets",
 			site: "https://acme.dev",
 		});
-		const reg = (await res.json()) as {
-			id: string;
-			verification: { code: string };
-		};
 		h.routes[
 			"https://cloudflare-dns.com/dns-query?name=_openaudit-badge.acme.dev&type=TXT"
 		] = () =>
 			Response.json({ Answer: [{ data: `"${reg.verification.code}"` }] });
-		const body = await (
-			await h.call("POST", `/api/badges/${reg.id}/verify`)
-		).json();
+		const body = await (await verifyAs(reg)).json();
 		expect(body).toMatchObject({ siteVerified: true, repoVerified: false });
 	});
 
+	test("a redirect or an oversized file fails the site check", async () => {
+		const reg = await signUp({
+			repo: "acme/widgets",
+			site: "https://acme.dev",
+		});
+		const file = "https://acme.dev/.well-known/openaudit-badge.txt";
+		h.routes[file] = () =>
+			new Response(null, {
+				status: 302,
+				headers: { location: "http://169.254.169.254/" },
+			});
+		expect(await (await verifyAs(reg)).json()).toMatchObject({
+			siteVerified: false,
+		});
+		h.routes[file] = () =>
+			new Response(`${"x".repeat(5000)}${reg.verification.code}`);
+		at(T0 + 11);
+		expect(await (await verifyAs(reg)).json()).toMatchObject({
+			siteVerified: false,
+		});
+	});
+
 	test("checks at most every 10 seconds", async () => {
-		const reg = (await (await register({ repo: "acme/widgets" })).json()) as {
-			id: string;
-		};
-		await h.call("POST", `/api/badges/${reg.id}/verify`);
+		const reg = await signUp({ repo: "acme/widgets" });
+		await verifyAs(reg);
 		const before = h.net.calls.length;
-		await h.call("POST", `/api/badges/${reg.id}/verify`);
+		await verifyAs(reg);
 		expect(h.net.calls.length).toBe(before);
 	});
 
 	test("unknown ids are 404", async () => {
-		expect((await h.call("POST", "/api/badges/nope/verify")).status).toBe(404);
+		const verify = h.call("POST", "/api/badges/nope/verify", {
+			token: "oam_x",
+		});
+		expect((await verify).status).toBe(404);
 		expect((await h.call("GET", "/api/badges/nope")).status).toBe(404);
+	});
+});
+
+describe("ownership", () => {
+	test("codes have 128 bits and tokens 256", async () => {
+		const reg = await signUp({ repo: "acme/widgets" });
+		expect(reg.verification.code).toMatch(/^openaudit-verify-[0-9a-f]{32}$/);
+		expect(reg.manageToken).toMatch(/^oam_[A-Za-z0-9_-]{43}$/);
+	});
+
+	test("a pending or active repo can't be taken over", async () => {
+		await signUp({ repo: "acme/widgets" });
+		expect(
+			(await register({ repo: "acme/widgets" }, "198.51.100.9")).status,
+		).toBe(409);
+		const other = makeHarness(github("acme/widgets"));
+		h = other;
+		await activeProject(h);
+		expect((await register({ repo: "Acme/Widgets" })).status).toBe(409);
+	});
+
+	test("a stale unverified sign-up can be replaced", async () => {
+		const old = await signUp({ repo: "acme/widgets" });
+		at(T0 + 7 * 86_400 + 1);
+		const fresh = await signUp({ repo: "acme/widgets" });
+		expect(fresh.id).toBe("acme-widgets");
+		expect(fresh.verification.code).not.toBe(old.verification.code);
+		expect(
+			(await verifyAs({ ...fresh, manageToken: old.manageToken })).status,
+		).toBe(401);
 	});
 });
 
@@ -269,7 +355,15 @@ describe("manage token", () => {
 			string,
 			unknown
 		>;
-		expect(row).toMatchObject({ status: "removed", code: "", manage_hash: "" });
+		expect(row).toMatchObject({
+			status: "removed",
+			code: "",
+			manage_hash: "",
+			site: null,
+			ip_day: null,
+		});
+		const count = h.d1.sqlite.query("SELECT count(*) AS n FROM scans").get();
+		expect(count).toEqual({ n: 0 });
 		expect((await register({ repo: "acme/widgets" })).status).toBe(201);
 	});
 });

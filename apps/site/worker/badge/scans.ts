@@ -74,14 +74,26 @@ export const finishedScans = async (db: D1, project: ProjectId) => {
 export const findScan = (db: D1, scan: ScanId) =>
 	db.prepare("SELECT * FROM scans WHERE id = ?").bind(scan).first<ScanRow>();
 
-/** Running scans past their lease fail, so their projects can be claimed. */
+/** How long a project waits after its scan's lease ran out. */
+export const RETRY_AFTER: Seconds = 60 * 60;
+
+/**
+ * Running scans past their lease fail ("scan timed out"), and their
+ * projects become due again an hour later rather than at once.
+ */
 export const expireLeases = (db: D1, now: Seconds) =>
-	db
-		.prepare(
-			"UPDATE scans SET status = 'failed', error = 'scan timed out', finished_at = ? WHERE status = 'running' AND lease_until < ?",
-		)
-		.bind(now, now)
-		.run();
+	db.batch([
+		db
+			.prepare(
+				"UPDATE projects SET next_scan_at = ? WHERE id IN (SELECT project_id FROM scans WHERE status = 'running' AND lease_until < ?)",
+			)
+			.bind(now + RETRY_AFTER, now),
+		db
+			.prepare(
+				"UPDATE scans SET status = 'failed', error = 'scan timed out', finished_at = ? WHERE status = 'running' AND lease_until < ?",
+			)
+			.bind(now, now),
+	]);
 
 /** The active project that has waited longest, with no scan running. */
 export const dueProject = (db: D1, now: Seconds) =>
@@ -161,29 +173,30 @@ const deleteRows = async (
 	);
 };
 
-const scanIds = async (db: D1, sql: string, project: ProjectId) => {
-	const { results } = await db.prepare(sql).bind(project).all<{ id: ScanId }>();
+const allScanIds = async (db: D1, project: ProjectId) => {
+	const { results } = await db
+		.prepare("SELECT id FROM scans WHERE project_id = ?")
+		.bind(project)
+		.all<{ id: ScanId }>();
 	return results.map((r) => r.id);
 };
 
 /** Keeps the newest finished scans and deletes the rest with their reports. */
-export const pruneScans = async (db: D1, reports: R2, project: ProjectId) =>
-	deleteRows(
+export const pruneScans = async (db: D1, reports: R2, project: ProjectId) => {
+	const { results } = await db
+		.prepare(
+			"SELECT id FROM scans WHERE project_id = ? AND status != 'running' ORDER BY started_at DESC LIMIT -1 OFFSET ?",
+		)
+		.bind(project, KEEP)
+		.all<{ id: ScanId }>();
+	await deleteRows(
 		db,
 		reports,
 		project,
-		await scanIds(
-			db,
-			`SELECT id FROM scans WHERE project_id = ? AND status != 'running' ORDER BY started_at DESC LIMIT -1 OFFSET ${KEEP}`,
-			project,
-		),
+		results.map((r) => r.id),
 	);
+};
 
 /** Deletes every scan of the project and its reports. */
 export const deleteAllScans = async (db: D1, reports: R2, project: ProjectId) =>
-	deleteRows(
-		db,
-		reports,
-		project,
-		await scanIds(db, "SELECT id FROM scans WHERE project_id = ?", project),
-	);
+	deleteRows(db, reports, project, await allScanIds(db, project));

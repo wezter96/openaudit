@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS scans (
 );
 
 CREATE INDEX IF NOT EXISTS scans_project ON scans (project_id, started_at);
+CREATE INDEX IF NOT EXISTS scans_lease ON scans (status, lease_until);
 
 CREATE TABLE IF NOT EXISTS registrations (
 	ip_day_hash TEXT NOT NULL,

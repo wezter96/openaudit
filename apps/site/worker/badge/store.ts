@@ -153,7 +153,7 @@ export const queueRescan = (db: D1, id: ProjectId, now: Seconds) =>
 export const markRemoved = (db: D1, id: ProjectId) =>
 	db
 		.prepare(
-			"UPDATE projects SET status = 'removed', site = NULL, code = '', manage_hash = '', repo_verified = 0, site_verified = 0, next_scan_at = NULL WHERE id = ?",
+			"UPDATE projects SET status = 'removed', site = NULL, code = '', manage_hash = '', repo_verified = 0, site_verified = 0, next_scan_at = NULL, last_rescan_at = NULL, checked_at = NULL, ip_day = NULL WHERE id = ?",
 		)
 		.bind(id)
 		.run();

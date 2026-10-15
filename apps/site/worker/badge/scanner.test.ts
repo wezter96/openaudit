@@ -97,6 +97,44 @@ describe("claim and upload", () => {
 		expect((await upload(first?.id ?? "", okReport())).status).toBe(404);
 	});
 
+	test("a timed-out project waits an hour before it's claimable again", async () => {
+		const reg = await activeProject(h);
+		await claim();
+		const expiry = T0 + 30 * 60 + 1;
+		at(expiry);
+		expect(await claim()).toEqual({ job: null });
+		const row = h.d1.sqlite
+			.query("SELECT next_scan_at FROM projects WHERE id = ?")
+			.get(reg.id) as { next_scan_at: number };
+		expect(row.next_scan_at).toBe(expiry + 3600);
+		at(expiry + 3600);
+		expect((await claim()).job?.projectId).toBe(reg.id);
+	});
+
+	test("an ok scan with a site note keeps the codebase score and shows the note", async () => {
+		const reg = await activeProject(h);
+		await scanOnce({
+			...okReport(),
+			error: "site: <script>timed out</script>",
+		});
+		const state = (await (
+			await h.call("GET", `/api/badges/${reg.id}`)
+		).json()) as ProjectState;
+		expect(state.latest).toMatchObject({
+			status: "ok",
+			site: null,
+			error: "site: <script>timed out</script>",
+			codebase: { score: 96 },
+		});
+		const svg = await (await h.call("GET", `/badge/${reg.id}.svg`)).text();
+		expect(svg).toContain(">96 A<");
+		const html = await (await h.call("GET", `/v/${reg.id}`)).text();
+		expect(html).toContain(
+			"From this scan: site: &lt;script&gt;timed out&lt;/script&gt;",
+		);
+		expect(html).not.toContain("<script>timed");
+	});
+
 	test("an upload stores the reports and schedules the next scan", async () => {
 		const reg = await activeProject(h);
 		const job = await scanOnce();
@@ -166,6 +204,24 @@ describe("claim and upload", () => {
 		);
 	});
 
+	test("removing a badge deletes its scans and reports, and a new sign-up starts empty", async () => {
+		const reg = await activeProject(h);
+		await scanOnce();
+		expect(h.r2.objects.size).toBe(2);
+		const del = await h.call("DELETE", `/api/badges/${reg.id}`, {
+			token: reg.manageToken,
+		});
+		expect(del.status).toBe(204);
+		expect(h.r2.objects.size).toBe(0);
+		expect((await h.call("GET", `/v/${reg.id}/report`)).status).toBe(404);
+		const again = await activeProject(h);
+		expect(again.id).toBe(reg.id);
+		const state = (await (
+			await h.call("GET", `/api/badges/${reg.id}`)
+		).json()) as ProjectState;
+		expect(state.latest).toBeUndefined();
+	});
+
 	test("refuses oversized uploads", async () => {
 		await activeProject(h);
 		const { job } = await claim();
@@ -189,13 +245,23 @@ describe("public pages", () => {
 		expect(res.headers.get("content-type")).toBe(
 			"image/svg+xml; charset=utf-8",
 		);
-		expect(res.headers.get("cache-control")).toBe("public, max-age=3600");
+		expect(res.headers.get("cache-control")).toBe("public, max-age=900");
 		expect(res.headers.get("access-control-allow-origin")).toBe("*");
 		expect(await res.text()).toContain(">15 Oct 2026<");
 		const card = await h.call("GET", `/badge/${reg.id}/card.svg`);
 		expect(await card.text()).toContain(">acme/widgets<");
 		const head = await h.call("HEAD", `/badge/${reg.id}.svg`);
 		expect(await head.text()).toBe("");
+	});
+
+	test("long URLs, other methods and unknown ids stay cheap", async () => {
+		const long = await h.call("GET", `/v/acme-widgets?${"a".repeat(600)}`);
+		expect(long.status).toBe(414);
+		expect((await h.call("POST", "/v/acme-widgets")).status).toBe(405);
+		h.net.calls.length = 0;
+		await h.call("GET", "/v/nobody-here/report");
+		expect(h.r2.objects.size).toBe(0);
+		expect(h.net.calls).toEqual([]);
 	});
 
 	test("an unknown badge is a grey 404", async () => {

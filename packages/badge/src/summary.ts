@@ -44,6 +44,16 @@ const ReportInput = Schema.Struct({
 				rules: Count,
 				paths: Count,
 				fingerprints: Count,
+				entries: Schema.optional(
+					Schema.Array(
+						Schema.Struct({
+							kind: Schema.String,
+							value: Schema.String,
+							reason: Schema.optional(Schema.String),
+							count: Count,
+						}),
+					),
+				),
 			}),
 		),
 	),
@@ -53,19 +63,32 @@ type Suppression = NonNullable<ReportInput["suppressed"]>[number];
 
 const decode = Schema.decodeUnknownOption(Schema.fromJsonString(ReportInput));
 
-/** Sources the engine adds itself, not the project's own choices. */
-const isEngineSource = (source: string) =>
-	source === ".gitignore" || source.startsWith("--diff");
-
 /** A config file path, as opposed to a `--baseline` or `--diff` flag. */
-const isConfigSource = (source: string) =>
-	!source.startsWith("--") && source !== ".gitignore";
+const isConfigSource = (s: Suppression) =>
+	!s.source.startsWith("--") && s.source !== ".gitignore";
 
 const removed = (s: Suppression) => s.rules + s.paths + s.fingerprints;
 
+/** Entries listed on the verification page, at most. */
+const MAX_ENTRIES = 50;
+/** Characters kept of an entry's value or reason. */
+const MAX_TEXT = 300;
+
+const cut = (text: string) => text.slice(0, MAX_TEXT);
+
+const entriesOf = (config: ReadonlyArray<Suppression>) =>
+	config
+		.flatMap((s) => s.entries ?? [])
+		.slice(0, MAX_ENTRIES)
+		.map((e) => ({
+			kind: cut(e.kind),
+			value: cut(e.value),
+			reason: e.reason === undefined ? null : cut(e.reason),
+			count: e.count,
+		}));
+
 const toSummary = (report: ReportInput): TargetSummary => {
-	const suppressions = report.suppressed ?? [];
-	const counted = suppressions.filter((s) => !isEngineSource(s.source));
+	const config = (report.suppressed ?? []).filter(isConfigSource);
 	return {
 		score: Math.round(report.summary.score),
 		grade: report.summary.grade,
@@ -76,8 +99,8 @@ const toSummary = (report: ReportInput): TargetSummary => {
 			grade,
 		})),
 		auditors: report.summary.auditors,
-		suppressed: counted.reduce((sum, s) => sum + removed(s), 0),
-		configApplied: suppressions.some((s) => isConfigSource(s.source)),
+		suppressed: config.reduce((sum, s) => sum + removed(s), 0),
+		hiddenBy: entriesOf(config),
 		openauditVersion: report.tool.version,
 	};
 };

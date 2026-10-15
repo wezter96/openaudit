@@ -24,6 +24,7 @@ code,pre,.score,.cats b,td{font-family:var(--mono)}
 .target{margin-top:1.5rem;padding:1rem;background:var(--paper-2);border:1px solid var(--hair);border-radius:.5rem}
 .target h3{margin-top:0}
 .cats{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(12rem,1fr));gap:.2rem 1rem}
+.hidden{margin:.3rem 0 0;padding-left:1.1rem;overflow-wrap:anywhere}
 .cats li{display:flex;justify-content:space-between;border-bottom:1px solid var(--hair)}
 .g-A{color:var(--g-A)}.g-B{color:var(--g-B)}.g-C{color:var(--g-C)}.g-D{color:var(--g-D)}.g-F{color:var(--g-F)}
 table{width:100%;border-collapse:collapse;font-size:.9rem;display:block;overflow-x:auto}

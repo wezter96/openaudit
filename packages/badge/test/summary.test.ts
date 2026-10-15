@@ -33,12 +33,12 @@ describe("summarize", () => {
 			categories: [{ category: "security", score: 91, grade: "A" }],
 			auditors: { passed: 10, failed: 2, skipped: 5, error: 1 },
 			suppressed: 0,
-			configApplied: false,
+			hiddenBy: [],
 			openauditVersion: "0.3.0",
 		});
 	});
 
-	test("counts config and baseline suppressions, not engine ones", () => {
+	test("counts only what the project's config hid", () => {
 		const summary = summarize(
 			report({
 				suppressed: [
@@ -47,6 +47,10 @@ describe("summarize", () => {
 						rules: 1,
 						paths: 2,
 						fingerprints: 3,
+						entries: [
+							{ kind: "path", value: "test/**", reason: "Fixtures", count: 2 },
+							{ kind: "rule", value: "x".repeat(400), count: 1 },
+						],
 					},
 					{
 						source: "--baseline old.json",
@@ -59,11 +63,14 @@ describe("summarize", () => {
 				],
 			}),
 		);
-		expect(summary?.suppressed).toBe(10);
-		expect(summary?.configApplied).toBe(true);
+		expect(summary?.suppressed).toBe(6);
+		expect(summary?.hiddenBy).toEqual([
+			{ kind: "path", value: "test/**", reason: "Fixtures", count: 2 },
+			{ kind: "rule", value: "x".repeat(300), reason: null, count: 1 },
+		]);
 	});
 
-	test("a baseline alone is not a project config", () => {
+	test("a baseline is not the project's config", () => {
 		const summary = summarize(
 			report({
 				suppressed: [
@@ -76,14 +83,14 @@ describe("summarize", () => {
 				],
 			}),
 		);
-		expect(summary?.configApplied).toBe(false);
+		expect(summary?.suppressed).toBe(0);
 	});
 
 	test("summarises the site's own self-audit report", async () => {
 		const summary = summarize(await Bun.file(selfAudit).text());
 		expect(summary?.grade).toMatch(/^[A-F]$/);
-		expect(summary?.configApplied).toBe(true);
 		expect(summary?.suppressed).toBeGreaterThan(0);
+		expect(summary?.hiddenBy.length).toBeGreaterThan(0);
 	});
 
 	test("rejects anything that isn't an openaudit report", () => {

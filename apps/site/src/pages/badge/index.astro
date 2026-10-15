@@ -56,8 +56,12 @@ const description =
 					<p>An unverified site isn't scanned. The repo still is.</p>
 				</div>
 				<div data-token-box hidden>
-					<p><strong>Save your manage token now.</strong> We show it once and only keep a hash. You need it to rescan or remove the badge.</p>
+					<p><strong>Save your manage token now.</strong> We show it once and only keep a hash. You need it to check, rescan or remove the badge.</p>
 					<pre><code data-token></code></pre>
+				</div>
+				<div class="field">
+					<label for="b-token">Manage token</label>
+					<input id="b-token" type="password" autocomplete="off" spellcheck="false" placeholder="oam_..." data-token-input />
 				</div>
 				<button class="btn primary" type="button" data-verify>Check now</button>
 				<p class="status" role="status" aria-live="polite" data-verify-status></p>

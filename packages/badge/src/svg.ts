@@ -13,9 +13,37 @@ const ENTITIES: Record<string, string> = {
 	"'": "&#39;",
 };
 
-/** Escapes text for an XML or HTML element or quoted attribute. */
+/**
+ * C0 and C1 controls (but tab and newline), bidi embeddings, overrides and
+ * isolates, and other invisible format characters, as code point ranges.
+ * They're not valid XML, or they let text reorder what's around it.
+ */
+const UNSAFE: ReadonlyArray<readonly [number, number]> = [
+	[0x00, 0x08],
+	[0x0b, 0x0c],
+	[0x0e, 0x1f],
+	[0x7f, 0x9f],
+	[0x200b, 0x200f],
+	[0x2028, 0x202e],
+	[0x2060, 0x206f],
+	[0xfeff, 0xfeff],
+	[0xfff9, 0xfffb],
+];
+
+const isUnsafe = (c: string) => {
+	const code = c.codePointAt(0) ?? 0;
+	return UNSAFE.some(([low, high]) => code >= low && code <= high);
+};
+
+const neutralise = (text: Text) =>
+	[...text].map((c) => (isUnsafe(c) ? "\ufffd" : c)).join("");
+
+/**
+ * Escapes text for an XML or HTML element or a quoted attribute, and
+ * replaces unsafe invisible characters with U+FFFD.
+ */
 export const escapeXml = (text: Text): Text =>
-	text.replace(/[&<>"']/g, (c) => ENTITIES[c] ?? c);
+	neutralise(String(text)).replace(/[&<>"']/g, (c) => ENTITIES[c] ?? c);
 
 const NARROW = /[ .,:;|!'ilIjft1()[\]]/;
 const WIDE = /[mwMW@%]/;
@@ -64,7 +92,7 @@ const GRADE_COLOURS: Record<Grade, string> = {
 	F: "#e05d44",
 };
 
-export const gradeColour = (grade: Grade) => GRADE_COLOURS[grade];
+export const gradeColour = (grade: Grade) => GRADE_COLOURS[grade] ?? GREY;
 
 /** Cuts text to `max` characters, with an ellipsis when cut. */
 export const truncate = (text: Text, max: number): Text =>

@@ -74,10 +74,21 @@ export const TargetSummary = Schema.Struct({
 		skipped: Count,
 		error: Count,
 	}),
-	/** Findings hidden by suppressions (project config or baseline). */
+	/**
+	 * Findings hidden by the project's own openaudit config. A config that
+	 * only tunes settings leaves no trace in the report, so this says nothing
+	 * about whether a config exists.
+	 */
 	suppressed: Count,
-	/** Whether the repository's own openaudit config was applied. */
-	configApplied: Schema.Boolean,
+	/** The config entries that hid findings and gave a reason or expiry. */
+	hiddenBy: Schema.Array(
+		Schema.Struct({
+			kind: Schema.String,
+			value: Schema.String,
+			reason: Schema.NullOr(Schema.String),
+			count: Count,
+		}),
+	),
 	openauditVersion: Schema.String,
 });
 export type TargetSummary = typeof TargetSummary.Type;
@@ -271,7 +282,7 @@ export class ProjectsApi extends HttpApiGroup.make("projects")
 			params: idParams,
 			success: VerifyResult,
 			error: NotFound,
-		}),
+		}).middleware(ManageAuth),
 		HttpApiEndpoint.get("get", "/:id", {
 			params: idParams,
 			success: ProjectState,
