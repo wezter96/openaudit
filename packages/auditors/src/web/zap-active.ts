@@ -19,22 +19,25 @@ interface ZapActiveSettings {
 }
 
 /** Lower-cased host names the user allow-listed; anything but strings is dropped. */
+const hostList = (hosts: unknown): ReadonlyArray<string> =>
+	(Array.isArray(hosts) ? hosts : [])
+		.filter((h): h is string => typeof h === "string")
+		.map((h) => h.trim().toLowerCase())
+		.filter(Boolean);
+
+const isWholeNumber = (n: unknown): n is number =>
+	typeof n === "number" && Number.isInteger(n);
+
+const inMinuteRange = (n: number) => n >= 1 && n <= MAX_MINUTES;
+
+const minutesOrDefault = (mins: unknown): number =>
+	isWholeNumber(mins) && inMinuteRange(mins) ? mins : DEFAULT_MINUTES;
+
 export const readZapActiveSettings = (ctx: AuditContext): ZapActiveSettings => {
 	const s = ctx.options.settings?.[ID];
-	const hosts = Array.isArray(s?.allowHosts) ? s.allowHosts : [];
-	const mins = s?.maxMinutes;
 	return {
-		allowHosts: hosts
-			.filter((h): h is string => typeof h === "string")
-			.map((h) => h.trim().toLowerCase())
-			.filter(Boolean),
-		maxMinutes:
-			typeof mins === "number" &&
-			Number.isInteger(mins) &&
-			mins >= 1 &&
-			mins <= MAX_MINUTES
-				? mins
-				: DEFAULT_MINUTES,
+		allowHosts: hostList(s?.allowHosts),
+		maxMinutes: minutesOrDefault(s?.maxMinutes),
 	};
 };
 

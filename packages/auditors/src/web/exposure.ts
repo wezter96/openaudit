@@ -6,9 +6,16 @@ import {
 	redact,
 	type Severity,
 } from "@openaudit/core";
-import { Effect } from "effect";
+import { Effect, type Option } from "effect";
 
-import { crawl, fetchCached, type Page, resourcesOf, sameOrigin } from "./page";
+import {
+	type Crawl,
+	crawl,
+	fetchCached,
+	type Page,
+	resourcesOf,
+	sameOrigin,
+} from "./page";
 import { truncate } from "./util";
 
 const OWASP_CONFIG =
@@ -198,12 +205,273 @@ const verboseError = (body: string): [string, string] | undefined => {
 const DIR_LISTING =
 	/<title>\s*Index of \/|<h1>\s*Index of \/|<title>Directory listing for \//i;
 
+/** The crawl and origin every exposure check works from. */
+interface Scan {
+	readonly ctx: AuditContext;
+	readonly crawl: Crawl;
+	readonly origin: string;
+}
+
+type Probed = Option.Option<HttpResponse>;
+
+interface ProbeResult {
+	readonly probe: Probe;
+	readonly res: Probed;
+}
+
+interface Body {
+	readonly url: string;
+	readonly body: string;
+}
+
 const probePath = (ctx: AuditContext, origin: string, path: string) =>
 	fetchCached(ctx, `${origin}${path}`, {
 		redirect: "manual",
 		timeoutMs: 8_000,
 		maxBytes: 128 * 1024,
 	}).pipe(Effect.option);
+
+/** The response when the probe answered 200. */
+const okResponse = (res: Probed): HttpResponse | undefined =>
+	res._tag === "Some" && res.value.status === 200 ? res.value : undefined;
+
+const pageBodies = (crawl: Crawl): Array<Body> =>
+	crawl.pages.map((p: Page) => ({ url: p.url, body: p.response.body }));
+
+const runProbes = ({ ctx, origin }: Scan) =>
+	Effect.forEach(
+		PROBES,
+		(probe) =>
+			Effect.map(probePath(ctx, origin, probe.path), (res) => ({
+				probe,
+				res,
+			})),
+		{ concurrency: 3 },
+	);
+
+const probeFinding = (
+	origin: string,
+	{ probe, res }: ProbeResult,
+): FindingInput[] => {
+	const ok = okResponse(res);
+	if (!ok) return [];
+	const evidence = probe.match(ok);
+	if (evidence === undefined) return [];
+	return [
+		{
+			ruleId: `web.exposure/${probe.rule}`,
+			title: probe.title,
+			severity: probe.severity,
+			category: "security",
+			message: probe.message,
+			location: { url: `${origin}${probe.path}` },
+			evidence,
+			remediation: probe.remediation,
+			references: [...probe.references],
+			tags: probe.tags ? [...probe.tags] : undefined,
+			confidence: "high",
+		},
+	];
+};
+
+const hasSecurityContact = (res: Probed): boolean => {
+	const ok = okResponse(res);
+	return ok !== undefined && /^\s*contact\s*:/im.test(ok.body);
+};
+
+const securityTxtFindings = ({ ctx, origin }: Scan) =>
+	Effect.map(
+		probePath(ctx, origin, "/.well-known/security.txt"),
+		(secTxt): FindingInput[] =>
+			hasSecurityContact(secTxt)
+				? []
+				: [
+						{
+							ruleId: "web.exposure/security-txt-missing",
+							title: "No security.txt",
+							severity: "info",
+							category: "security",
+							message:
+								"There is no /.well-known/security.txt telling researchers how to report vulnerabilities.",
+							location: { url: `${origin}/.well-known/security.txt` },
+							remediation:
+								"Publish /.well-known/security.txt with at least Contact: and Expires: fields.",
+							references: [
+								"https://securitytxt.org/",
+								"https://www.rfc-editor.org/rfc/rfc9116",
+							],
+						},
+					],
+	);
+
+const sameOriginScripts = (crawl: Crawl): string[] =>
+	[
+		...new Set(
+			crawl.pages
+				.flatMap(resourcesOf)
+				.filter(
+					(r) => r.kind === "script" && sameOrigin(r.url, crawl.start.url),
+				)
+				.map((r) => r.url.replace(/[?#].*$/, "")),
+		),
+	].slice(0, MAX_SOURCEMAP_CHECKS);
+
+const looksLikeSourceMap = (body: string): boolean =>
+	/"mappings"\s*:/.test(body) && /"sources"\s*:/.test(body);
+
+const sourceMapFinding = (src: string, res: HttpResponse): FindingInput[] => {
+	if (res.status !== 200 || !looksLikeSourceMap(res.body)) return [];
+	const hasContent = /"sourcesContent"\s*:/.test(res.body);
+	return [
+		{
+			ruleId: "web.exposure/source-map-exposed",
+			title: "JavaScript source map is public",
+			severity: hasContent ? "medium" : "low",
+			category: "security",
+			message: `${src}.map is publicly served${hasContent ? " with embedded original sources" : ""}, revealing un-minified source code, internal paths and comments that help attackers find bugs.`,
+			location: { url: `${src}.map` },
+			evidence: truncate(
+				res.body.match(/"sources"\s*:\s*\[[^\]]{0,120}/)?.[0] ?? "",
+				140,
+			),
+			remediation:
+				"Do not deploy .map files publicly; upload them to your error tracker instead, or restrict access.",
+			references: [
+				"https://developer.mozilla.org/en-US/docs/Glossary/Source_map",
+			],
+			tags: ["cwe-540"],
+		},
+	];
+};
+
+const sourceMapFindings = ({ ctx, crawl }: Scan) =>
+	Effect.map(
+		Effect.forEach(
+			sameOriginScripts(crawl),
+			(src) =>
+				fetchCached(ctx, `${src}.map`, {
+					redirect: "manual",
+					timeoutMs: 8_000,
+					maxBytes: 256 * 1024,
+				}).pipe(
+					Effect.map((res) => ({ src, res })),
+					Effect.option,
+				),
+			{ concurrency: 3 },
+		),
+		(maps) =>
+			maps.flatMap((m) =>
+				m._tag === "None" ? [] : sourceMapFinding(m.value.src, m.value.res),
+			),
+	);
+
+const listingDirs = (crawl: Crawl): string[] =>
+	[
+		...new Set(
+			crawl.pages
+				.flatMap(resourcesOf)
+				.filter((r) => sameOrigin(r.url, crawl.start.url) && r.kind !== "form")
+				.map((r) => new URL(r.url).pathname.replace(/[^/]*$/, ""))
+				.filter((d) => d !== "/"),
+		),
+	].slice(0, MAX_DIR_CHECKS);
+
+const listingFinding = ({ url, body }: Body): FindingInput[] =>
+	DIR_LISTING.test(body)
+		? [
+				{
+					ruleId: "web.exposure/directory-listing",
+					title: "Directory listing is enabled",
+					severity: "medium",
+					category: "security",
+					message: `${url} shows an auto-generated directory index, exposing every file in the folder, including ones never linked.`,
+					location: { url },
+					evidence: truncate(body.match(DIR_LISTING)?.[0] ?? "", 80),
+					remediation:
+						"Disable auto-indexing (`autoindex off` in nginx, `Options -Indexes` in Apache).",
+					references: [OWASP_CONFIG],
+					tags: ["cwe-548", "owasp-a05"],
+				},
+			]
+		: [];
+
+const directoryListingFindings = ({ ctx, crawl, origin }: Scan) =>
+	Effect.map(
+		Effect.forEach(
+			listingDirs(crawl),
+			(dir) => Effect.map(probePath(ctx, origin, dir), (res) => ({ dir, res })),
+			{ concurrency: 3 },
+		),
+		(listed) =>
+			[
+				...pageBodies(crawl),
+				...listed.flatMap(({ dir, res }) => {
+					const ok = okResponse(res);
+					return ok ? [{ url: `${origin}${dir}`, body: ok.body }] : [];
+				}),
+			].flatMap(listingFinding),
+	);
+
+const errorProbeBodies = (
+	origin: string,
+	probes: ReadonlyArray<ProbeResult>,
+): Array<Body> =>
+	probes.flatMap(({ probe, res }) =>
+		res._tag === "Some" && res.value.status >= 400
+			? [{ url: `${origin}${probe.path}`, body: res.value.body }]
+			: [],
+	);
+
+const verboseErrorFinding = (
+	{ url }: Body,
+	hit: [string, string],
+	location: string,
+): FindingInput => ({
+	ruleId: "web.exposure/verbose-error",
+	title: `Verbose error page (${hit[0]})`,
+	severity: "medium",
+	category: "security",
+	message: `${url} shows a ${hit[0]}, leaking file paths, framework versions or queries. Debug output in production usually also means debug mode is on.`,
+	location: { url: location },
+	evidence: hit[1],
+	remediation:
+		"Disable debug mode in production and serve generic error pages; log details server-side.",
+	references: ["https://owasp.org/www-community/Improper_Error_Handling"],
+	tags: ["cwe-209", "owasp-a05"],
+	confidence: "medium",
+});
+
+const verboseErrorFindings = (
+	scan: Scan,
+	probes: ReadonlyArray<ProbeResult>,
+) => {
+	const { ctx, crawl, origin } = scan;
+	const notFoundUrl = `${origin}/openaudit-${Date.now().toString(36)}-not-found`;
+	return Effect.map(
+		probePath(ctx, origin, new URL(notFoundUrl).pathname),
+		(notFound) => {
+			const errorBodies: Array<Body> = [
+				...pageBodies(crawl),
+				...(notFound._tag === "Some"
+					? [{ url: notFoundUrl, body: notFound.value.body }]
+					: []),
+				...errorProbeBodies(origin, probes),
+			];
+			const reported = new Set<string>();
+			const findings: FindingInput[] = [];
+			for (const page of errorBodies) {
+				const hit = verboseError(page.body);
+				if (!hit || reported.has(hit[0])) continue;
+				reported.add(hit[0]);
+				const location = page.url.startsWith(notFoundUrl)
+					? `${origin}/<random-404>`
+					: page.url;
+				findings.push(verboseErrorFinding(page, hit, location));
+			}
+			return findings;
+		},
+	);
+};
 
 /** Light probes for files and pages that should never be public. */
 export const exposure = defineAuditor({
@@ -217,197 +485,13 @@ export const exposure = defineAuditor({
 	run: (ctx) =>
 		Effect.gen(function* () {
 			const c = yield* crawl(ctx);
-			const origin = new URL(c.start.url).origin;
-			const findings: FindingInput[] = [];
-
-			const probes = yield* Effect.forEach(
-				PROBES,
-				(probe) =>
-					Effect.map(probePath(ctx, origin, probe.path), (res) => ({
-						probe,
-						res,
-					})),
-				{ concurrency: 3 },
-			);
-			for (const { probe, res } of probes) {
-				if (res._tag === "None" || res.value.status !== 200) continue;
-				const evidence = probe.match(res.value);
-				if (evidence === undefined) continue;
-				findings.push({
-					ruleId: `web.exposure/${probe.rule}`,
-					title: probe.title,
-					severity: probe.severity,
-					category: "security",
-					message: probe.message,
-					location: { url: `${origin}${probe.path}` },
-					evidence,
-					remediation: probe.remediation,
-					references: [...probe.references],
-					tags: probe.tags ? [...probe.tags] : undefined,
-					confidence: "high",
-				});
-			}
-
-			/* ------------------------------ security.txt ----------------------------- */
-			const secTxt = yield* probePath(ctx, origin, "/.well-known/security.txt");
-			if (
-				secTxt._tag === "None" ||
-				secTxt.value.status !== 200 ||
-				!/^\s*contact\s*:/im.test(secTxt.value.body)
-			)
-				findings.push({
-					ruleId: "web.exposure/security-txt-missing",
-					title: "No security.txt",
-					severity: "info",
-					category: "security",
-					message:
-						"There is no /.well-known/security.txt telling researchers how to report vulnerabilities.",
-					location: { url: `${origin}/.well-known/security.txt` },
-					remediation:
-						"Publish /.well-known/security.txt with at least Contact: and Expires: fields.",
-					references: [
-						"https://securitytxt.org/",
-						"https://www.rfc-editor.org/rfc/rfc9116",
-					],
-				});
-
-			/* ------------------------------ source maps ------------------------------ */
-			const scripts = [
-				...new Set(
-					c.pages
-						.flatMap(resourcesOf)
-						.filter(
-							(r) => r.kind === "script" && sameOrigin(r.url, c.start.url),
-						)
-						.map((r) => r.url.replace(/[?#].*$/, "")),
-				),
-			].slice(0, MAX_SOURCEMAP_CHECKS);
-			const maps = yield* Effect.forEach(
-				scripts,
-				(src) =>
-					fetchCached(ctx, `${src}.map`, {
-						redirect: "manual",
-						timeoutMs: 8_000,
-						maxBytes: 256 * 1024,
-					}).pipe(
-						Effect.map((res) => ({ src, res })),
-						Effect.option,
-					),
-				{ concurrency: 3 },
-			);
-			for (const m of maps) {
-				if (m._tag === "None") continue;
-				const { src, res } = m.value;
-				if (
-					res.status !== 200 ||
-					!/"mappings"\s*:/.test(res.body) ||
-					!/"sources"\s*:/.test(res.body)
-				)
-					continue;
-				const hasContent = /"sourcesContent"\s*:/.test(res.body);
-				findings.push({
-					ruleId: "web.exposure/source-map-exposed",
-					title: "JavaScript source map is public",
-					severity: hasContent ? "medium" : "low",
-					category: "security",
-					message: `${src}.map is publicly served${hasContent ? " with embedded original sources" : ""}, revealing un-minified source code, internal paths and comments that help attackers find bugs.`,
-					location: { url: `${src}.map` },
-					evidence: truncate(
-						res.body.match(/"sources"\s*:\s*\[[^\]]{0,120}/)?.[0] ?? "",
-						140,
-					),
-					remediation:
-						"Do not deploy .map files publicly; upload them to your error tracker instead, or restrict access.",
-					references: [
-						"https://developer.mozilla.org/en-US/docs/Glossary/Source_map",
-					],
-					tags: ["cwe-540"],
-				});
-			}
-
-			/* --------------------------- directory listing --------------------------- */
-			const dirs = [
-				...new Set(
-					c.pages
-						.flatMap(resourcesOf)
-						.filter((r) => sameOrigin(r.url, c.start.url) && r.kind !== "form")
-						.map((r) => new URL(r.url).pathname.replace(/[^/]*$/, ""))
-						.filter((d) => d !== "/"),
-				),
-			].slice(0, MAX_DIR_CHECKS);
-			const listed = yield* Effect.forEach(
-				dirs,
-				(dir) =>
-					Effect.map(probePath(ctx, origin, dir), (res) => ({ dir, res })),
-				{ concurrency: 3 },
-			);
-			const listingPages: Array<{ url: string; body: string }> = [
-				...c.pages.map((p) => ({ url: p.url, body: p.response.body })),
-				...listed.flatMap(({ dir, res }) =>
-					res._tag === "Some" && res.value.status === 200
-						? [{ url: `${origin}${dir}`, body: res.value.body }]
-						: [],
-				),
-			];
-			for (const { url, body } of listingPages)
-				if (DIR_LISTING.test(body))
-					findings.push({
-						ruleId: "web.exposure/directory-listing",
-						title: "Directory listing is enabled",
-						severity: "medium",
-						category: "security",
-						message: `${url} shows an auto-generated directory index, exposing every file in the folder, including ones never linked.`,
-						location: { url },
-						evidence: truncate(body.match(DIR_LISTING)?.[0] ?? "", 80),
-						remediation:
-							"Disable auto-indexing (`autoindex off` in nginx, `Options -Indexes` in Apache).",
-						references: [OWASP_CONFIG],
-						tags: ["cwe-548", "owasp-a05"],
-					});
-
-			/* ----------------------------- verbose errors ---------------------------- */
-			const notFoundUrl = `${origin}/openaudit-${Date.now().toString(36)}-not-found`;
-			const notFound = yield* probePath(
-				ctx,
-				origin,
-				new URL(notFoundUrl).pathname,
-			);
-			const errorBodies: Array<{ url: string; body: string }> = [
-				...c.pages.map((p: Page) => ({ url: p.url, body: p.response.body })),
-				...(notFound._tag === "Some"
-					? [{ url: notFoundUrl, body: notFound.value.body }]
-					: []),
-				...probes.flatMap(({ probe, res }) =>
-					res._tag === "Some" && res.value.status >= 400
-						? [{ url: `${origin}${probe.path}`, body: res.value.body }]
-						: [],
-				),
-			];
-			const reported = new Set<string>();
-			for (const { url, body } of errorBodies) {
-				const hit = verboseError(body);
-				if (!hit || reported.has(hit[0])) continue;
-				reported.add(hit[0]);
-				findings.push({
-					ruleId: "web.exposure/verbose-error",
-					title: `Verbose error page (${hit[0]})`,
-					severity: "medium",
-					category: "security",
-					message: `${url} shows a ${hit[0]}, leaking file paths, framework versions or queries. Debug output in production usually also means debug mode is on.`,
-					location: {
-						url: url.startsWith(notFoundUrl) ? `${origin}/<random-404>` : url,
-					},
-					evidence: hit[1],
-					remediation:
-						"Disable debug mode in production and serve generic error pages; log details server-side.",
-					references: [
-						"https://owasp.org/www-community/Improper_Error_Handling",
-					],
-					tags: ["cwe-209", "owasp-a05"],
-					confidence: "medium",
-				});
-			}
-
-			return findings;
+			const scan: Scan = { ctx, crawl: c, origin: new URL(c.start.url).origin };
+			const probes = yield* runProbes(scan);
+			const probed = probes.flatMap((p) => probeFinding(scan.origin, p));
+			const securityTxt = yield* securityTxtFindings(scan);
+			const sourceMaps = yield* sourceMapFindings(scan);
+			const listings = yield* directoryListingFindings(scan);
+			const errors = yield* verboseErrorFindings(scan, probes);
+			return [...probed, ...securityTxt, ...sourceMaps, ...listings, ...errors];
 		}),
 });

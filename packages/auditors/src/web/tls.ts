@@ -1,15 +1,25 @@
 import * as tls from "node:tls";
 import {
 	type AuditContext,
+	type AuditorError,
 	defineAuditor,
 	type FindingInput,
 	requireUrl,
 	type Severity,
+	type SkipAudit,
 } from "@openaudit/core";
-import { Effect } from "effect";
+import { Effect, type Result } from "effect";
 
 import { snippetOf } from "./dom";
-import { crawl, fetchCached, isLoopback, type Page, resourcesOf } from "./page";
+import {
+	type Crawl,
+	crawl,
+	fetchCached,
+	isLoopback,
+	type Page,
+	type Resource,
+	resourcesOf,
+} from "./page";
 
 const MDN_MIXED =
 	"https://developer.mozilla.org/en-US/docs/Web/Security/Mixed_content";
@@ -36,6 +46,53 @@ const nameOf = (o: unknown): string | undefined => {
 		: cn === undefined
 			? undefined
 			: String(cn);
+};
+
+const hostnameErrorOf = (
+	host: string,
+	cert: tls.PeerCertificate,
+): string | undefined => {
+	try {
+		return tls.checkServerIdentity(host, cert)?.message;
+	} catch (e) {
+		return e instanceof Error ? e.message : String(e);
+	}
+};
+
+/** OpenSSL's verification error code, e.g. `CERT_HAS_EXPIRED`. */
+const authErrorCode = (authError: unknown): string | undefined => {
+	if (authError === null || authError === undefined) return undefined;
+	if (typeof authError === "string") return authError;
+	return (authError as Error & { code?: string }).code ?? String(authError);
+};
+
+const dateOf = (value: string | undefined) =>
+	value ? new Date(value) : undefined;
+
+/** Issuer and subject are the same name. */
+const selfIssued = (cert: tls.PeerCertificate | undefined) =>
+	cert?.issuer !== undefined &&
+	cert?.subject !== undefined &&
+	JSON.stringify(cert.issuer) === JSON.stringify(cert.subject);
+
+/** What the server presented on a completed handshake. */
+const tlsInfoOf = (socket: tls.TLSSocket, host: string): TlsInfo => {
+	const cert = socket.getPeerCertificate();
+	const hostnameError = hostnameErrorOf(host, cert);
+	const errorCode = authErrorCode(socket.authorizationError);
+	return {
+		protocol: socket.getProtocol(),
+		authorized: socket.authorized,
+		authorizationError: errorCode,
+		hostnameError,
+		subject: nameOf(cert?.subject),
+		issuer: nameOf(cert?.issuer),
+		validFrom: dateOf(cert?.valid_from),
+		validTo: dateOf(cert?.valid_to),
+		selfSigned:
+			/SELF_SIGNED/.test(errorCode ?? "") ||
+			(selfIssued(cert) && !socket.authorized),
+	};
 };
 
 /** Connects with TLS (without rejecting bad certificates) and reports what was presented. */
@@ -73,40 +130,7 @@ export const inspectTls = (
 		}, options.timeoutMs ?? 10_000);
 		socket.once("secureConnect", () => {
 			clearTimeout(timer);
-			const cert = socket.getPeerCertificate();
-			let hostnameError: string | undefined;
-			try {
-				const err = tls.checkServerIdentity(host, cert);
-				hostnameError = err?.message;
-			} catch (e) {
-				hostnameError = e instanceof Error ? e.message : String(e);
-			}
-			const authError = socket.authorizationError;
-			const errorCode =
-				authError === null || authError === undefined
-					? undefined
-					: typeof authError === "string"
-						? authError
-						: ((authError as Error & { code?: string }).code ??
-							String(authError));
-			const subject = nameOf(cert?.subject);
-			const issuer = nameOf(cert?.issuer);
-			const info: TlsInfo = {
-				protocol: socket.getProtocol(),
-				authorized: socket.authorized,
-				authorizationError: errorCode,
-				hostnameError,
-				subject,
-				issuer,
-				validFrom: cert?.valid_from ? new Date(cert.valid_from) : undefined,
-				validTo: cert?.valid_to ? new Date(cert.valid_to) : undefined,
-				selfSigned:
-					/SELF_SIGNED/.test(errorCode ?? "") ||
-					(cert?.issuer !== undefined &&
-						cert?.subject !== undefined &&
-						JSON.stringify(cert.issuer) === JSON.stringify(cert.subject) &&
-						!socket.authorized),
-			};
+			const info = tlsInfoOf(socket, host);
 			socket.end();
 			resume(Effect.succeed(info));
 		});
@@ -121,153 +145,198 @@ export const inspectTls = (
 		});
 	});
 
+/** TLS 1.1 and older, as Node's `getProtocol()` names them. */
+const LEGACY_PROTOCOL = /^(SSLv|TLSv1(\.[01])?$)/;
+
+/** One certificate or protocol problem, before the shared finding fields. */
+interface CertProblem {
+	readonly rule: string;
+	readonly severity: Severity;
+	readonly title: string;
+	readonly message: string;
+	readonly remediation: string;
+	readonly cwe?: string;
+}
+
+const day = (date: Date) => date.toISOString().slice(0, 10);
+
+const isExpired = (info: TlsInfo, now: number) =>
+	info.validTo !== undefined && info.validTo.getTime() < now;
+
+const expiryProblem = (info: TlsInfo, now: number): CertProblem | undefined => {
+	if (isExpired(info, now))
+		return {
+			rule: "certificate-expired",
+			severity: "critical",
+			title: "TLS certificate has expired",
+			message: `The certificate expired on ${info.validTo?.toISOString().slice(0, 10)}; browsers show a full-page warning and clients refuse to connect.`,
+			remediation:
+				"Renew the certificate and automate renewal (e.g. ACME/Let's Encrypt).",
+		};
+	if (!info.validTo) return undefined;
+	const days = Math.floor((info.validTo.getTime() - now) / DAY);
+	if (days < 30)
+		return {
+			rule: "certificate-expiring",
+			severity: days < 7 ? "high" : "medium",
+			title: "TLS certificate expires soon",
+			message: `The certificate expires in ${days} day(s), on ${day(info.validTo)}.`,
+			remediation:
+				"Renew the certificate now and automate renewal with monitoring.",
+		};
+	return undefined;
+};
+
+const notYetValidProblem = (
+	info: TlsInfo,
+	now: number,
+): CertProblem | undefined => {
+	if (info.validFrom && info.validFrom.getTime() > now)
+		return {
+			rule: "certificate-not-yet-valid",
+			severity: "high",
+			title: "TLS certificate is not yet valid",
+			message: `The certificate is only valid from ${info.validFrom.toISOString()}.`,
+			remediation: "Check the server clock and certificate validity period.",
+		};
+	return undefined;
+};
+
+const hostnameMismatch = (info: TlsInfo) =>
+	info.hostnameError ||
+	info.authorizationError === "ERR_TLS_CERT_ALTNAME_INVALID";
+
+const untrustedProblem = (info: TlsInfo): CertProblem | undefined => {
+	const code = info.authorizationError;
+	if (info.authorized || !code) return undefined;
+	const incomplete = code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE";
+	return {
+		rule: incomplete ? "certificate-chain-incomplete" : "certificate-untrusted",
+		severity: incomplete ? "medium" : "high",
+		title: incomplete
+			? "TLS certificate chain is incomplete"
+			: "TLS certificate is not trusted",
+		message: `Certificate verification failed: ${code}.`,
+		remediation:
+			"Serve the full chain (leaf + intermediates) from a publicly trusted CA.",
+	};
+};
+
+const trustProblem = (info: TlsInfo, now: number): CertProblem | undefined => {
+	if (info.selfSigned)
+		return {
+			rule: "certificate-self-signed",
+			severity: "high",
+			title: "TLS certificate is self-signed",
+			message:
+				"The certificate is not issued by a trusted CA, so browsers warn and users learn to click through warnings (enabling MITM).",
+			remediation:
+				"Use a certificate from a publicly trusted CA (e.g. Let's Encrypt).",
+		};
+	if (hostnameMismatch(info))
+		return {
+			rule: "certificate-hostname-mismatch",
+			severity: "high",
+			title: "TLS certificate does not match the hostname",
+			message: `The certificate is not valid for this host: ${info.hostnameError ?? info.authorizationError}.`,
+			remediation:
+				"Issue a certificate whose subjectAltName covers this hostname.",
+		};
+	return isExpired(info, now) ? undefined : untrustedProblem(info);
+};
+
+const protocolProblem = (info: TlsInfo): CertProblem | undefined => {
+	if (info.protocol && LEGACY_PROTOCOL.test(info.protocol))
+		return {
+			rule: "weak-protocol",
+			severity: "high",
+			title: `Server negotiated ${info.protocol}`,
+			message: `The connection used ${info.protocol}, which is deprecated (RFC 8996) and vulnerable to known attacks.`,
+			remediation:
+				"Disable SSLv3, TLS 1.0 and TLS 1.1; support TLS 1.2 and 1.3 only.",
+			cwe: "cwe-327",
+		};
+	return undefined;
+};
+
 /** Findings for a TLS handshake result. Exported for tests. */
 export const certificateFindings = (
 	url: string,
 	info: TlsInfo,
 	now = Date.now(),
 ): FindingInput[] => {
-	const findings: FindingInput[] = [];
 	const location = { url };
 	const evidence = `subject=${info.subject ?? "?"}; issuer=${info.issuer ?? "?"}; valid_to=${info.validTo?.toISOString() ?? "?"}; protocol=${info.protocol ?? "?"}`;
 	const refs = [
 		"https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html",
 	];
-	const add = (
-		rule: string,
-		severity: Severity,
-		title: string,
-		message: string,
-		remediation: string,
-		cwe = "cwe-295",
-	) =>
-		findings.push({
-			ruleId: `web.tls/${rule}`,
-			title,
-			severity,
+	const problems = [
+		expiryProblem(info, now),
+		notYetValidProblem(info, now),
+		trustProblem(info, now),
+		protocolProblem(info),
+	].filter((p) => p !== undefined);
+	return problems.map(
+		(p): FindingInput => ({
+			ruleId: `web.tls/${p.rule}`,
+			title: p.title,
+			severity: p.severity,
 			category: "security",
-			message,
+			message: p.message,
 			location,
 			evidence,
-			remediation,
+			remediation: p.remediation,
 			references: refs,
-			tags: [cwe, "owasp-a02"],
-		});
+			tags: [p.cwe ?? "cwe-295", "owasp-a02"],
+		}),
+	);
+};
 
-	const expired = info.validTo !== undefined && info.validTo.getTime() < now;
-	if (expired)
-		add(
-			"certificate-expired",
-			"critical",
-			"TLS certificate has expired",
-			`The certificate expired on ${info.validTo?.toISOString().slice(0, 10)}; browsers show a full-page warning and clients refuse to connect.`,
-			"Renew the certificate and automate renewal (e.g. ACME/Let's Encrypt).",
-		);
-	else if (info.validTo) {
-		const days = Math.floor((info.validTo.getTime() - now) / DAY);
-		if (days < 30)
-			add(
-				"certificate-expiring",
-				days < 7 ? "high" : "medium",
-				"TLS certificate expires soon",
-				`The certificate expires in ${days} day(s), on ${info.validTo.toISOString().slice(0, 10)}.`,
-				"Renew the certificate now and automate renewal with monitoring.",
-			);
-	}
-	if (info.validFrom && info.validFrom.getTime() > now)
-		add(
-			"certificate-not-yet-valid",
-			"high",
-			"TLS certificate is not yet valid",
-			`The certificate is only valid from ${info.validFrom.toISOString()}.`,
-			"Check the server clock and certificate validity period.",
-		);
+/** Resource kinds whose mixed content browsers block. */
+const ACTIVE_KINDS = ["script", "stylesheet", "iframe", "object", "font"];
 
-	if (info.selfSigned)
-		add(
-			"certificate-self-signed",
-			"high",
-			"TLS certificate is self-signed",
-			"The certificate is not issued by a trusted CA, so browsers warn and users learn to click through warnings (enabling MITM).",
-			"Use a certificate from a publicly trusted CA (e.g. Let's Encrypt).",
-		);
-	else if (
-		info.hostnameError ||
-		info.authorizationError === "ERR_TLS_CERT_ALTNAME_INVALID"
-	)
-		add(
-			"certificate-hostname-mismatch",
-			"high",
-			"TLS certificate does not match the hostname",
-			`The certificate is not valid for this host: ${info.hostnameError ?? info.authorizationError}.`,
-			"Issue a certificate whose subjectAltName covers this hostname.",
-		);
-	else if (!info.authorized && info.authorizationError && !expired)
-		add(
-			info.authorizationError === "UNABLE_TO_VERIFY_LEAF_SIGNATURE"
-				? "certificate-chain-incomplete"
-				: "certificate-untrusted",
-			info.authorizationError === "UNABLE_TO_VERIFY_LEAF_SIGNATURE"
-				? "medium"
-				: "high",
-			info.authorizationError === "UNABLE_TO_VERIFY_LEAF_SIGNATURE"
-				? "TLS certificate chain is incomplete"
-				: "TLS certificate is not trusted",
-			`Certificate verification failed: ${info.authorizationError}.`,
-			"Serve the full chain (leaf + intermediates) from a publicly trusted CA.",
-		);
-
-	if (info.protocol && /^(SSLv|TLSv1(\.[01])?$)/.test(info.protocol))
-		add(
-			"weak-protocol",
-			"high",
-			`Server negotiated ${info.protocol}`,
-			`The connection used ${info.protocol}, which is deprecated (RFC 8996) and vulnerable to known attacks.`,
-			"Disable SSLv3, TLS 1.0 and TLS 1.1; support TLS 1.2 and 1.3 only.",
-			"cwe-327",
-		);
-	return findings;
+const mixedContentText = (
+	res: Resource,
+): Pick<FindingInput, "ruleId" | "title" | "severity" | "message"> => {
+	if (res.kind === "form")
+		return {
+			ruleId: "web.tls/insecure-form-action",
+			title: "Form submits over plain HTTP",
+			severity: "high",
+			message: `A form on this HTTPS page posts to ${res.url}, sending its data unencrypted.`,
+		};
+	const active = ACTIVE_KINDS.includes(res.kind);
+	return {
+		ruleId: `web.tls/mixed-content-${active ? "active" : "passive"}`,
+		title: `Mixed content: ${res.kind} loaded over HTTP`,
+		severity: active ? "high" : "low",
+		message: active
+			? `This HTTPS page loads a ${res.kind} from ${res.url}. Browsers block active mixed content, breaking the page; where allowed, a network attacker can inject code.`
+			: `This HTTPS page loads ${res.url} over HTTP. Browsers auto-upgrade or warn, and an attacker can swap the content.`,
+	};
 };
 
 /** http:// subresources on an https page. Exported for tests. */
 export const mixedContentFindings = (page: Page): FindingInput[] => {
 	if (!page.url.startsWith("https:")) return [];
-	const findings: FindingInput[] = [];
-	for (const res of resourcesOf(page)) {
-		if (!res.url.startsWith("http:")) continue;
-		const active = [
-			"script",
-			"stylesheet",
-			"iframe",
-			"object",
-			"font",
-		].includes(res.kind);
-		const form = res.kind === "form";
-		findings.push({
-			ruleId: form
-				? "web.tls/insecure-form-action"
-				: `web.tls/mixed-content-${active ? "active" : "passive"}`,
-			title: form
-				? "Form submits over plain HTTP"
-				: active
-					? `Mixed content: ${res.kind} loaded over HTTP`
-					: `Mixed content: ${res.kind} loaded over HTTP`,
-			severity: active || form ? "high" : "low",
-			category: "security",
-			message: form
-				? `A form on this HTTPS page posts to ${res.url}, sending its data unencrypted.`
-				: active
-					? `This HTTPS page loads a ${res.kind} from ${res.url}. Browsers block active mixed content, breaking the page; where allowed, a network attacker can inject code.`
-					: `This HTTPS page loads ${res.url} over HTTP. Browsers auto-upgrade or warn, and an attacker can swap the content.`,
-			location: { url: page.url },
-			evidence: snippetOf(res.el),
-			remediation:
-				"Reference the resource over https:// (or a protocol-relative/relative URL served over HTTPS).",
-			references: [MDN_MIXED],
-			tags: ["cwe-319"],
+	return resourcesOf(page)
+		.filter((res) => res.url.startsWith("http:"))
+		.map((res): FindingInput => {
+			const { ruleId, title, severity, message } = mixedContentText(res);
+			return {
+				ruleId,
+				title,
+				severity,
+				category: "security",
+				message,
+				location: { url: page.url },
+				evidence: snippetOf(res.el),
+				remediation:
+					"Reference the resource over https:// (or a protocol-relative/relative URL served over HTTPS).",
+				references: [MDN_MIXED],
+				tags: ["cwe-319"],
+			};
 		});
-	}
-	return findings;
 };
 
 const checkRedirect = (ctx: AuditContext, url: URL) =>
@@ -317,6 +386,134 @@ const connectHostOf = (ctx: AuditContext): string | undefined => {
 	return typeof value === "string" && value.length > 0 ? value : undefined;
 };
 
+const noHttpsFinding = (location: string): FindingInput => ({
+	ruleId: "web.tls/no-https",
+	title: "Site is served over plain HTTP",
+	severity: "high",
+	category: "security",
+	message:
+		"The target is served without TLS, so everything (including cookies and form data) travels in clear text and can be modified in transit.",
+	location: { url: location },
+	remediation:
+		"Serve the site over HTTPS with a trusted certificate and redirect HTTP to HTTPS.",
+	references: ["https://web.dev/articles/why-https-matters"],
+	tags: ["cwe-319", "owasp-a02"],
+});
+
+type Crawled = Result.Result<Crawl, AuditorError | SkipAudit>;
+
+const plainHttpFindings = (crawled: Crawled, url: URL) =>
+	Effect.gen(function* () {
+		if (crawled._tag === "Failure") return yield* crawled.failure;
+		if (isLoopback(url.toString())) return [];
+		return [noHttpsFinding(crawled.success.start.url)];
+	});
+
+/**
+ * The TLS probe dials a raw socket outside ctx.http, so its host and port
+ * come only from the target URL, never from a redirect to another host.
+ * Its findings are located at that URL: TLS is per host and port, not
+ * per page, and wrappers such as web.sslyze locate theirs there too.
+ */
+const tlsUrlOf = (target: URL, url: URL) =>
+	target.protocol === "https:"
+		? target
+		: target.hostname === url.hostname
+			? url
+			: undefined;
+
+/** Where the TLS probe connects. */
+interface Probe {
+	readonly hostname: string;
+	readonly port: number;
+	readonly connectHost: string | undefined;
+}
+
+const handshake = ({ hostname, port, connectHost }: Probe) =>
+	inspectTls(hostname, port, { connectHost }).pipe(
+		// Clients default to TLS 1.2+, so a legacy-only server needs a retry.
+		Effect.catch(() =>
+			inspectTls(hostname, port, {
+				connectHost,
+				minVersion: "TLSv1",
+				timeoutMs: 5_000,
+			}),
+		),
+		Effect.option,
+	);
+
+// Does the server still accept TLS 1.0/1.1? Clients default to 1.2+, so ask explicitly.
+const legacyProtocolFindings = (
+	{ hostname, port, connectHost }: Probe,
+	location: string,
+) =>
+	Effect.gen(function* () {
+		const legacy = yield* inspectTls(hostname, port, {
+			connectHost,
+			minVersion: "TLSv1",
+			maxVersion: "TLSv1.1",
+			timeoutMs: 5_000,
+		}).pipe(Effect.option);
+		if (legacy._tag === "None") return [];
+		const { protocol } = legacy.value;
+		if (!protocol || !/^TLSv1(\.1)?$/.test(protocol)) return [];
+		return [
+			{
+				ruleId: "web.tls/legacy-protocol-supported",
+				title: `Server still accepts ${protocol}`,
+				severity: "medium",
+				category: "security",
+				message: `The server completed a ${protocol} handshake. TLS 1.0/1.1 are deprecated (RFC 8996) and enable downgrade attacks for old clients.`,
+				location: { url: location },
+				evidence: `protocol=${protocol}`,
+				remediation: "Disable TLS 1.0 and 1.1; allow only TLS 1.2 and 1.3.",
+				references: ["https://datatracker.ietf.org/doc/html/rfc8996"],
+				tags: ["cwe-327"],
+			} satisfies FindingInput,
+		];
+	});
+
+/** HTTP redirect, certificate and protocol findings for the TLS endpoint. */
+const endpointFindings = (ctx: AuditContext, tlsUrl: URL) =>
+	Effect.gen(function* () {
+		const location = tlsUrl.toString();
+		const findings: FindingInput[] = [...(yield* checkRedirect(ctx, tlsUrl))];
+		const probe: Probe = {
+			hostname: tlsUrl.hostname,
+			port: Number(tlsUrl.port || 443),
+			connectHost: connectHostOf(ctx),
+		};
+		const info = yield* handshake(probe);
+		if (info._tag === "None") {
+			yield* ctx.log(`web.tls: TLS handshake with ${tlsUrl.host} failed`);
+			return findings;
+		}
+		findings.push(...certificateFindings(location, info.value));
+		if (!LEGACY_PROTOCOL.test(info.value.protocol ?? ""))
+			findings.push(...(yield* legacyProtocolFindings(probe, location)));
+		return findings;
+	});
+
+/** Adds mixed content findings from the crawl, or explains why there are none. */
+const withMixedContent = (
+	ctx: AuditContext,
+	crawled: Crawled,
+	findings: FindingInput[],
+) =>
+	Effect.gen(function* () {
+		if (crawled._tag === "Failure") {
+			// Nothing to show for the run: surface why the page was unreachable.
+			if (findings.length === 0) return yield* crawled.failure;
+			yield* ctx.log(
+				`web.tls: mixed content not checked, the page fetch failed: ${crawled.failure.message}`,
+			);
+			return findings;
+		}
+		for (const page of crawled.success.pages)
+			findings.push(...mixedContentFindings(page));
+		return findings;
+	});
+
 /** HTTPS enforcement, certificate health, protocol versions and mixed content. */
 export const tlsAuditor = defineAuditor({
 	id: "web.tls",
@@ -333,104 +530,17 @@ export const tlsAuditor = defineAuditor({
 			// and those are the hosts the TLS checks matter most for, so they run
 			// on their own handshake whether or not the crawl succeeds.
 			const crawled = yield* Effect.result(crawl(ctx));
-			const site = crawled._tag === "Success" ? crawled.success : undefined;
-			const url = site ? new URL(site.start.url) : target;
-			const findings: FindingInput[] = [];
-			const loopback = isLoopback(url.toString());
-
-			if (url.protocol === "http:") {
-				if (crawled._tag === "Failure") return yield* crawled.failure;
-				if (!loopback)
-					findings.push({
-						ruleId: "web.tls/no-https",
-						title: "Site is served over plain HTTP",
-						severity: "high",
-						category: "security",
-						message:
-							"The target is served without TLS, so everything (including cookies and form data) travels in clear text and can be modified in transit.",
-						location: { url: site?.start.url ?? url.toString() },
-						remediation:
-							"Serve the site over HTTPS with a trusted certificate and redirect HTTP to HTTPS.",
-						references: ["https://web.dev/articles/why-https-matters"],
-						tags: ["cwe-319", "owasp-a02"],
-					});
-				return findings;
-			}
-
-			// The TLS probe dials a raw socket outside ctx.http, so its host and port
-			// come only from the target URL, never from a redirect to another host.
-			// Its findings are located at that URL: TLS is per host and port, not
-			// per page, and wrappers such as web.sslyze locate theirs there too.
-			const tlsUrl =
-				target.protocol === "https:"
-					? target
-					: target.hostname === url.hostname
-						? url
-						: undefined;
-			if (!loopback && tlsUrl) {
-				const location = tlsUrl.toString();
-				findings.push(...(yield* checkRedirect(ctx, tlsUrl)));
-				const port = Number(tlsUrl.port || 443);
-				const connectHost = connectHostOf(ctx);
-				const info = yield* inspectTls(tlsUrl.hostname, port, {
-					connectHost,
-				}).pipe(
-					// Clients default to TLS 1.2+, so a legacy-only server needs a retry.
-					Effect.catch(() =>
-						inspectTls(tlsUrl.hostname, port, {
-							connectHost,
-							minVersion: "TLSv1",
-							timeoutMs: 5_000,
-						}),
-					),
-					Effect.option,
-				);
-				if (info._tag === "Some")
-					findings.push(...certificateFindings(location, info.value));
-				else
-					yield* ctx.log(`web.tls: TLS handshake with ${tlsUrl.host} failed`);
-				// Does the server still accept TLS 1.0/1.1? Clients default to 1.2+, so ask explicitly.
-				if (
-					info._tag === "Some" &&
-					!/^(SSLv|TLSv1(\.[01])?$)/.test(info.value.protocol ?? "")
-				) {
-					const legacy = yield* inspectTls(tlsUrl.hostname, port, {
-						connectHost,
-						minVersion: "TLSv1",
-						maxVersion: "TLSv1.1",
-						timeoutMs: 5_000,
-					}).pipe(Effect.option);
-					if (
-						legacy._tag === "Some" &&
-						legacy.value.protocol &&
-						/^TLSv1(\.1)?$/.test(legacy.value.protocol)
-					)
-						findings.push({
-							ruleId: "web.tls/legacy-protocol-supported",
-							title: `Server still accepts ${legacy.value.protocol}`,
-							severity: "medium",
-							category: "security",
-							message: `The server completed a ${legacy.value.protocol} handshake. TLS 1.0/1.1 are deprecated (RFC 8996) and enable downgrade attacks for old clients.`,
-							location: { url: location },
-							evidence: `protocol=${legacy.value.protocol}`,
-							remediation:
-								"Disable TLS 1.0 and 1.1; allow only TLS 1.2 and 1.3.",
-							references: ["https://datatracker.ietf.org/doc/html/rfc8996"],
-							tags: ["cwe-327"],
-						});
-				}
-			}
-
-			if (crawled._tag === "Failure") {
-				// Nothing to show for the run: surface why the page was unreachable.
-				if (findings.length === 0) return yield* crawled.failure;
-				yield* ctx.log(
-					`web.tls: mixed content not checked, the page fetch failed: ${crawled.failure.message}`,
-				);
-				return findings;
-			}
-			for (const page of crawled.success.pages)
-				findings.push(...mixedContentFindings(page));
-			return findings;
+			const url =
+				crawled._tag === "Success"
+					? new URL(crawled.success.start.url)
+					: target;
+			if (url.protocol === "http:")
+				return yield* plainHttpFindings(crawled, url);
+			const tlsUrl = tlsUrlOf(target, url);
+			const findings =
+				isLoopback(url.toString()) || !tlsUrl
+					? []
+					: yield* endpointFindings(ctx, tlsUrl);
+			return yield* withMixedContent(ctx, crawled, findings);
 		}),
 });

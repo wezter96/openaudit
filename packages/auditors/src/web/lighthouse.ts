@@ -51,6 +51,11 @@ const CATEGORY: Record<string, Category> = {
 
 const SCORED = new Set(["binary", "numeric", "metricSavings"]);
 
+const accessibilitySeverity = (weight: number): Severity => {
+	if (weight >= 7) return "high";
+	return weight >= 3 ? "medium" : "low";
+};
+
 const severityOf = (
 	category: Category,
 	score: number,
@@ -58,8 +63,7 @@ const severityOf = (
 	group?: string,
 ): Severity => {
 	if (group === "metrics") return score < 0.5 ? "high" : "medium";
-	if (category === "accessibility")
-		return weight >= 7 ? "high" : weight >= 3 ? "medium" : "low";
+	if (category === "accessibility") return accessibilitySeverity(weight);
 	// Performance opportunities carry weight 0 in Lighthouse 10+; rank by score.
 	if (category === "performance") return score < 0.5 ? "medium" : "low";
 	return weight >= 3 ? "medium" : "low";
@@ -82,6 +86,99 @@ const nodeOf = (item: Record<string, unknown>) => {
 	return node && typeof node === "object" ? node : undefined;
 };
 
+type AuditRef = NonNullable<LhCategory["auditRefs"]>[number];
+type LhNode = NonNullable<ReturnType<typeof nodeOf>>;
+
+interface CategoryScope {
+	readonly key: string;
+	readonly category: Category;
+	readonly url: string | undefined;
+}
+
+interface Failing {
+	readonly audit: LhAudit;
+	readonly score: number;
+}
+
+/** The score of a scored audit below the 0.9 pass mark, if it failed. */
+const failingScore = (audit: LhAudit): number | undefined => {
+	if (!SCORED.has(audit.scoreDisplayMode ?? "")) return undefined;
+	// A scored audit without a score has nothing to report.
+	const score = audit.score ?? 1;
+	return score < 0.9 ? score : undefined;
+};
+
+/** The referenced audit when it failed and was not reported under another category. */
+const failingAudit = (
+	report: LighthouseReport,
+	ref: AuditRef,
+	seen: Set<string>,
+): Failing | undefined => {
+	const audit = report.audits?.[ref.id];
+	if (!audit || seen.has(audit.id)) return undefined;
+	const score = failingScore(audit);
+	if (score === undefined) return undefined;
+	seen.add(audit.id);
+	return { audit, score };
+};
+
+const evidenceOf = (
+	audit: LhAudit,
+	items: ReadonlyArray<Record<string, unknown>>,
+	nodes: LhNode[],
+): string => {
+	const firstUrl = items
+		.map((i) => i.url)
+		.find((u): u is string => typeof u === "string");
+	return [
+		audit.displayValue,
+		nodes[0]?.snippet,
+		!nodes[0] && firstUrl ? firstUrl : undefined,
+		items.length > 1 ? `${items.length} items` : undefined,
+	]
+		.filter(Boolean)
+		.join(" · ");
+};
+
+const toFinding = (
+	{ key, category, url }: CategoryScope,
+	ref: AuditRef,
+	{ audit, score }: Failing,
+): FindingInput => {
+	const { links, plain } = splitDescription(audit.description);
+	const items = audit.details?.items ?? [];
+	const nodes = items.map(nodeOf).filter((n): n is LhNode => !!n);
+	const evidence = evidenceOf(audit, items, nodes);
+	return {
+		ruleId: `web.lighthouse/${audit.id}`,
+		title: audit.title ?? audit.id,
+		severity: severityOf(category, score, ref.weight ?? 0, ref.group),
+		category,
+		message: `${plain || audit.title || audit.id}${audit.displayValue ? ` (${audit.displayValue})` : ""} — Lighthouse score ${Math.round(score * 100)}/100.`,
+		location: { url, selector: nodes[0]?.selector },
+		evidence: evidence ? truncate(evidence, 200) : undefined,
+		remediation: plain
+			? `See the Lighthouse guidance: ${truncate(plain, 200)}`
+			: "See the linked Lighthouse documentation.",
+		references: links.length > 0 ? links : undefined,
+		tags: [`lighthouse-${key}`],
+	};
+};
+
+const categoryFindings = (
+	report: LighthouseReport,
+	scope: CategoryScope,
+	refs: ReadonlyArray<AuditRef>,
+	seen: Set<string>,
+): FindingInput[] => {
+	const findings: FindingInput[] = [];
+	for (const ref of refs) {
+		const failing = failingAudit(report, ref, seen);
+		if (failing) findings.push(toFinding(scope, ref, failing));
+	}
+	return findings;
+};
+
 /** Maps failing audits of a Lighthouse JSON report to findings. Exported for tests. */
 export const parseLighthouse = (report: LighthouseReport): FindingInput[] => {
 	const findings: FindingInput[] = [];
@@ -91,45 +188,10 @@ export const parseLighthouse = (report: LighthouseReport): FindingInput[] => {
 	for (const [key, cat] of Object.entries(report.categories ?? {})) {
 		const category = CATEGORY[key];
 		if (!category) continue;
-		for (const ref of cat.auditRefs ?? []) {
-			const audit = report.audits?.[ref.id];
-			if (!audit || seen.has(audit.id)) continue;
-			if (!SCORED.has(audit.scoreDisplayMode ?? "")) continue;
-			const score = audit.score;
-			if (score === null || score === undefined || score >= 0.9) continue;
-			seen.add(audit.id);
-			const { links, plain } = splitDescription(audit.description);
-			const items = audit.details?.items ?? [];
-			const nodes = items
-				.map(nodeOf)
-				.filter((n): n is NonNullable<typeof n> => !!n);
-			const firstUrl = items
-				.map((i) => i.url)
-				.find((u): u is string => typeof u === "string");
-			const severity = severityOf(category, score, ref.weight ?? 0, ref.group);
-			const evidence = [
-				audit.displayValue,
-				nodes[0]?.snippet,
-				!nodes[0] && firstUrl ? firstUrl : undefined,
-				items.length > 1 ? `${items.length} items` : undefined,
-			]
-				.filter(Boolean)
-				.join(" · ");
-			findings.push({
-				ruleId: `web.lighthouse/${audit.id}`,
-				title: audit.title ?? audit.id,
-				severity,
-				category,
-				message: `${plain || audit.title || audit.id}${audit.displayValue ? ` (${audit.displayValue})` : ""} — Lighthouse score ${Math.round(score * 100)}/100.`,
-				location: { url, selector: nodes[0]?.selector },
-				evidence: evidence ? truncate(evidence, 200) : undefined,
-				remediation: plain
-					? `See the Lighthouse guidance: ${truncate(plain, 200)}`
-					: "See the linked Lighthouse documentation.",
-				references: links.length > 0 ? links : undefined,
-				tags: [`lighthouse-${key}`],
-			});
-		}
+		const scope = { key, category, url };
+		findings.push(
+			...categoryFindings(report, scope, cat.auditRefs ?? [], seen),
+		);
 	}
 	return findings;
 };

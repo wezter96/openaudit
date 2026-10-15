@@ -45,11 +45,11 @@ const kebab = (s: string) =>
 
 /** pa11y types map to error → medium, warning → low, notice → info. */
 const severityOf = (issue: Pa11yIssue): Severity => {
-	const extras = issue.runnerExtras;
+	const { needsFurtherReview, impact } = issue.runnerExtras ?? {};
 	if (issue.type === "error") {
 		// Items axe could not decide on are not confirmed failures.
-		if (extras?.needsFurtherReview) return "low";
-		return extras?.impact === "critical" ? "high" : "medium";
+		if (needsFurtherReview) return "low";
+		return impact === "critical" ? "high" : "medium";
 	}
 	return issue.type === "warning" ? "low" : "info";
 };
@@ -62,43 +62,119 @@ interface Parsed {
 	readonly message: string;
 }
 
+const describeAxe = (
+	issue: Pa11yIssue,
+	code: string,
+	message: string,
+): Parsed => {
+	const { help, helpUrl, impact } = issue.runnerExtras ?? {};
+	return {
+		ruleKey: `axe-${kebab(code)}`,
+		title: help ?? truncate(message, 90),
+		references: helpUrl ? [helpUrl] : [],
+		tags: ["axe", ...(impact ? [`axe-impact-${impact}`] : [])],
+		message,
+	};
+};
+
+/** WCAG technique links for an HTML_CodeSniffer technique list like `H37` or `G94,G95`. */
+const techniqueRefs = (technique: string): string[] | undefined =>
+	technique
+		.split(".")[0]
+		?.split(",")
+		.filter((t) => /^[A-Z]+\d+$/.test(t))
+		.map((t) => `https://www.w3.org/TR/WCAG20-TECHS/${t}.html`);
+
+const htmlcsTags = (
+	level: string | undefined,
+	sc: string | undefined,
+): string[] => [
+	"htmlcs",
+	...(level?.startsWith("wcag") ? [level] : []),
+	...(sc && /^\d+\.\d+\.\d+$/.test(sc) ? [`wcag-${sc}`] : []),
+];
+
+// HTML_CodeSniffer: WCAG2AA.Principle1.Guideline1_1.1_1_1.H37
+const describeHtmlcs = (code: string, message: string): Parsed => {
+	const parts = code.split(".");
+	const criterion = parts[3];
+	const technique = parts.slice(4).join(".");
+	return {
+		ruleKey: `htmlcs-${kebab(`${criterion ?? ""}-${technique}`).slice(0, 60)}`,
+		title: truncate(message.split(/(?<=\.)\s/)[0] ?? message, 90),
+		references: techniqueRefs(technique) ?? [],
+		tags: htmlcsTags(
+			parts[0]?.toLowerCase(),
+			criterion?.split("_").slice(0, 3).join("."),
+		),
+		message,
+	};
+};
+
 const describe = (issue: Pa11yIssue): Parsed | undefined => {
 	const code = issue.code;
 	if (!code) return undefined;
 	const message = (issue.message ?? code)
 		.replace(/\s*\(https?:\/\/[^)\s]+\)\s*$/, "")
 		.trim();
-	if (issue.runner === "axe") {
-		const extras = issue.runnerExtras;
-		return {
-			ruleKey: `axe-${kebab(code)}`,
-			title: extras?.help ?? truncate(message, 90),
-			references: extras?.helpUrl ? [extras.helpUrl] : [],
-			tags: ["axe", ...(extras?.impact ? [`axe-impact-${extras.impact}`] : [])],
-			message,
-		};
+	return issue.runner === "axe"
+		? describeAxe(issue, code, message)
+		: describeHtmlcs(code, message);
+};
+
+interface Group {
+	readonly parsed: Parsed;
+	severity: Severity;
+	readonly issues: Pa11yIssue[];
+}
+
+const addIssue = (groups: Map<string, Group>, issue: Pa11yIssue): void => {
+	const parsed = describe(issue);
+	if (!parsed) return;
+	const severity = severityOf(issue);
+	const g = groups.get(parsed.ruleKey);
+	if (!g) {
+		groups.set(parsed.ruleKey, { parsed, severity, issues: [issue] });
+		return;
 	}
-	// HTML_CodeSniffer: WCAG2AA.Principle1.Guideline1_1.1_1_1.H37
-	const parts = code.split(".");
-	const level = parts[0]?.toLowerCase();
-	const criterion = parts[3];
-	const technique = parts.slice(4).join(".");
-	const refs = technique
-		.split(".")[0]
-		?.split(",")
-		.filter((t) => /^[A-Z]+\d+$/.test(t))
-		.map((t) => `https://www.w3.org/TR/WCAG20-TECHS/${t}.html`);
-	const sc = criterion?.split("_").slice(0, 3).join(".");
+	g.issues.push(issue);
+	if (RANK[severity] > RANK[g.severity]) g.severity = severity;
+};
+
+const evidenceOf = (first: Pa11yIssue, issues: Pa11yIssue[]): string => {
+	const selectors = [
+		...new Set(issues.map((i) => str(i.selector)).filter(Boolean)),
+	];
+	return [
+		first.context ? truncate(first.context.replace(/\s+/g, " "), 120) : "",
+		selectors.length > 1
+			? `${selectors.length} elements: ${truncate(selectors.slice(0, 4).join(", "), 120)}${selectors.length > 4 ? ", …" : ""}`
+			: "",
+	]
+		.filter(Boolean)
+		.join(" · ");
+};
+
+const toFinding = (
+	{ parsed, severity, issues }: Group,
+	url: string | undefined,
+): FindingInput => {
+	const first = issues[0] as Pa11yIssue;
+	const evidence = evidenceOf(first, issues);
+	const referenced = parsed.references.length > 0;
 	return {
-		ruleKey: `htmlcs-${kebab(`${criterion ?? ""}-${technique}`).slice(0, 60)}`,
-		title: truncate(message.split(/(?<=\.)\s/)[0] ?? message, 90),
-		references: refs ?? [],
-		tags: [
-			"htmlcs",
-			...(level?.startsWith("wcag") ? [level] : []),
-			...(sc && /^\d+\.\d+\.\d+$/.test(sc) ? [`wcag-${sc}`] : []),
-		],
-		message,
+		ruleId: `web.pa11y/${parsed.ruleKey}`,
+		title: parsed.title,
+		severity,
+		category: "accessibility",
+		message: `${parsed.message}${first.type ? ` (pa11y ${first.type}${first.runner ? `, ${first.runner}` : ""})` : ""}.`,
+		location: { url, selector: first.selector },
+		evidence: evidence || undefined,
+		remediation: referenced
+			? "Fix the markup as described by the linked guidance."
+			: "Fix the markup so it satisfies the WCAG criterion named in the message.",
+		references: referenced ? parsed.references : undefined,
+		tags: parsed.tags,
 	};
 };
 
@@ -110,50 +186,9 @@ export const parsePa11yReport = (
 	json: unknown,
 	url?: string,
 ): FindingInput[] => {
-	const groups = new Map<
-		string,
-		{ parsed: Parsed; severity: Severity; issues: Pa11yIssue[] }
-	>();
-	for (const raw of arr(json)) {
-		const issue = raw as Pa11yIssue;
-		const parsed = describe(issue);
-		if (!parsed) continue;
-		const severity = severityOf(issue);
-		const g = groups.get(parsed.ruleKey);
-		if (!g) groups.set(parsed.ruleKey, { parsed, severity, issues: [issue] });
-		else {
-			g.issues.push(issue);
-			if (RANK[severity] > RANK[g.severity]) g.severity = severity;
-		}
-	}
-	return [...groups.values()].map(({ parsed, severity, issues }) => {
-		const first = issues[0] as Pa11yIssue;
-		const selectors = [
-			...new Set(issues.map((i) => str(i.selector)).filter(Boolean)),
-		];
-		const evidence = [
-			first.context ? truncate(first.context.replace(/\s+/g, " "), 120) : "",
-			selectors.length > 1
-				? `${selectors.length} elements: ${truncate(selectors.slice(0, 4).join(", "), 120)}${selectors.length > 4 ? ", …" : ""}`
-				: "",
-		]
-			.filter(Boolean)
-			.join(" · ");
-		return {
-			ruleId: `web.pa11y/${parsed.ruleKey}`,
-			title: parsed.title,
-			severity,
-			category: "accessibility",
-			message: `${parsed.message}${first.type ? ` (pa11y ${first.type}${first.runner ? `, ${first.runner}` : ""})` : ""}.`,
-			location: { url, selector: first.selector },
-			evidence: evidence || undefined,
-			remediation: parsed.references.length
-				? "Fix the markup as described by the linked guidance."
-				: "Fix the markup so it satisfies the WCAG criterion named in the message.",
-			references: parsed.references.length ? parsed.references : undefined,
-			tags: parsed.tags,
-		} satisfies FindingInput;
-	});
+	const groups = new Map<string, Group>();
+	for (const raw of arr(json)) addIssue(groups, raw as Pa11yIssue);
+	return [...groups.values()].map((g) => toFinding(g, url));
 };
 
 /** Runs pa11y (axe-core + HTML_CodeSniffer in headless Chrome) and reports accessibility issues. */

@@ -371,6 +371,448 @@ const dateOf = (v: unknown) => {
 
 const day = (t: number) => new Date(t).toISOString().slice(0, 10);
 
+const recordOr = (v: unknown): Record<string, unknown> =>
+	isRecord(v) ? v : {};
+
+type ScanRecord = Record<string, unknown>;
+
+interface Hit {
+	readonly evidence: Set<string>;
+	readonly severity?: Severity;
+	readonly message?: string;
+}
+
+type HitOverride = Pick<Hit, "severity" | "message">;
+
+/** Scan results being read, plus the errors and evidence collected so far. */
+interface ScanState {
+	readonly scans: ScanRecord;
+	readonly errors: string[];
+	/** Evidence per rule, collected across protocols and certificate deployments. */
+	readonly hits: Map<RuleId, Hit>;
+}
+
+/** The result of one scan command, recording an error when it failed. */
+const resultOf = (state: ScanState, key: string): ScanRecord | undefined => {
+	const attempt = state.scans[key];
+	if (!isRecord(attempt) || attempt.status === "NOT_SCHEDULED")
+		return undefined;
+	if (attempt.status !== "COMPLETED" || !isRecord(attempt.result)) {
+		state.errors.push(
+			`${key}: ${str(attempt.error_reason) ?? "error"} ${lastLine(attempt.error_trace)}`.trim(),
+		);
+		return undefined;
+	}
+	return attempt.result;
+};
+
+const hit = (
+	state: ScanState,
+	rule: RuleId,
+	evidence: string,
+	override: HitOverride = {},
+) => {
+	const entry = state.hits.get(rule) ?? { evidence: new Set<string>() };
+	entry.evidence.add(evidence);
+	state.hits.set(rule, { ...entry, ...override });
+};
+
+/* ------------------------------ protocols ------------------------------ */
+
+const VERSION_RULES: ReadonlyArray<readonly [string, RuleId]> = [
+	["SSL 2.0", "sslv2-enabled"],
+	["SSL 3.0", "sslv3-enabled"],
+	["TLS 1.0", "tls-1-0-enabled"],
+	["TLS 1.1", "tls-1-1-enabled"],
+];
+
+const suiteName = (accepted: unknown): string[] => {
+	const name =
+		isRecord(accepted) && isRecord(accepted.cipher_suite)
+			? str(accepted.cipher_suite.name)
+			: undefined;
+	return name ? [name] : [];
+};
+
+/** Accepted cipher suite names per supported protocol label. */
+const acceptedSuites = (state: ScanState): Map<string, string[]> => {
+	const accepted = new Map<string, string[]>();
+	for (const [key, label] of PROTOCOLS) {
+		const res = resultOf(state, key);
+		if (!res) continue;
+		const names = arr(res.accepted_cipher_suites).flatMap(suiteName);
+		if (res.is_tls_version_supported === true && names.length > 0)
+			accepted.set(label, names);
+	}
+	return accepted;
+};
+
+const versionChecks = (state: ScanState, accepted: Map<string, string[]>) => {
+	for (const [label, rule] of VERSION_RULES) {
+		const names = accepted.get(label);
+		if (names) hit(state, rule, `${label} cipher suites: ${names.join(", ")}`);
+	}
+};
+
+const highestVersionCheck = (state: ScanState, server: ScanRecord) => {
+	const highest = str(
+		recordOr(server.connectivity_result).highest_tls_version_supported,
+	);
+	if (highest === "TLS_1_2")
+		hit(
+			state,
+			"tls-1-3-not-supported",
+			`highest_tls_version_supported=${highest}`,
+		);
+	else if (highest && /^(SSL_[23]_0|TLS_1_[01])$/.test(highest))
+		hit(
+			state,
+			"tls-1-2-not-supported",
+			`highest_tls_version_supported=${highest}`,
+		);
+};
+
+// Each suite counts once, under the worst class it falls in.
+const classOf = (name: string): RuleId | undefined =>
+	INSECURE_CIPHER.test(name)
+		? "insecure-cipher-suites"
+		: WEAK_CIPHER.test(name)
+			? "weak-cipher-suites"
+			: NO_FS_CIPHER.test(name)
+				? "no-forward-secrecy"
+				: undefined;
+
+const cipherChecks = (state: ScanState, accepted: Map<string, string[]>) => {
+	for (const [label, names] of accepted) {
+		// SSL 2.0 as a whole is already critical.
+		if (label === "SSL 2.0") continue;
+		const byClass = Map.groupBy(names, classOf);
+		for (const [rule, suites] of byClass)
+			if (rule) hit(state, rule, `${label}: ${suites.join(", ")}`);
+	}
+};
+
+const protocolChecks = (state: ScanState, server: ScanRecord) => {
+	const accepted = acceptedSuites(state);
+	versionChecks(state, accepted);
+	highestVersionCheck(state, server);
+	cipherChecks(state, accepted);
+};
+
+/* ---------------------------- vulnerabilities --------------------------- */
+
+/** A scan result field whose value alone flags a rule. */
+interface FlagCheck {
+	readonly scan: string;
+	readonly field: string;
+	readonly flagged: boolean;
+	readonly rule: RuleId;
+}
+
+const flagCheck = (state: ScanState, check: FlagCheck) => {
+	if (resultOf(state, check.scan)?.[check.field] === check.flagged)
+		hit(state, check.rule, `${check.field}=${check.flagged}`);
+};
+
+const renegotiationChecks = (state: ScanState) => {
+	const reneg = resultOf(state, "session_renegotiation");
+	if (reneg?.supports_secure_renegotiation === false)
+		hit(state, "insecure-renegotiation", "supports_secure_renegotiation=false");
+	if (reneg?.is_vulnerable_to_client_renegotiation_dos === true)
+		hit(
+			state,
+			"client-renegotiation",
+			`client_renegotiations_success_count=${num(reneg.client_renegotiations_success_count) ?? "?"}`,
+		);
+};
+
+const robotCheck = (state: ScanState) => {
+	const robot = str(resultOf(state, "robot")?.robot_result);
+	if (
+		robot === "VULNERABLE_STRONG_ORACLE" ||
+		robot === "VULNERABLE_WEAK_ORACLE"
+	)
+		hit(state, "robot", `robot_result=${robot}`, {
+			severity: robot === "VULNERABLE_STRONG_ORACLE" ? "high" : "medium",
+		});
+};
+
+const vulnerabilityChecks = (state: ScanState) => {
+	flagCheck(state, {
+		scan: "heartbleed",
+		field: "is_vulnerable_to_heartbleed",
+		flagged: true,
+		rule: "heartbleed",
+	});
+	flagCheck(state, {
+		scan: "openssl_ccs_injection",
+		field: "is_vulnerable_to_ccs_injection",
+		flagged: true,
+		rule: "ccs-injection",
+	});
+	renegotiationChecks(state);
+	flagCheck(state, {
+		scan: "tls_fallback_scsv",
+		field: "supports_fallback_scsv",
+		flagged: false,
+		rule: "no-fallback-scsv",
+	});
+	flagCheck(state, {
+		scan: "tls_compression",
+		field: "supports_compression",
+		flagged: true,
+		rule: "compression-enabled",
+	});
+	robotCheck(state);
+};
+
+/* ----------------------------- certificates ----------------------------- */
+
+interface Leaf {
+	readonly cert: ScanRecord | undefined;
+	readonly name: string;
+	readonly notAfter: number | undefined;
+	readonly notBefore: number | undefined;
+	readonly expired: boolean;
+	readonly notYet: boolean;
+}
+
+const leafOf = (chain: ScanRecord[], now: number): Leaf => {
+	const cert = chain[0];
+	const notAfter = dateOf(cert?.not_valid_after);
+	const notBefore = dateOf(cert?.not_valid_before);
+	return {
+		cert,
+		name: nameOf(cert?.subject),
+		notAfter,
+		notBefore,
+		expired: notAfter !== undefined && notAfter < now,
+		notYet: notBefore !== undefined && notBefore > now,
+	};
+};
+
+const expiringSoon = (
+	state: ScanState,
+	leaf: Leaf,
+	notAfter: number,
+	now: number,
+) => {
+	const days = Math.floor((notAfter - now) / DAY);
+	hit(
+		state,
+		"certificate-expiring-soon",
+		`${leaf.name}; not_valid_after=${day(notAfter)}`,
+		{
+			severity: days < 7 ? "high" : "medium",
+			message: `The certificate expires in ${days} day(s), on ${day(notAfter)}.`,
+		},
+	);
+};
+
+const validityChecks = (state: ScanState, leaf: Leaf, now: number) => {
+	const { notAfter, notBefore } = leaf;
+	if (leaf.expired && notAfter !== undefined)
+		hit(
+			state,
+			"certificate-expired",
+			`${leaf.name}; not_valid_after=${day(notAfter)}`,
+			{
+				message: `The certificate expired on ${day(notAfter)}; browsers show a full-page warning and clients refuse to connect.`,
+			},
+		);
+	else if (notAfter !== undefined && notAfter - now < 30 * DAY)
+		expiringSoon(state, leaf, notAfter, now);
+	if (leaf.notYet && notBefore !== undefined)
+		hit(
+			state,
+			"certificate-not-yet-valid",
+			`${leaf.name}; not_valid_before=${day(notBefore)}`,
+		);
+};
+
+const storeName = (v: ScanRecord) =>
+	isRecord(v.trust_store) ? (str(v.trust_store.name) ?? "?") : "?";
+
+// Drops the "(encountered processing <Certificate(...)>)" suffix.
+const validationError = (v: ScanRecord | undefined) =>
+	(str(v?.validation_error) ?? "validation failed").replace(
+		/\s*\(encountered processing [\s\S]*$/,
+		"",
+	);
+
+const selfIssued = (cert: ScanRecord) =>
+	nameOf(cert.subject) === nameOf(cert.issuer);
+
+const outOfValidity = (leaf: Leaf) => leaf.expired || leaf.notYet;
+
+// Mozilla's store is what web.tls (Node) uses; other platforms may differ.
+const otherStoreChecks = (state: ScanState, validations: ScanRecord[]) => {
+	for (const v of validations)
+		if (v.was_validation_successful === false)
+			hit(
+				state,
+				"untrusted-in-some-stores",
+				`${storeName(v)}: ${truncate(validationError(v), 120)}`,
+			);
+};
+
+const mozillaFailureCheck = (
+	state: ScanState,
+	chain: ScanRecord[],
+	leaf: Leaf,
+	error: string,
+) => {
+	if (/no matching subjectAltName/i.test(error))
+		hit(state, "hostname-mismatch", `${leaf.name}; ${truncate(error, 160)}`);
+	else if (chain.length === 1 && chain.every(selfIssued))
+		hit(
+			state,
+			"certificate-self-signed",
+			`${leaf.name}; issuer=${nameOf(leaf.cert?.issuer)}`,
+		);
+	// An expired leaf already explains "not valid at validation time".
+	else if (
+		!(outOfValidity(leaf) && /not valid at validation time/i.test(error))
+	)
+		hit(state, "untrusted-chain", `Mozilla: ${truncate(error, 200)}`);
+};
+
+const trustChecks = (
+	state: ScanState,
+	dep: ScanRecord,
+	chain: ScanRecord[],
+	leaf: Leaf,
+) => {
+	const validations = arr(dep.path_validation_results).filter(isRecord);
+	const mozilla = validations.find((v) => storeName(v) === "Mozilla");
+	if (mozilla?.was_validation_successful === true)
+		otherStoreChecks(state, validations);
+	else if (mozilla)
+		mozillaFailureCheck(state, chain, leaf, validationError(mozilla));
+};
+
+const signatureCheck = (state: ScanState, cert: ScanRecord) => {
+	// A self-signed root's own signature is never checked by clients.
+	if (selfIssued(cert)) return;
+	const hash = isRecord(cert.signature_hash_algorithm)
+		? str(cert.signature_hash_algorithm.name)
+		: undefined;
+	if (hash === "md5" || hash === "sha1")
+		hit(state, `${hash}-signature`, `${nameOf(cert.subject)} (${hash})`);
+};
+
+const minKeySize = (algorithm: string) =>
+	algorithm.startsWith("RSA") || algorithm.startsWith("DSA")
+		? 2048
+		: algorithm.startsWith("EllipticCurve")
+			? 224
+			: 0;
+
+const keySizeCheck = (state: ScanState, cert: ScanRecord) => {
+	const key = recordOr(cert.public_key);
+	const size = num(key.key_size);
+	const algorithm = str(key.algorithm) ?? "";
+	if (size !== undefined && size < minKeySize(algorithm))
+		hit(
+			state,
+			"weak-certificate-key",
+			`${nameOf(cert.subject)}: ${algorithm} ${size} bits`,
+		);
+};
+
+const mustStapleMissing = (dep: ScanRecord) =>
+	dep.leaf_certificate_has_must_staple_extension === true &&
+	dep.ocsp_response === null;
+
+const deploymentFlagChecks = (
+	state: ScanState,
+	dep: ScanRecord,
+	leaf: Leaf,
+) => {
+	if (dep.received_chain_has_valid_order === false)
+		hit(state, "chain-order-invalid", "received_chain_has_valid_order=false");
+	if (mustStapleMissing(dep))
+		hit(state, "must-staple-not-stapled", `${leaf.name}; ocsp_response=null`);
+	if (dep.verified_chain_has_legacy_symantec_anchor === true)
+		hit(
+			state,
+			"legacy-symantec-anchor",
+			"verified_chain_has_legacy_symantec_anchor=true",
+		);
+};
+
+const deploymentChecks = (state: ScanState, dep: ScanRecord, now: number) => {
+	const chain = arr(dep.received_certificate_chain).filter(isRecord);
+	const leaf = leafOf(chain, now);
+	validityChecks(state, leaf, now);
+	trustChecks(state, dep, chain, leaf);
+	for (const cert of chain) {
+		signatureCheck(state, cert);
+		keySizeCheck(state, cert);
+	}
+	deploymentFlagChecks(state, dep, leaf);
+};
+
+// The deployment served without SNI only matters to ancient clients.
+const certificateChecks = (state: ScanState, now: number) => {
+	const deployments = arr(
+		resultOf(state, "certificate_info")?.certificate_deployments,
+	).filter(isRecord);
+	for (const dep of deployments) deploymentChecks(state, dep, now);
+};
+
+/* -------------------------------- findings ------------------------------- */
+
+interface Endpoint {
+	readonly url: string;
+	/** `host:port` of the scanned TLS endpoint. */
+	readonly hostPort: string;
+}
+
+const endpointOf = (server: ScanRecord, url: string): Endpoint => {
+	const loc = recordOr(server.server_location);
+	return {
+		url,
+		hostPort: `${str(loc.hostname) ?? "?"}:${num(loc.port) ?? "?"}`,
+	};
+};
+
+const toFinding = (id: RuleId, h: Hit, endpoint: Endpoint): FindingInput => {
+	const rule: Rule = RULES[id];
+	const cves = rule.cves ?? [];
+	const { url } = endpoint;
+	return {
+		ruleId: `${ID}/${id}`,
+		title: rule.title,
+		severity: h.severity ?? rule.severity,
+		category: "security",
+		message: h.message ?? rule.message,
+		location: rule.shared
+			? { url }
+			: { url, selector: `tls:${endpoint.hostPort}` },
+		evidence: truncate([...h.evidence].join("; "), 500),
+		remediation: rule.fix,
+		references: [
+			...cves.map((c) => `https://nvd.nist.gov/vuln/detail/${c}`),
+			MOZILLA_TLS,
+			`https://cwe.mitre.org/data/definitions/${rule.cwe}.html`,
+			DOCS,
+		],
+		tags: [
+			"tls",
+			`cwe-${rule.cwe}`,
+			"owasp-a02",
+			...cves.map((c) => c.toLowerCase()),
+		],
+	};
+};
+
+const unreachable = (connectivityError: string): SslyzeScan => ({
+	findings: [],
+	errors: [],
+	connectivityError,
+});
+
 /**
  * Maps a sslyze 6.x `--json_out` document to findings. Exported for tests.
  *
@@ -387,278 +829,23 @@ export const parseSslyzeReport = (
 	now = Date.now(),
 ): SslyzeScan => {
 	const server = arr(isRecord(json) ? json.server_scan_results : undefined)[0];
-	if (!isRecord(server))
-		return {
-			findings: [],
-			errors: [],
-			connectivityError: "sslyze returned no scan result",
-		};
-	const loc = isRecord(server.server_location) ? server.server_location : {};
-	const endpoint = `${str(loc.hostname) ?? "?"}:${num(loc.port) ?? "?"}`;
+	if (!isRecord(server)) return unreachable("sslyze returned no scan result");
 	if (server.scan_status !== "COMPLETED")
-		return {
-			findings: [],
-			errors: [],
-			connectivityError:
-				lastLine(server.connectivity_error_trace) ||
+		return unreachable(
+			lastLine(server.connectivity_error_trace) ||
 				`scan status ${String(server.scan_status)}`,
-		};
-
-	const errors: string[] = [];
-	const scans = isRecord(server.scan_result) ? server.scan_result : {};
-	const resultOf = (key: string): Record<string, unknown> | undefined => {
-		const attempt = scans[key];
-		if (!isRecord(attempt) || attempt.status === "NOT_SCHEDULED")
-			return undefined;
-		if (attempt.status !== "COMPLETED" || !isRecord(attempt.result)) {
-			errors.push(
-				`${key}: ${str(attempt.error_reason) ?? "error"} ${lastLine(attempt.error_trace)}`.trim(),
-			);
-			return undefined;
-		}
-		return attempt.result;
-	};
-
-	// Evidence per rule, collected across protocols and certificate deployments.
-	const hits = new Map<
-		RuleId,
-		{ evidence: Set<string>; severity?: Severity; message?: string }
-	>();
-	const hit = (
-		rule: RuleId,
-		evidence: string,
-		override: { severity?: Severity; message?: string } = {},
-	) => {
-		const entry = hits.get(rule) ?? { evidence: new Set<string>() };
-		entry.evidence.add(evidence);
-		hits.set(rule, { ...entry, ...override });
-	};
-
-	/* ------------------------------ protocols ------------------------------ */
-
-	const accepted = new Map<string, string[]>();
-	for (const [key, label] of PROTOCOLS) {
-		const res = resultOf(key);
-		if (!res) continue;
-		const names = arr(res.accepted_cipher_suites).flatMap((a) => {
-			const name =
-				isRecord(a) && isRecord(a.cipher_suite)
-					? str(a.cipher_suite.name)
-					: undefined;
-			return name ? [name] : [];
-		});
-		if (res.is_tls_version_supported === true && names.length > 0)
-			accepted.set(label, names);
-	}
-	const versionRules: ReadonlyArray<readonly [string, RuleId]> = [
-		["SSL 2.0", "sslv2-enabled"],
-		["SSL 3.0", "sslv3-enabled"],
-		["TLS 1.0", "tls-1-0-enabled"],
-		["TLS 1.1", "tls-1-1-enabled"],
-	];
-	for (const [label, rule] of versionRules) {
-		const names = accepted.get(label);
-		if (names) hit(rule, `${label} cipher suites: ${names.join(", ")}`);
-	}
-
-	const conn = isRecord(server.connectivity_result)
-		? server.connectivity_result
-		: {};
-	const highest = str(conn.highest_tls_version_supported);
-	if (highest === "TLS_1_2")
-		hit("tls-1-3-not-supported", `highest_tls_version_supported=${highest}`);
-	else if (highest && /^(SSL_[23]_0|TLS_1_[01])$/.test(highest))
-		hit("tls-1-2-not-supported", `highest_tls_version_supported=${highest}`);
-
-	// Each suite counts once, under the worst class it falls in.
-	const classOf = (name: string): RuleId | undefined =>
-		INSECURE_CIPHER.test(name)
-			? "insecure-cipher-suites"
-			: WEAK_CIPHER.test(name)
-				? "weak-cipher-suites"
-				: NO_FS_CIPHER.test(name)
-					? "no-forward-secrecy"
-					: undefined;
-	for (const [label, names] of accepted) {
-		// SSL 2.0 as a whole is already critical.
-		if (label === "SSL 2.0") continue;
-		const byClass = Map.groupBy(names, classOf);
-		for (const [rule, suites] of byClass)
-			if (rule) hit(rule, `${label}: ${suites.join(", ")}`);
-	}
-
-	/* ---------------------------- vulnerabilities --------------------------- */
-
-	if (resultOf("heartbleed")?.is_vulnerable_to_heartbleed === true)
-		hit("heartbleed", "is_vulnerable_to_heartbleed=true");
-	if (
-		resultOf("openssl_ccs_injection")?.is_vulnerable_to_ccs_injection === true
-	)
-		hit("ccs-injection", "is_vulnerable_to_ccs_injection=true");
-	const reneg = resultOf("session_renegotiation");
-	if (reneg?.supports_secure_renegotiation === false)
-		hit("insecure-renegotiation", "supports_secure_renegotiation=false");
-	if (reneg?.is_vulnerable_to_client_renegotiation_dos === true)
-		hit(
-			"client-renegotiation",
-			`client_renegotiations_success_count=${num(reneg.client_renegotiations_success_count) ?? "?"}`,
 		);
-	if (resultOf("tls_fallback_scsv")?.supports_fallback_scsv === false)
-		hit("no-fallback-scsv", "supports_fallback_scsv=false");
-	if (resultOf("tls_compression")?.supports_compression === true)
-		hit("compression-enabled", "supports_compression=true");
-	const robot = str(resultOf("robot")?.robot_result);
-	if (
-		robot === "VULNERABLE_STRONG_ORACLE" ||
-		robot === "VULNERABLE_WEAK_ORACLE"
-	)
-		hit("robot", `robot_result=${robot}`, {
-			severity: robot === "VULNERABLE_STRONG_ORACLE" ? "high" : "medium",
-		});
-
-	/* ----------------------------- certificates ----------------------------- */
-
-	// The deployment served without SNI only matters to ancient clients.
-	const deployments = arr(
-		resultOf("certificate_info")?.certificate_deployments,
-	).filter(isRecord);
-	for (const dep of deployments) {
-		const chain = arr(dep.received_certificate_chain).filter(isRecord);
-		const leaf = chain[0];
-		const leafName = nameOf(leaf?.subject);
-		const notAfter = dateOf(leaf?.not_valid_after);
-		const notBefore = dateOf(leaf?.not_valid_before);
-		const expired = notAfter !== undefined && notAfter < now;
-		const notYet = notBefore !== undefined && notBefore > now;
-		if (expired && notAfter !== undefined)
-			hit(
-				"certificate-expired",
-				`${leafName}; not_valid_after=${day(notAfter)}`,
-				{
-					message: `The certificate expired on ${day(notAfter)}; browsers show a full-page warning and clients refuse to connect.`,
-				},
-			);
-		else if (notAfter !== undefined && notAfter - now < 30 * DAY) {
-			const days = Math.floor((notAfter - now) / DAY);
-			hit(
-				"certificate-expiring-soon",
-				`${leafName}; not_valid_after=${day(notAfter)}`,
-				{
-					severity: days < 7 ? "high" : "medium",
-					message: `The certificate expires in ${days} day(s), on ${day(notAfter)}.`,
-				},
-			);
-		}
-		if (notYet && notBefore !== undefined)
-			hit(
-				"certificate-not-yet-valid",
-				`${leafName}; not_valid_before=${day(notBefore)}`,
-			);
-
-		const validations = arr(dep.path_validation_results).filter(isRecord);
-		const storeName = (v: Record<string, unknown>) =>
-			isRecord(v.trust_store) ? (str(v.trust_store.name) ?? "?") : "?";
-		// Drops the "(encountered processing <Certificate(...)>)" suffix.
-		const errorOf = (v: Record<string, unknown> | undefined) =>
-			(str(v?.validation_error) ?? "validation failed").replace(
-				/\s*\(encountered processing [\s\S]*$/,
-				"",
-			);
-		const mozilla = validations.find((v) => storeName(v) === "Mozilla");
-		const mozillaError = errorOf(mozilla);
-		if (mozilla?.was_validation_successful === true) {
-			// Mozilla's store is what web.tls (Node) uses; other platforms may differ.
-			for (const v of validations)
-				if (v.was_validation_successful === false)
-					hit(
-						"untrusted-in-some-stores",
-						`${storeName(v)}: ${truncate(errorOf(v), 120)}`,
-					);
-		} else if (mozilla) {
-			const selfSigned =
-				chain.length === 1 &&
-				leaf !== undefined &&
-				nameOf(leaf.subject) === nameOf(leaf.issuer);
-			if (/no matching subjectAltName/i.test(mozillaError))
-				hit("hostname-mismatch", `${leafName}; ${truncate(mozillaError, 160)}`);
-			else if (selfSigned)
-				hit(
-					"certificate-self-signed",
-					`${leafName}; issuer=${nameOf(leaf?.issuer)}`,
-				);
-			// An expired leaf already explains "not valid at validation time".
-			else if (
-				!(
-					(expired || notYet) &&
-					/not valid at validation time/i.test(mozillaError)
-				)
-			)
-				hit("untrusted-chain", `Mozilla: ${truncate(mozillaError, 200)}`);
-		}
-
-		for (const cert of chain) {
-			const subject = nameOf(cert.subject);
-			// A self-signed root's own signature is never checked by clients.
-			if (subject !== nameOf(cert.issuer)) {
-				const hash = isRecord(cert.signature_hash_algorithm)
-					? str(cert.signature_hash_algorithm.name)
-					: undefined;
-				if (hash === "md5" || hash === "sha1")
-					hit(`${hash}-signature`, `${subject} (${hash})`);
-			}
-			const key = isRecord(cert.public_key) ? cert.public_key : {};
-			const size = num(key.key_size);
-			const algorithm = str(key.algorithm) ?? "";
-			const min =
-				algorithm.startsWith("RSA") || algorithm.startsWith("DSA")
-					? 2048
-					: algorithm.startsWith("EllipticCurve")
-						? 224
-						: 0;
-			if (size !== undefined && size < min)
-				hit("weak-certificate-key", `${subject}: ${algorithm} ${size} bits`);
-		}
-		if (dep.received_chain_has_valid_order === false)
-			hit("chain-order-invalid", "received_chain_has_valid_order=false");
-		if (
-			dep.leaf_certificate_has_must_staple_extension === true &&
-			dep.ocsp_response === null
-		)
-			hit("must-staple-not-stapled", `${leafName}; ocsp_response=null`);
-		if (dep.verified_chain_has_legacy_symantec_anchor === true)
-			hit(
-				"legacy-symantec-anchor",
-				"verified_chain_has_legacy_symantec_anchor=true",
-			);
-	}
-
-	const findings = [...hits].map(([id, h]): FindingInput => {
-		const rule: Rule = RULES[id];
-		const cves = rule.cves ?? [];
-		return {
-			ruleId: `${ID}/${id}`,
-			title: rule.title,
-			severity: h.severity ?? rule.severity,
-			category: "security",
-			message: h.message ?? rule.message,
-			location: rule.shared ? { url } : { url, selector: `tls:${endpoint}` },
-			evidence: truncate([...h.evidence].join("; "), 500),
-			remediation: rule.fix,
-			references: [
-				...cves.map((c) => `https://nvd.nist.gov/vuln/detail/${c}`),
-				MOZILLA_TLS,
-				`https://cwe.mitre.org/data/definitions/${rule.cwe}.html`,
-				DOCS,
-			],
-			tags: [
-				"tls",
-				`cwe-${rule.cwe}`,
-				"owasp-a02",
-				...cves.map((c) => c.toLowerCase()),
-			],
-		};
-	});
-	return { findings, errors };
+	const state: ScanState = {
+		scans: recordOr(server.scan_result),
+		errors: [],
+		hits: new Map(),
+	};
+	protocolChecks(state, server);
+	vulnerabilityChecks(state);
+	certificateChecks(state, now);
+	const endpoint = endpointOf(server, url);
+	const findings = [...state.hits].map(([id, h]) => toFinding(id, h, endpoint));
+	return { findings, errors: state.errors };
 };
 
 /** Lightweight TLS scan with sslyze: protocols, known vulnerabilities and certificate health. */

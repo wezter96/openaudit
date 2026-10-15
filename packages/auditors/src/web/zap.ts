@@ -82,6 +82,84 @@ const text = (html = "") =>
 		.replace(/&amp;/g, "&")
 		.trim();
 
+interface Rewrite {
+	readonly from: string;
+	readonly to: string;
+}
+
+/** Maps the Docker host alias in a URL back to the host the user asked for. */
+const rewriter =
+	(rewrite?: Rewrite) =>
+	(u?: string): string | undefined =>
+		u && rewrite ? u.split(rewrite.from).join(rewrite.to) : u;
+
+const referencesOf = (alert: ZapAlert, pluginid: string) => [
+	...new Set(
+		(text(alert.reference).match(/https?:\/\/[^\s<>"]+/g) ?? []).map((r) =>
+			r.replace(/[.,)]+$/, ""),
+		),
+	),
+	`https://www.zaproxy.org/docs/alerts/${pluginid}/`,
+];
+
+const tagsOf = (alert: ZapAlert) => [
+	...cweTags(Number(alert.cweid) > 0 ? [`CWE-${alert.cweid}`] : []),
+	...(Number(alert.wascid) > 0 ? [`wasc-${alert.wascid}`] : []),
+];
+
+/** Instances with a distinct method, URL and parameter. */
+const uniqueInstances = (instances: ReadonlyArray<ZapInstance>) => {
+	const seen = new Set<string>();
+	return instances.filter((i) => {
+		const key = `${i.method} ${i.uri} ${i.param}`;
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
+};
+
+const instanceEvidence = (inst: ZapInstance) =>
+	[
+		inst.param ? `param: ${inst.param}` : "",
+		inst.evidence ? truncate(inst.evidence.replace(/\s+/g, " "), 160) : "",
+	]
+		.filter(Boolean)
+		.join(" · ");
+
+/** One finding per unique instance URL of an alert (capped). */
+const alertFindings = (
+	alert: ZapAlert,
+	back: ReturnType<typeof rewriter>,
+	auditorId: string,
+): FindingInput[] => {
+	const severity = RISK[alert.riskcode ?? ""];
+	const name = alert.name ?? alert.alert;
+	if (!severity || !name) return [];
+	// confidence 0 is a ZAP-confirmed false positive.
+	if (alert.confidence === "0" || !alert.pluginid) return [];
+	const plain = text(alert.desc).split("\n")[0] ?? name;
+	const references = referencesOf(alert, alert.pluginid);
+	const tags = tagsOf(alert);
+	const instances = uniqueInstances(alert.instances ?? []);
+	const message = `${truncate(plain, 300)}${instances.length > 1 ? ` (${instances.length} URLs affected)` : ""}`;
+	const remediation =
+		truncate(text(alert.solution).replace(/\n/g, " "), 400) ||
+		"See the ZAP alert documentation.";
+	return instances.slice(0, MAX_INSTANCES).map((inst) => ({
+		ruleId: `${auditorId}/${alert.pluginid}-${kebab(name)}`,
+		title: name,
+		severity,
+		category: "security",
+		message,
+		location: { url: back(inst.uri) },
+		evidence: instanceEvidence(inst) || undefined,
+		remediation,
+		references,
+		confidence: CONFIDENCE[alert.confidence ?? ""],
+		tags,
+	}));
+};
+
 /**
  * Maps a ZAP traditional JSON report to findings, one per alert and unique
  * instance URL (capped). `rewrite` maps the Docker host alias back to the
@@ -89,68 +167,16 @@ const text = (html = "") =>
  */
 export const parseZapReport = (
 	report: ZapReport,
-	rewrite?: { readonly from: string; readonly to: string },
+	rewrite?: Rewrite,
 	/** Rule id prefix; the active scan reports under its own auditor id. */
 	auditorId = "web.zap-baseline",
 ): FindingInput[] => {
-	const back = (u?: string) =>
-		u && rewrite ? u.split(rewrite.from).join(rewrite.to) : u;
-	const findings: FindingInput[] = [];
-	for (const site of report.site ?? []) {
-		for (const alert of site.alerts ?? []) {
-			const severity = RISK[alert.riskcode ?? ""];
-			const name = alert.name ?? alert.alert;
-			// confidence 0 is a ZAP-confirmed false positive.
-			if (!severity || !name || alert.confidence === "0" || !alert.pluginid)
-				continue;
-			const plain = text(alert.desc).split("\n")[0] ?? name;
-			const refs = [
-				...new Set(
-					(text(alert.reference).match(/https?:\/\/[^\s<>"]+/g) ?? []).map(
-						(r) => r.replace(/[.,)]+$/, ""),
-					),
-				),
-				`https://www.zaproxy.org/docs/alerts/${alert.pluginid}/`,
-			];
-			const tags = [
-				...cweTags(Number(alert.cweid) > 0 ? [`CWE-${alert.cweid}`] : []),
-				...(Number(alert.wascid) > 0 ? [`wasc-${alert.wascid}`] : []),
-			];
-			const seen = new Set<string>();
-			const instances = (alert.instances ?? []).filter((i) => {
-				const key = `${i.method} ${i.uri} ${i.param}`;
-				if (seen.has(key)) return false;
-				seen.add(key);
-				return true;
-			});
-			for (const inst of instances.slice(0, MAX_INSTANCES)) {
-				const evidence = [
-					inst.param ? `param: ${inst.param}` : "",
-					inst.evidence
-						? truncate(inst.evidence.replace(/\s+/g, " "), 160)
-						: "",
-				]
-					.filter(Boolean)
-					.join(" · ");
-				findings.push({
-					ruleId: `${auditorId}/${alert.pluginid}-${kebab(name)}`,
-					title: name,
-					severity,
-					category: "security",
-					message: `${truncate(plain, 300)}${instances.length > 1 ? ` (${instances.length} URLs affected)` : ""}`,
-					location: { url: back(inst.uri) },
-					evidence: evidence || undefined,
-					remediation:
-						truncate(text(alert.solution).replace(/\n/g, " "), 400) ||
-						"See the ZAP alert documentation.",
-					references: refs,
-					confidence: CONFIDENCE[alert.confidence ?? ""],
-					tags,
-				});
-			}
-		}
-	}
-	return findings;
+	const back = rewriter(rewrite);
+	return (report.site ?? []).flatMap((site) =>
+		(site.alerts ?? []).flatMap((alert) =>
+			alertFindings(alert, back, auditorId),
+		),
+	);
 };
 
 /** `http://localhost:3000/x` → `http://host.docker.internal:3000/x` for the container. */
@@ -184,16 +210,37 @@ interface ZapScan {
 	readonly announce?: string;
 }
 
-/**
- * Runs a ZAP packaged scan from a local install or the pinned Docker image and
- * parses its JSON report. Skips when neither is available.
- */
-export const runZapScan = (ctx: AuditContext, scan: ZapScan) =>
+interface ExecResult {
+	readonly code: number;
+	readonly stdout: string;
+	readonly stderr: string;
+}
+
+/** How the scan runs: a local ZAP script, or Docker with a scratch dir mounted. */
+interface ZapRun {
+	readonly local?: string;
+	readonly docker?: string;
+	readonly loopback: boolean;
+	readonly dir: string;
+	/** A loopback target reached from the container through the Docker host alias. */
+	readonly viaDockerHost: boolean;
+}
+
+const hasCustomHeaders = (ctx: AuditContext) =>
+	Object.keys(ctx.options.headers ?? {}).length > 0;
+
+const requireDockerDaemon = (ctx: AuditContext, docker: string) =>
 	Effect.gen(function* () {
-		if (ctx.options.headers && Object.keys(ctx.options.headers).length > 0)
-			yield* ctx.log(
-				`${scan.id}: custom headers are not forwarded (authenticated scans are not supported)`,
-			);
+		const info = yield* ctx.exec
+			.run([docker, "info"], { timeoutMs: 20_000 })
+			.pipe(Effect.orElseSucceed(() => ({ code: 1, stdout: "", stderr: "" })));
+		if (info.code !== 0)
+			return yield* skip("Docker daemon is not running (`docker info` failed)");
+	});
+
+/** A local ZAP script, else a running Docker daemon; skips when neither is usable. */
+const findRunner = (ctx: AuditContext, scan: ZapScan) =>
+	Effect.gen(function* () {
 		const local = yield* ctx.exec.which(scan.script);
 		const docker = local ? undefined : yield* ctx.exec.which("docker");
 		if (!local && !docker)
@@ -201,69 +248,88 @@ export const runZapScan = (ctx: AuditContext, scan: ZapScan) =>
 				`Neither ${scan.script} nor docker found on PATH. Install Docker (https://docs.docker.com/get-docker/) and the scan pulls ` +
 					`${ZAP_IMAGE}, or install ZAP's ${scan.script}.`,
 			);
-		if (docker) {
-			const info = yield* ctx.exec
-				.run([docker, "info"], { timeoutMs: 20_000 })
-				.pipe(
-					Effect.orElseSucceed(() => ({ code: 1, stdout: "", stderr: "" })),
-				);
-			if (info.code !== 0)
-				return yield* skip(
-					"Docker daemon is not running (`docker info` failed)",
-				);
-		}
+		if (docker) yield* requireDockerDaemon(ctx, docker);
+		return { local, docker };
+	});
+
+const zapCommand = (scan: ZapScan, run: ZapRun, args: ReadonlyArray<string>) =>
+	run.local
+		? [run.local, ...args]
+		: [
+				run.docker as string,
+				"run",
+				"--rm",
+				"-v",
+				`${run.dir}:/zap/wrk/:rw`,
+				...(run.loopback ? [`--add-host=${DOCKER_HOST}:host-gateway`] : []),
+				ZAP_IMAGE,
+				scan.script,
+				...args,
+			];
+
+const readReport = (dir: string, script: string, res: ExecResult) =>
+	Effect.gen(function* () {
+		const body = yield* Effect.promise(() =>
+			readFile(join(dir, "report.json"), "utf8").catch(() => ""),
+		);
+		// 0 = pass, 1 = failures, 2 = warnings; 3 and others = scan error.
+		if (!body.trim() || res.code > 2)
+			return yield* Effect.fail(
+				new AuditorError({
+					message: `${script} exited with code ${res.code} and no report: ${truncate((res.stderr || res.stdout).trim(), 300)}`,
+				}),
+			);
+		return yield* Effect.try({
+			try: () => JSON.parse(body) as ZapReport,
+			catch: (cause) =>
+				new AuditorError({
+					message: "ZAP produced an invalid JSON report",
+					cause,
+				}),
+		});
+	});
+
+const scanIn = (ctx: AuditContext, scan: ZapScan, run: ZapRun) =>
+	Effect.gen(function* () {
+		// The container's zap user must be able to write the report.
+		yield* Effect.promise(() => chmod(run.dir, 0o777));
+		const target = run.viaDockerHost ? forContainer(scan.url) : scan.url;
+		const cmd = zapCommand(scan, run, scan.args(target));
+		if (scan.announce) yield* ctx.log(scan.announce);
+		const res = yield* ctx.exec.run(cmd, {
+			cwd: run.dir,
+			timeoutMs: scan.timeoutMs,
+		});
+		const report = yield* readReport(run.dir, scan.script, res);
+		return parseZapReport(
+			report,
+			run.viaDockerHost ? { from: DOCKER_HOST, to: scan.hostname } : undefined,
+			scan.id,
+		);
+	});
+
+/**
+ * Runs a ZAP packaged scan from a local install or the pinned Docker image and
+ * parses its JSON report. Skips when neither is available.
+ */
+export const runZapScan = (ctx: AuditContext, scan: ZapScan) =>
+	Effect.gen(function* () {
+		if (hasCustomHeaders(ctx))
+			yield* ctx.log(
+				`${scan.id}: custom headers are not forwarded (authenticated scans are not supported)`,
+			);
+		const { local, docker } = yield* findRunner(ctx, scan);
 		const loopback = isLoopback(scan.url);
-		const target = docker && loopback ? forContainer(scan.url) : scan.url;
+		const viaDockerHost = Boolean(docker) && loopback;
 		const dir = yield* Effect.promise(() =>
 			mkdtemp(join(tmpdir(), scan.tmpPrefix)),
 		);
-		return yield* Effect.gen(function* () {
-			// The container's zap user must be able to write the report.
-			yield* Effect.promise(() => chmod(dir, 0o777));
-			const args = scan.args(target);
-			const cmd = local
-				? [local, ...args]
-				: [
-						docker as string,
-						"run",
-						"--rm",
-						"-v",
-						`${dir}:/zap/wrk/:rw`,
-						...(loopback ? [`--add-host=${DOCKER_HOST}:host-gateway`] : []),
-						ZAP_IMAGE,
-						scan.script,
-						...args,
-					];
-			if (scan.announce) yield* ctx.log(scan.announce);
-			const res = yield* ctx.exec.run(cmd, {
-				cwd: dir,
-				timeoutMs: scan.timeoutMs,
-			});
-			const body = yield* Effect.promise(() =>
-				readFile(join(dir, "report.json"), "utf8").catch(() => ""),
-			);
-			// 0 = pass, 1 = failures, 2 = warnings; 3 and others = scan error.
-			if (!body.trim() || res.code > 2)
-				return yield* Effect.fail(
-					new AuditorError({
-						message: `${scan.script} exited with code ${res.code} and no report: ${truncate((res.stderr || res.stdout).trim(), 300)}`,
-					}),
-				);
-			const report = yield* Effect.try({
-				try: () => JSON.parse(body) as ZapReport,
-				catch: (cause) =>
-					new AuditorError({
-						message: "ZAP produced an invalid JSON report",
-						cause,
-					}),
-			});
-			return parseZapReport(
-				report,
-				docker && loopback
-					? { from: DOCKER_HOST, to: scan.hostname }
-					: undefined,
-				scan.id,
-			);
+		return yield* scanIn(ctx, scan, {
+			local,
+			docker,
+			loopback,
+			dir,
+			viaDockerHost,
 		}).pipe(
 			Effect.ensuring(
 				Effect.promise(() => rm(dir, { recursive: true, force: true })),

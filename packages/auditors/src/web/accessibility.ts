@@ -31,17 +31,19 @@ interface Rule {
 	readonly remediation: string;
 }
 
+type Report = (rule: Rule, el: El | undefined, message: string) => void;
+type Check = (page: Page, report: Report) => void;
+
+const HIDDEN_STYLE = /display\s*:\s*none|visibility\s*:\s*hidden/i;
+
+const hidesItself = (el: El): boolean =>
+	"hidden" in el.attrs ||
+	el.attrs["aria-hidden"] === "true" ||
+	HIDDEN_STYLE.test(el.attrs.style ?? "");
+
 const hidden = (el: El): boolean => {
-	let cur: El | undefined = el;
-	while (cur) {
-		if (
-			"hidden" in cur.attrs ||
-			cur.attrs["aria-hidden"] === "true" ||
-			/display\s*:\s*none|visibility\s*:\s*hidden/i.test(cur.attrs.style ?? "")
-		)
-			return true;
-		cur = cur.parent;
-	}
+	for (let cur: El | undefined = el; cur; cur = cur.parent)
+		if (hidesItself(cur)) return true;
 	return false;
 };
 
@@ -67,38 +69,22 @@ const contentName = (el: El): string => {
 	return `${textOf(el)} ${alts} ${svgTitles}`.trim();
 };
 
+/** Named by its own text alternative (content, alt or value), ARIA or a title. */
+const isNamed = (page: Page, el: El, own: string | undefined): boolean =>
+	Boolean(own || ariaName(page, el) || el.attrs.title?.trim());
+
 const isPresentational = (el: El) =>
 	/^(presentation|none)$/.test(el.attrs.role ?? "");
 
-/** Static (non-rendered) WCAG checks over the crawled HTML. */
-const checkPage = (page: Page): FindingInput[] => {
-	const findings: FindingInput[] = [];
-	const counts = new Map<string, number>();
-	const report = (rule: Rule, el: El | undefined, message: string) => {
-		const n = (counts.get(rule.id) ?? 0) + 1;
-		counts.set(rule.id, n);
-		if (n > MAX_PER_RULE) return;
-		const references = [
-			...(rule.understanding ? [`${WCAG}/${rule.understanding}`] : []),
-			...(rule.axe ? [`${DEQUE}/${rule.axe}`] : []),
-		];
-		findings.push({
-			ruleId: `web.accessibility/${rule.id}`,
-			title: rule.title,
-			severity: rule.severity,
-			category: "accessibility",
-			message,
-			location: { url: page.url, selector: el ? selectorOf(el) : undefined },
-			evidence: el ? snippetOf(el) : undefined,
-			remediation: rule.remediation,
-			references,
-			tags: rule.wcag.map((sc) => `wcag-${sc}`),
-		});
-	};
-	const doc = page.doc;
+const inputOfType = (type: string) => (el: El) =>
+	(el.attrs.type ?? "").toLowerCase() === type;
 
-	/* ------------------------------ document ------------------------------ */
-	const html = findFirst(doc, "html");
+const hasHref = (el: El) => "href" in el.attrs;
+
+/* ------------------------------ document ------------------------------ */
+
+const checkLang: Check = (page, report) => {
+	const html = findFirst(page.doc, "html");
 	if (!html?.attrs.lang?.trim())
 		report(
 			{
@@ -113,7 +99,10 @@ const checkPage = (page: Page): FindingInput[] => {
 			html,
 			"Screen readers use the lang attribute to choose pronunciation; without it, content may be read with the wrong voice.",
 		);
-	const title = findFirst(doc, "title", (t) => !closest(t, "svg"));
+};
+
+const checkTitle: Check = (page, report) => {
+	const title = findFirst(page.doc, "title", (t) => !closest(t, "svg"));
 	if (!title || !textOf(title))
 		report(
 			{
@@ -128,17 +117,23 @@ const checkPage = (page: Page): FindingInput[] => {
 			undefined,
 			"The page has no <title>, which is the first thing screen readers announce and what identifies the tab.",
 		);
+};
 
-	const viewport = findFirst(
-		doc,
-		"meta",
-		(m) => (m.attrs.name ?? "").toLowerCase() === "viewport",
-	);
-	const vp = (viewport?.attrs.content ?? "").toLowerCase();
+/** A lowercased viewport content that blocks pinch-zoom. */
+const blocksZoom = (vp: string): boolean => {
 	const maxScale = Number(
 		vp.match(/maximum-scale\s*=\s*([\d.]+)/)?.[1] ?? "10",
 	);
-	if (viewport && (/user-scalable\s*=\s*(no|0)\b/.test(vp) || maxScale < 2))
+	return /user-scalable\s*=\s*(no|0)\b/.test(vp) || maxScale < 2;
+};
+
+const checkViewport: Check = (page, report) => {
+	const viewport = findFirst(
+		page.doc,
+		"meta",
+		(m) => (m.attrs.name ?? "").toLowerCase() === "viewport",
+	);
+	if (viewport && blocksZoom((viewport.attrs.content ?? "").toLowerCase()))
 		report(
 			{
 				id: "viewport-zoom-disabled",
@@ -153,16 +148,21 @@ const checkPage = (page: Page): FindingInput[] => {
 			viewport,
 			"The viewport meta tag prevents pinch-zoom, so low-vision users cannot enlarge text.",
 		);
+};
 
-	/* ------------------------------- images -------------------------------- */
-	for (const img of findAll(doc, "img")) {
-		if (
-			"alt" in img.attrs ||
-			isPresentational(img) ||
-			hidden(img) ||
-			ariaName(page, img)
-		)
-			continue;
+/* ------------------------------- images -------------------------------- */
+
+/** Images with alt, a presentational role, no rendering or an ARIA name need no alt. */
+const needsAlt = (page: Page, img: El): boolean =>
+	!(
+		"alt" in img.attrs ||
+		isPresentational(img) ||
+		hidden(img) ||
+		ariaName(page, img)
+	);
+
+const checkImages: Check = (page, report) => {
+	for (const img of findAll(page.doc, "img", (i) => needsAlt(page, i)))
 		report(
 			{
 				id: "image-alt",
@@ -177,18 +177,11 @@ const checkPage = (page: Page): FindingInput[] => {
 			img,
 			`Image ${img.attrs.src ? `"${img.attrs.src.slice(0, 80)}" ` : ""}has no alt attribute, so screen readers announce the file name or nothing at all.`,
 		);
-	}
-	for (const input of findAll(
-		doc,
-		"input",
-		(i) => (i.attrs.type ?? "").toLowerCase() === "image",
-	)) {
-		if (
-			input.attrs.alt?.trim() ||
-			ariaName(page, input) ||
-			input.attrs.title?.trim()
-		)
-			continue;
+};
+
+const checkImageInputs: Check = (page, report) => {
+	for (const input of findAll(page.doc, "input", inputOfType("image"))) {
+		if (isNamed(page, input, input.attrs.alt?.trim())) continue;
 		report(
 			{
 				id: "input-image-alt",
@@ -203,7 +196,10 @@ const checkPage = (page: Page): FindingInput[] => {
 			"An <input type=image> has no alternative text, so its purpose is not announced.",
 		);
 	}
-	for (const area of findAll(doc, "area", (a) => "href" in a.attrs)) {
+};
+
+const checkAreas: Check = (page, report) => {
+	for (const area of findAll(page.doc, "area", hasHref)) {
 		if (area.attrs.alt?.trim() || ariaName(page, area)) continue;
 		report(
 			{
@@ -220,27 +216,39 @@ const checkPage = (page: Page): FindingInput[] => {
 			"An image map <area> link has no alt text.",
 		);
 	}
+};
 
-	/* -------------------------------- forms -------------------------------- */
-	const labelFor = new Set(
+/* -------------------------------- forms -------------------------------- */
+
+const UNLABELLED_INPUTS = ["hidden", "submit", "button", "reset", "image"];
+
+/** Ids that some `<label for>` points at. */
+const labelTargets = (doc: El) =>
+	new Set(
 		findAll(doc, "label")
 			.map((l) => l.attrs.for)
 			.filter(Boolean),
 	);
-	for (const field of findAll(doc, ["input", "select", "textarea"])) {
+
+/** Inputs that take no label (buttons, hidden fields) and fields not rendered. */
+const needsNoLabel = (field: El, type: string): boolean =>
+	(field.name === "input" && UNLABELLED_INPUTS.includes(type)) || hidden(field);
+
+const hasLabel = (
+	page: Page,
+	field: El,
+	labelFor: ReadonlySet<string | undefined>,
+): boolean => {
+	const id = field.attrs.id;
+	const labelled = (id && labelFor.has(id)) || closest(field, "label");
+	return Boolean(labelled) || isNamed(page, field, undefined);
+};
+
+const checkFormLabels: Check = (page, report) => {
+	const labelFor = labelTargets(page.doc);
+	for (const field of findAll(page.doc, ["input", "select", "textarea"])) {
 		const type = (field.attrs.type ?? "text").toLowerCase();
-		if (
-			field.name === "input" &&
-			["hidden", "submit", "button", "reset", "image"].includes(type)
-		)
-			continue;
-		if (hidden(field)) continue;
-		const labelled =
-			(field.attrs.id && labelFor.has(field.attrs.id)) ||
-			closest(field, "label") ||
-			ariaName(page, field) ||
-			field.attrs.title?.trim();
-		if (labelled) continue;
+		if (needsNoLabel(field, type) || hasLabel(page, field, labelFor)) continue;
 		report(
 			{
 				id: "form-label",
@@ -256,16 +264,20 @@ const checkPage = (page: Page): FindingInput[] => {
 			`A ${field.name}${field.name === "input" ? ` type=${type}` : ""} has no programmatic label${field.attrs.placeholder ? " (placeholder is not a substitute)" : ""}, so screen-reader users do not know what to enter.`,
 		);
 	}
+};
 
-	/* -------------------------- links and buttons -------------------------- */
-	for (const a of findAll(doc, "a", (el) => "href" in el.attrs)) {
-		if (
-			hidden(a) ||
-			contentName(a) ||
-			ariaName(page, a) ||
-			a.attrs.title?.trim()
-		)
-			continue;
+/* -------------------------- links and buttons -------------------------- */
+
+/** Rendered, yet with no name from content, ARIA or a title. */
+const lacksName = (page: Page, el: El): boolean =>
+	!hidden(el) && !isNamed(page, el, contentName(el));
+
+const checkLinks: Check = (page, report) => {
+	for (const a of findAll(
+		page.doc,
+		"a",
+		(el) => hasHref(el) && lacksName(page, el),
+	))
 		report(
 			{
 				id: "link-name",
@@ -280,23 +292,18 @@ const checkPage = (page: Page): FindingInput[] => {
 			a,
 			`Link to "${(a.attrs.href ?? "").slice(0, 80)}" has no text, so screen readers announce only "link".`,
 		);
-	}
+};
+
+const checkButtons: Check = (page, report) => {
 	const buttons = [
-		...findAll(doc, "button"),
+		...findAll(page.doc, "button"),
 		...findAll(
-			doc,
+			page.doc,
 			"*",
 			(el) => el.attrs.role === "button" && el.name !== "button",
 		),
 	];
-	for (const b of buttons) {
-		if (
-			hidden(b) ||
-			contentName(b) ||
-			ariaName(page, b) ||
-			b.attrs.title?.trim()
-		)
-			continue;
+	for (const b of buttons.filter((el) => lacksName(page, el)))
 		report(
 			{
 				id: "button-name",
@@ -310,19 +317,11 @@ const checkPage = (page: Page): FindingInput[] => {
 			b,
 			"A button has no text or label, so its action is not announced.",
 		);
-	}
-	for (const b of findAll(
-		doc,
-		"input",
-		(i) => (i.attrs.type ?? "").toLowerCase() === "button",
-	)) {
-		if (
-			hidden(b) ||
-			b.attrs.value?.trim() ||
-			ariaName(page, b) ||
-			b.attrs.title?.trim()
-		)
-			continue;
+};
+
+const checkInputButtons: Check = (page, report) => {
+	for (const b of findAll(page.doc, "input", inputOfType("button"))) {
+		if (hidden(b) || isNamed(page, b, b.attrs.value?.trim())) continue;
 		report(
 			{
 				id: "button-name",
@@ -337,10 +336,16 @@ const checkPage = (page: Page): FindingInput[] => {
 			"An <input type=button> has no value, so its action is not announced.",
 		);
 	}
+};
 
-	/* ------------------------------- headings ------------------------------ */
+/* ------------------------------- headings ------------------------------ */
+
+const isEmptyHeading = (page: Page, h: El): boolean =>
+	!textOf(h) && !contentName(h) && !ariaName(page, h) && !hidden(h);
+
+const checkHeadings: Check = (page, report) => {
 	let previous = 0;
-	for (const h of findAll(doc, ["h1", "h2", "h3", "h4", "h5", "h6"])) {
+	for (const h of findAll(page.doc, ["h1", "h2", "h3", "h4", "h5", "h6"])) {
 		const level = Number(h.name[1]);
 		if (previous > 0 && level > previous + 1)
 			report(
@@ -358,7 +363,7 @@ const checkPage = (page: Page): FindingInput[] => {
 				`Heading jumps from h${previous} to h${level}, breaking the outline screen-reader users navigate by.`,
 			);
 		previous = level;
-		if (!textOf(h) && !contentName(h) && !ariaName(page, h) && !hidden(h))
+		if (isEmptyHeading(page, h))
 			report(
 				{
 					id: "empty-heading",
@@ -373,15 +378,23 @@ const checkPage = (page: Page): FindingInput[] => {
 				"An empty heading is announced with no content.",
 			);
 	}
+};
 
-	/* ------------------------------ duplicate ids --------------------------- */
+/* ------------------------------ duplicate ids --------------------------- */
+
+const elementsById = (doc: El): Map<string, El[]> => {
 	const ids = new Map<string, El[]>();
 	for (const el of findAll(doc, "*", (e) => !!e.attrs.id)) {
 		const id = el.attrs.id as string;
 		ids.set(id, [...(ids.get(id) ?? []), el]);
 	}
-	const referenced = new Set<string>([
-		...labelFor.values(),
+	return ids;
+};
+
+/** Ids that a label or an ARIA relationship points at. */
+const referencedIds = (doc: El): Set<string> =>
+	new Set<string>([
+		...labelTargets(doc).values(),
 		...findAll(
 			doc,
 			"*",
@@ -397,7 +410,10 @@ const checkPage = (page: Page): FindingInput[] => {
 				.split(/\s+/),
 		),
 	] as string[]);
-	for (const [id, els] of ids) {
+
+const checkDuplicateIds: Check = (page, report) => {
+	const referenced = referencedIds(page.doc);
+	for (const [id, els] of elementsById(page.doc)) {
 		if (els.length < 2) continue;
 		const aria = referenced.has(id);
 		report(
@@ -414,18 +430,24 @@ const checkPage = (page: Page): FindingInput[] => {
 			`${els.length} elements share id="${id}"${aria ? ", and a label or ARIA attribute references it, so assistive technology may associate the wrong element" : ""}.`,
 		);
 	}
+};
 
-	/* ----------------------------- skip link -------------------------------- */
+/* ----------------------------- skip link -------------------------------- */
+
+/** Navigation to tab through, with neither a skip link nor a main landmark. */
+const lacksBypass = (doc: El): boolean => {
 	const body = findFirst(doc, "body") ?? doc;
+	const links = findAll(body, "a", hasHref);
 	const hasMain =
 		!!findFirst(doc, "main") ||
 		!!findFirst(doc, "*", (e) => e.attrs.role === "main");
-	const firstLinks = findAll(body, "a", (a) => "href" in a.attrs).slice(0, 5);
-	const hasSkip = firstLinks.some((a) => /^#./.test(a.attrs.href ?? ""));
-	const navigation =
-		findAll(body, "a", (a) => "href" in a.attrs).length >= 10 ||
-		!!findFirst(doc, "nav");
-	if (navigation && !hasSkip && !hasMain)
+	const hasSkip = links.slice(0, 5).some((a) => /^#./.test(a.attrs.href ?? ""));
+	const navigation = links.length >= 10 || !!findFirst(doc, "nav");
+	return navigation && !hasSkip && !hasMain;
+};
+
+const checkBypass: Check = (page, report) => {
+	if (lacksBypass(page.doc))
 		report(
 			{
 				id: "bypass-blocks",
@@ -440,21 +462,23 @@ const checkPage = (page: Page): FindingInput[] => {
 			undefined,
 			"Keyboard users must tab through all navigation on every page: there is neither a skip link nor a <main> landmark.",
 		);
+};
 
-	/* -------------------------------- tables -------------------------------- */
-	for (const table of findAll(doc, "table")) {
+/* -------------------------------- tables -------------------------------- */
+
+const hasHeaderCells = (table: El): boolean =>
+	!!findFirst(table, "th") ||
+	!!findFirst(
+		table,
+		"*",
+		(e) => e.attrs.role === "columnheader" || e.attrs.role === "rowheader",
+	);
+
+const checkTables: Check = (page, report) => {
+	for (const table of findAll(page.doc, "table")) {
 		if (isPresentational(table)) continue;
 		const rows = findAll(table, "tr");
-		if (rows.length < 2) continue;
-		if (
-			findFirst(table, "th") ||
-			findFirst(
-				table,
-				"*",
-				(e) => e.attrs.role === "columnheader" || e.attrs.role === "rowheader",
-			)
-		)
-			continue;
+		if (rows.length < 2 || hasHeaderCells(table)) continue;
 		report(
 			{
 				id: "table-headers",
@@ -470,11 +494,13 @@ const checkPage = (page: Page): FindingInput[] => {
 			`A ${rows.length}-row table has no <th> cells, so screen readers cannot announce which column or row a cell belongs to.`,
 		);
 	}
+};
 
-	/* -------------------------------- frames -------------------------------- */
-	for (const frame of findAll(doc, ["iframe", "frame"])) {
-		if (hidden(frame) || frame.attrs.title?.trim() || ariaName(page, frame))
-			continue;
+/* -------------------------------- frames -------------------------------- */
+
+const checkFrames: Check = (page, report) => {
+	for (const frame of findAll(page.doc, ["iframe", "frame"])) {
+		if (hidden(frame) || isNamed(page, frame, undefined)) continue;
 		report(
 			{
 				id: "frame-title",
@@ -489,9 +515,12 @@ const checkPage = (page: Page): FindingInput[] => {
 			"An iframe has no title, so screen-reader users cannot tell what it contains before entering it.",
 		);
 	}
+};
 
-	/* ------------------------------- tabindex ------------------------------- */
-	for (const el of findAll(doc, "*", (e) => Number(e.attrs.tabindex) > 0)) {
+/* ------------------------------- tabindex ------------------------------- */
+
+const checkTabindex: Check = (page, report) => {
+	for (const el of findAll(page.doc, "*", (e) => Number(e.attrs.tabindex) > 0))
 		report(
 			{
 				id: "positive-tabindex",
@@ -506,20 +535,78 @@ const checkPage = (page: Page): FindingInput[] => {
 			el,
 			`tabindex="${el.attrs.tabindex}" overrides the natural focus order, which confuses keyboard users.`,
 		);
-	}
+};
 
-	for (const [rule, n] of counts)
-		if (n > MAX_PER_RULE)
-			findings.push({
-				ruleId: `web.accessibility/${rule}`,
-				title: "More occurrences omitted",
-				severity: "info",
-				category: "accessibility",
-				message: `${n - MAX_PER_RULE} further ${rule} issues on this page were not listed individually.`,
-				location: { url: page.url, selector: "(truncated)" },
-			});
+/** Run in this order, so findings keep a stable order per page. */
+const CHECKS: ReadonlyArray<Check> = [
+	checkLang,
+	checkTitle,
+	checkViewport,
+	checkImages,
+	checkImageInputs,
+	checkAreas,
+	checkFormLabels,
+	checkLinks,
+	checkButtons,
+	checkInputButtons,
+	checkHeadings,
+	checkDuplicateIds,
+	checkBypass,
+	checkTables,
+	checkFrames,
+	checkTabindex,
+];
 
-	return findings;
+const referencesOf = (rule: Rule): string[] => [
+	...(rule.understanding ? [`${WCAG}/${rule.understanding}`] : []),
+	...(rule.axe ? [`${DEQUE}/${rule.axe}`] : []),
+];
+
+const findingOf = (
+	page: Page,
+	rule: Rule,
+	el: El | undefined,
+	message: string,
+): FindingInput => ({
+	ruleId: `web.accessibility/${rule.id}`,
+	title: rule.title,
+	severity: rule.severity,
+	category: "accessibility",
+	message,
+	location: { url: page.url, selector: el ? selectorOf(el) : undefined },
+	evidence: el ? snippetOf(el) : undefined,
+	remediation: rule.remediation,
+	references: referencesOf(rule),
+	tags: rule.wcag.map((sc) => `wcag-${sc}`),
+});
+
+/** One note per rule that hit the per-page cap. */
+const omitted = (
+	page: Page,
+	counts: ReadonlyMap<string, number>,
+): FindingInput[] =>
+	[...counts]
+		.filter(([, n]) => n > MAX_PER_RULE)
+		.map(([rule, n]) => ({
+			ruleId: `web.accessibility/${rule}`,
+			title: "More occurrences omitted",
+			severity: "info",
+			category: "accessibility",
+			message: `${n - MAX_PER_RULE} further ${rule} issues on this page were not listed individually.`,
+			location: { url: page.url, selector: "(truncated)" },
+		}));
+
+/** Static (non-rendered) WCAG checks over the crawled HTML. */
+const checkPage = (page: Page): FindingInput[] => {
+	const findings: FindingInput[] = [];
+	const counts = new Map<string, number>();
+	const report: Report = (rule, el, message) => {
+		const n = (counts.get(rule.id) ?? 0) + 1;
+		counts.set(rule.id, n);
+		if (n <= MAX_PER_RULE) findings.push(findingOf(page, rule, el, message));
+	};
+	for (const check of CHECKS) check(page, report);
+	return [...findings, ...omitted(page, counts)];
 };
 
 /** Static WCAG checks over crawled HTML (no browser). */

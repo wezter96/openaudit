@@ -65,24 +65,31 @@ export const parseHtml = (html: string): El => {
 	return root;
 };
 
+const nameTest = (
+	names: string | ReadonlyArray<string>,
+): ((el: El) => boolean) => {
+	const wanted = typeof names === "string" ? [names] : names;
+	return wanted.includes("*") ? () => true : (el) => wanted.includes(el.name);
+};
+
+const collect = (el: El, keep: (el: El) => boolean, out: El[]): void => {
+	for (const child of el.children) {
+		if (child.type !== "el") continue;
+		if (keep(child)) out.push(child);
+		collect(child, keep, out);
+	}
+};
+
 /** All descendant elements matching a tag name (or `*`) and optional predicate. */
 export const findAll = (
 	root: El,
 	names: string | ReadonlyArray<string>,
 	pred?: (el: El) => boolean,
 ): El[] => {
-	const wanted = typeof names === "string" ? [names] : names;
-	const any = wanted.includes("*");
+	const nameMatches = nameTest(names);
+	const predMatches = pred ?? (() => true);
 	const out: El[] = [];
-	const visit = (el: El) => {
-		for (const child of el.children) {
-			if (child.type !== "el") continue;
-			if ((any || wanted.includes(child.name)) && (!pred || pred(child)))
-				out.push(child);
-			visit(child);
-		}
-	};
-	visit(root);
+	collect(root, (el) => nameMatches(el) && predMatches(el), out);
 	return out;
 };
 
@@ -124,28 +131,40 @@ export const closest = (el: El, name: string): El | undefined => {
 
 const cssIdent = (s: string) => s.replace(/([^\w-])/g, "\\$1");
 
+const inDocument = (el: El | undefined): el is El =>
+	el !== undefined && el.name !== "#document";
+
+const isPageRoot = (el: El) => el.name === "body" || el.name === "html";
+
+/** `tag#id` when the element has an id usable as a CSS identifier. */
+const idSelector = (el: El): string | undefined => {
+	const id = el.attrs.id;
+	return id && /^[A-Za-z][\w-]*$/.test(id)
+		? `${el.name}#${cssIdent(id)}`
+		: undefined;
+};
+
+/** `:nth-of-type(n)` when same-named siblings make the tag ambiguous. */
+const nthOfType = (el: El): string => {
+	const parent = el.parent;
+	if (!parent || isPageRoot(el)) return "";
+	const siblings = parent.children.filter(
+		(c): c is El => c.type === "el" && c.name === el.name,
+	);
+	return siblings.length > 1 ? `:nth-of-type(${siblings.indexOf(el) + 1})` : "";
+};
+
 /** A short, reasonably unique CSS selector for reporting. */
 export const selectorOf = (el: El): string => {
 	const parts: string[] = [];
-	let cur: El | undefined = el;
-	while (cur && cur.name !== "#document" && parts.length < 5) {
-		const id = cur.attrs.id;
-		if (id && /^[A-Za-z][\w-]*$/.test(id)) {
-			parts.unshift(`${cur.name}#${cssIdent(id)}`);
+	for (let cur: El | undefined = el; inDocument(cur); cur = cur.parent) {
+		const id = idSelector(cur);
+		if (id) {
+			parts.unshift(id);
 			break;
 		}
-		let part = cur.name;
-		const parent: El | undefined = cur.parent;
-		if (parent && cur.name !== "html" && cur.name !== "body") {
-			const siblings = parent.children.filter(
-				(c): c is El => c.type === "el" && c.name === cur?.name,
-			);
-			if (siblings.length > 1)
-				part += `:nth-of-type(${siblings.indexOf(cur) + 1})`;
-		}
-		parts.unshift(part);
-		if (cur.name === "body" || cur.name === "html") break;
-		cur = parent;
+		parts.unshift(`${cur.name}${nthOfType(cur)}`);
+		if (isPageRoot(cur) || parts.length >= 5) break;
 	}
 	return parts.join(" > ");
 };

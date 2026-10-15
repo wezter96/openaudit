@@ -84,7 +84,7 @@ const memo = <A, E>(
 /** `ctx.http`, cached per audit so auditors never refetch the same URL. */
 export const fetchCached = (
 	ctx: AuditContext,
-	url: string,
+	url: Url,
 	init: HttpRequest = {},
 ): Effect.Effect<HttpResponse, AuditorError> =>
 	memo(
@@ -98,54 +98,55 @@ export const fetchCached = (
 		ctx.http(url, init),
 	);
 
-export const resolveUrl = (
-	base: string,
-	href: string | undefined,
-): string | undefined => {
-	if (!href) return undefined;
-	const trimmed = href.trim();
-	if (!trimmed || /^(javascript|mailto|tel|data|blob|about):/i.test(trimmed))
-		return undefined;
+/** An absolute or relative URL as found in a page or the target. */
+export type Url = string;
+
+const NON_HTTP_SCHEME = /^(javascript|mailto|tel|data|blob|about):/i;
+const HTTP_PROTOCOLS = new Set(["http:", "https:"]);
+
+const parseUrl = (raw: Url, base?: Url): URL | undefined => {
 	try {
-		const url = new URL(trimmed, base);
-		if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
-		return url.toString();
+		return new URL(raw, base);
 	} catch {
 		return undefined;
 	}
 };
 
-export const stripHash = (url: string): string => {
+const isHttp = (url: URL | undefined): url is URL =>
+	url !== undefined && HTTP_PROTOCOLS.has(url.protocol);
+
+export const resolveUrl = (
+	base: Url,
+	href: Url | undefined,
+): Url | undefined => {
+	const trimmed = href?.trim();
+	if (!trimmed || NON_HTTP_SCHEME.test(trimmed)) return undefined;
+	const url = parseUrl(trimmed, base);
+	return isHttp(url) ? url.toString() : undefined;
+};
+
+export const stripHash = (url: Url): Url => {
 	const i = url.indexOf("#");
 	return i === -1 ? url : url.slice(0, i);
 };
 
-export const originOf = (url: string): string | undefined => {
-	try {
-		return new URL(url).origin;
-	} catch {
-		return undefined;
-	}
-};
+export const originOf = (url: Url): string | undefined => parseUrl(url)?.origin;
 
-export const sameOrigin = (a: string, b: string): boolean => {
+export const sameOrigin = (a: Url, b: Url): boolean => {
 	// Exact origin match; opaque origins ("null", e.g. data:) never match.
 	const oa = originOf(a);
 	return oa !== undefined && oa !== "null" && oa === originOf(b);
 };
 
-export const isLoopback = (url: string): boolean => {
-	try {
-		const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
-		return (
-			host === "localhost" ||
-			host.endsWith(".localhost") ||
-			host === "::1" ||
-			host.startsWith("127.")
-		);
-	} catch {
-		return false;
-	}
+const isLoopbackHost = (host: string): boolean =>
+	host === "localhost" ||
+	host.endsWith(".localhost") ||
+	host === "::1" ||
+	host.startsWith("127.");
+
+export const isLoopback = (url: Url): boolean => {
+	const host = parseUrl(url)?.hostname.replace(/^\[|\]$/g, "");
+	return host !== undefined && isLoopbackHost(host);
 };
 
 const looksLikeHtml = (res: HttpResponse): boolean => {
@@ -168,15 +169,20 @@ const EMPTY_DOC = (): El => ({
 	start: 0,
 });
 
-const toPage = (requestedUrl: string, response: HttpResponse): Page => {
-	const isHtml = looksLikeHtml(response);
-	const doc = isHtml ? parseHtml(response.body) : EMPTY_DOC();
-	const base = baseUrlOf({ url: response.url, doc });
+/** Absolute, hash-less same-origin links of a parsed document. */
+const linksOf = (doc: El, base: Url, pageUrl: Url): string[] => {
 	const links = new Set<string>();
 	for (const a of findAll(doc, ["a", "area"], (el) => "href" in el.attrs)) {
 		const abs = resolveUrl(base, attr(a, "href"));
-		if (abs && sameOrigin(abs, response.url)) links.add(stripHash(abs));
+		if (abs && sameOrigin(abs, pageUrl)) links.add(stripHash(abs));
 	}
+	return [...links];
+};
+
+const toPage = (requestedUrl: Url, response: HttpResponse): Page => {
+	const isHtml = looksLikeHtml(response);
+	const doc = isHtml ? parseHtml(response.body) : EMPTY_DOC();
+	const base = baseUrlOf({ url: response.url, doc });
 	return {
 		url: response.url,
 		requestedUrl,
@@ -184,14 +190,14 @@ const toPage = (requestedUrl: string, response: HttpResponse): Page => {
 		status: response.status,
 		isHtml,
 		doc,
-		links: [...links],
+		links: linksOf(doc, base, response.url),
 	};
 };
 
 /** Fetches and parses a URL once per audit. */
 export const getPage = (
 	ctx: AuditContext,
-	url: string,
+	url: Url,
 ): Effect.Effect<Page, AuditorError> =>
 	memo(
 		cacheFor(ctx).pages,
@@ -205,6 +211,64 @@ export const startPage = (
 ): Effect.Effect<Page, AuditorError | SkipAudit> =>
 	Effect.flatMap(requireUrl(ctx), (url) => getPage(ctx, url));
 
+interface CrawlState {
+	readonly statuses: Map<string, number>;
+	readonly linkedFrom: Map<string, string>;
+	readonly pages: Page[];
+	readonly queue: string[];
+}
+
+const isHtmlOk = (page: Page): boolean => page.isHtml && page.status < 400;
+
+const isKnown = (state: CrawlState, link: Url): boolean =>
+	state.statuses.has(link) || state.queue.includes(link);
+
+const enqueue = (state: CrawlState, page: Page) => {
+	for (const link of page.links) {
+		if (!state.linkedFrom.has(link)) state.linkedFrom.set(link, page.url);
+		if (!isKnown(state, link)) state.queue.push(link);
+	}
+};
+
+const isCrawlable = (state: CrawlState, url: Url): boolean =>
+	!state.statuses.has(url) && !ASSET_EXT.test(new URL(url).pathname);
+
+/** Takes up to `room` crawlable URLs off the queue. */
+const nextBatch = (state: CrawlState, room: number): string[] => {
+	const batch: string[] = [];
+	while (state.queue.length > 0 && batch.length < room) {
+		const next = state.queue.shift() as string;
+		if (isCrawlable(state, next)) batch.push(next);
+	}
+	return batch;
+};
+
+const fetchBatch = (ctx: AuditContext, batch: ReadonlyArray<Url>) =>
+	Effect.forEach(
+		batch,
+		(url) =>
+			getPage(ctx, url).pipe(
+				Effect.map((page) => ({ url, page })),
+				Effect.orElseSucceed(() => ({ url, page: undefined })),
+			),
+		{ concurrency: CRAWL_CONCURRENCY },
+	);
+
+const record = (
+	state: CrawlState,
+	start: Page,
+	fetched: { readonly url: Url; readonly page: Page | undefined },
+) => {
+	const { url, page } = fetched;
+	state.statuses.set(url, page?.status ?? 0);
+	if (!page) return;
+	state.statuses.set(stripHash(page.url), page.status);
+	if (isHtmlOk(page) && sameOrigin(page.url, start.url)) {
+		state.pages.push(page);
+		enqueue(state, page);
+	}
+};
+
 const doCrawl = (
 	ctx: AuditContext,
 ): Effect.Effect<Crawl, AuditorError | SkipAudit> =>
@@ -212,54 +276,25 @@ const doCrawl = (
 		const startUrl = yield* requireUrl(ctx);
 		const max = Math.max(1, ctx.options.maxPages ?? DEFAULT_MAX_PAGES);
 		const start = yield* getPage(ctx, startUrl);
-		const statuses = new Map<string, number>([
-			[stripHash(startUrl), start.status],
-			[stripHash(start.url), start.status],
-		]);
-		const linkedFrom = new Map<string, string>();
-		const pages: Page[] = start.isHtml && start.status < 400 ? [start] : [];
-		const queue: string[] = [];
-		const enqueue = (page: Page) => {
-			for (const link of page.links) {
-				if (!linkedFrom.has(link)) linkedFrom.set(link, page.url);
-				if (!statuses.has(link) && !queue.includes(link)) queue.push(link);
-			}
+		const state: CrawlState = {
+			statuses: new Map<string, number>([
+				[stripHash(startUrl), start.status],
+				[stripHash(start.url), start.status],
+			]),
+			linkedFrom: new Map<string, string>(),
+			pages: isHtmlOk(start) ? [start] : [],
+			queue: [],
 		};
-		enqueue(start);
+		enqueue(state, start);
 
-		while (pages.length < max && queue.length > 0) {
-			const batch: string[] = [];
-			while (queue.length > 0 && batch.length < max - pages.length) {
-				const next = queue.shift() as string;
-				if (statuses.has(next)) continue;
-				if (ASSET_EXT.test(new URL(next).pathname)) continue;
-				batch.push(next);
-			}
+		while (state.pages.length < max && state.queue.length > 0) {
+			const batch = nextBatch(state, max - state.pages.length);
 			if (batch.length === 0) break;
-			const fetched = yield* Effect.forEach(
-				batch,
-				(url) =>
-					getPage(ctx, url).pipe(
-						Effect.map((page) => ({ url, page })),
-						Effect.orElseSucceed(() => ({ url, page: undefined })),
-					),
-				{ concurrency: CRAWL_CONCURRENCY },
-			);
-			for (const { url, page } of fetched) {
-				statuses.set(url, page?.status ?? 0);
-				if (!page) continue;
-				statuses.set(stripHash(page.url), page.status);
-				if (
-					page.isHtml &&
-					page.status < 400 &&
-					sameOrigin(page.url, start.url)
-				) {
-					pages.push(page);
-					enqueue(page);
-				}
-			}
+			const fetched = yield* fetchBatch(ctx, batch);
+			for (const f of fetched) record(state, start, f);
 		}
 
+		const { statuses, linkedFrom, pages, queue } = state;
 		return {
 			start,
 			pages,
@@ -316,62 +351,65 @@ export interface Resource {
 	readonly el: El;
 }
 
+/** Elements whose kind and URL attribute are fixed by their tag name. */
+const TAG_REFERENCES = new Map<string, readonly [ResourceKind, string]>([
+	["script", ["script", "src"]],
+	["img", ["image", "src"]],
+	["iframe", ["iframe", "src"]],
+	["frame", ["iframe", "src"]],
+	["video", ["media", "src"]],
+	["audio", ["media", "src"]],
+	["source", ["media", "src"]],
+	["track", ["media", "src"]],
+	["object", ["object", "data"]],
+	["embed", ["object", "src"]],
+	["form", ["form", "action"]],
+]);
+
+const PRELOAD_AS = new Map<string, ResourceKind>([
+	["font", "font"],
+	["style", "stylesheet"],
+	["script", "script"],
+]);
+
+const preloadKind = (as: string | undefined, rel: string[]): ResourceKind => {
+	const explicit = PRELOAD_AS.get(as ?? "");
+	if (explicit) return explicit;
+	if (rel.includes("modulepreload")) return "script";
+	return as === "image" ? "image" : "other";
+};
+
+const linkKind = (el: El): ResourceKind | undefined => {
+	const rel = (el.attrs.rel ?? "").toLowerCase().split(/\s+/);
+	if (rel.includes("stylesheet")) return "stylesheet";
+	if (rel.includes("preload") || rel.includes("modulepreload"))
+		return preloadKind(el.attrs.as, rel);
+	if (rel.includes("icon")) return "image";
+	return undefined;
+};
+
+const referenceOf = (
+	el: El,
+): { kind: ResourceKind; value: Url | undefined } | undefined => {
+	if (el.name === "link") {
+		const kind = linkKind(el);
+		return kind && { kind, value: el.attrs.href };
+	}
+	const known = TAG_REFERENCES.get(el.name);
+	return known && { kind: known[0], value: el.attrs[known[1]] };
+};
+
+const resourceOf = (base: Url, el: El): Resource | undefined => {
+	const ref = referenceOf(el);
+	if (!ref) return undefined;
+	const url = resolveUrl(base, ref.value);
+	return url ? { kind: ref.kind, url, el } : undefined;
+};
+
 /** Subresources referenced by a page, resolved to absolute URLs. */
 export const resourcesOf = (page: Page): ReadonlyArray<Resource> => {
 	const base = baseUrlOf(page);
-	const out: Resource[] = [];
-	const add = (kind: ResourceKind, el: El, value: string | undefined) => {
-		const url = resolveUrl(base, value);
-		if (url) out.push({ kind, url, el });
-	};
-	for (const el of findAll(page.doc, "*")) {
-		switch (el.name) {
-			case "script":
-				add("script", el, el.attrs.src);
-				break;
-			case "link": {
-				const rel = (el.attrs.rel ?? "").toLowerCase().split(/\s+/);
-				if (rel.includes("stylesheet")) add("stylesheet", el, el.attrs.href);
-				else if (rel.includes("preload") || rel.includes("modulepreload"))
-					add(
-						el.attrs.as === "font"
-							? "font"
-							: el.attrs.as === "style"
-								? "stylesheet"
-								: el.attrs.as === "script" || rel.includes("modulepreload")
-									? "script"
-									: el.attrs.as === "image"
-										? "image"
-										: "other",
-						el,
-						el.attrs.href,
-					);
-				else if (rel.includes("icon")) add("image", el, el.attrs.href);
-				break;
-			}
-			case "img":
-				add("image", el, el.attrs.src);
-				break;
-			case "iframe":
-			case "frame":
-				add("iframe", el, el.attrs.src);
-				break;
-			case "video":
-			case "audio":
-			case "source":
-			case "track":
-				add("media", el, el.attrs.src);
-				break;
-			case "object":
-				add("object", el, el.attrs.data);
-				break;
-			case "embed":
-				add("object", el, el.attrs.src);
-				break;
-			case "form":
-				if (el.attrs.action) add("form", el, el.attrs.action);
-				break;
-		}
-	}
-	return out;
+	return findAll(page.doc, "*")
+		.map((el) => resourceOf(base, el))
+		.filter((r): r is Resource => r !== undefined);
 };

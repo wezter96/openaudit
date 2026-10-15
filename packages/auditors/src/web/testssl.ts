@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+	type AuditContext,
 	AuditorError,
 	defineAuditor,
 	type FindingInput,
@@ -11,7 +12,7 @@ import {
 } from "@openaudit/core";
 import { Effect } from "effect";
 
-import { arr, cweTags, str } from "../tool";
+import { arr, cweTags, parseJson, str } from "../tool";
 import { parseUrl, truncate } from "./util";
 
 export interface TestsslEntry {
@@ -21,6 +22,11 @@ export interface TestsslEntry {
 	readonly cve?: string;
 	readonly cwe?: string;
 }
+
+/** A testssl.sh finding id such as `LOGJAM-common_primes` or `cert_trust <#2>`. */
+type TestsslId = string;
+type Url = string;
+type FilePath = string;
 
 const DOCS = "https://testssl.sh/";
 
@@ -166,8 +172,8 @@ const INFO: Record<string, { title: string; fix: string }> = {
 	},
 };
 
-const idKey = (id: string) => id.replace(/\s*<#\d+>$/, "");
-const infoFor = (id: string) =>
+const idKey = (id: TestsslId) => id.replace(/\s*<#\d+>$/, "");
+const infoFor = (id: TestsslId) =>
 	INFO[id] ?? INFO[id.replace(/[-_](common|prime|CBC).*$/i, "")];
 
 const kebab = (s: string) =>
@@ -176,56 +182,136 @@ const kebab = (s: string) =>
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/^-+|-+$/g, "");
 
+const isSkipped = (key: TestsslId) =>
+	// Intermediate certificate entries other than expiry are informational.
+	SKIPPED.has(key) || /^intermediate_cert_(?!expiration)/.test(key);
+
+/** A reported entry worth a finding, with its id normalised. */
+interface Reported {
+	readonly entry: TestsslEntry;
+	readonly id: TestsslId;
+	readonly key: TestsslId;
+	readonly severity: Severity;
+	readonly finding: string;
+}
+
+const reportedOf = (raw: unknown): Reported | undefined => {
+	const entry = raw as TestsslEntry;
+	const id = str(entry.id);
+	const severity = SEVERITY[(entry.severity ?? "").toUpperCase()];
+	if (!id || !severity) return undefined;
+	const key = idKey(id);
+	if (isSkipped(key)) return undefined;
+	const finding = (entry.finding ?? "").replace(/\s+/g, " ").trim();
+	return { entry, id, key, severity, finding };
+};
+
+const toFinding = (
+	{ entry, key, severity, finding }: Reported,
+	url: Url | undefined,
+): FindingInput => {
+	const info = infoFor(key);
+	const cves = (entry.cve ?? "").match(/CVE-\d{4}-\d+/gi) ?? [];
+	return {
+		ruleId: `web.testssl/${kebab(key)}`,
+		title: info?.title ?? truncate(`${key}: ${finding}`, 90),
+		severity,
+		category: "security",
+		message: `testssl.sh reports ${key}: ${truncate(finding || "see testssl.sh output", 200)}`,
+		location: { url },
+		evidence: finding ? truncate(finding, 200) : undefined,
+		remediation:
+			info?.fix ??
+			"Review the TLS configuration against the Mozilla server-side TLS guidelines.",
+		references: [
+			...cves.map((c) => `https://nvd.nist.gov/vuln/detail/${c.toUpperCase()}`),
+			"https://wiki.mozilla.org/Security/Server_Side_TLS",
+			DOCS,
+		],
+		tags: [
+			"tls",
+			...cweTags(entry.cwe ? [entry.cwe] : []),
+			...cves.map((c) => c.toLowerCase()),
+		],
+	};
+};
+
 /** Maps a testssl.sh flat JSON report to findings. Exported for tests. */
 export const parseTestsslReport = (
 	json: unknown,
-	url?: string,
+	url?: Url,
 ): FindingInput[] => {
 	const findings: FindingInput[] = [];
 	const seen = new Set<string>();
 	for (const raw of arr(json)) {
-		const entry = raw as TestsslEntry;
-		const id = str(entry.id);
-		const severity = SEVERITY[(entry.severity ?? "").toUpperCase()];
-		if (!id || !severity) continue;
-		const key = idKey(id);
-		// Intermediate certificate entries other than expiry are informational.
-		if (SKIPPED.has(key) || /^intermediate_cert_(?!expiration)/.test(key))
-			continue;
-		const finding = (entry.finding ?? "").replace(/\s+/g, " ").trim();
+		const reported = reportedOf(raw);
+		if (!reported) continue;
 		// testssl repeats some ids per protocol/IP; one finding per id and text.
-		const dedupe = `${id}|${finding}`;
+		const dedupe = `${reported.id}|${reported.finding}`;
 		if (seen.has(dedupe)) continue;
 		seen.add(dedupe);
-		const info = infoFor(key);
-		const cves = (entry.cve ?? "").match(/CVE-\d{4}-\d+/gi) ?? [];
-		findings.push({
-			ruleId: `web.testssl/${kebab(key)}`,
-			title: info?.title ?? truncate(`${key}: ${finding}`, 90),
-			severity,
-			category: "security",
-			message: `testssl.sh reports ${key}: ${truncate(finding || "see testssl.sh output", 200)}`,
-			location: { url },
-			evidence: finding ? truncate(finding, 200) : undefined,
-			remediation:
-				info?.fix ??
-				"Review the TLS configuration against the Mozilla server-side TLS guidelines.",
-			references: [
-				...cves.map(
-					(c) => `https://nvd.nist.gov/vuln/detail/${c.toUpperCase()}`,
-				),
-				"https://wiki.mozilla.org/Security/Server_Side_TLS",
-				DOCS,
-			],
-			tags: [
-				"tls",
-				...cweTags(entry.cwe ? [entry.cwe] : []),
-				...cves.map((c) => c.toLowerCase()),
-			],
-		});
+		findings.push(toFinding(reported, url));
 	}
 	return findings;
 };
+
+/** What to scan: the testssl.sh binary, the target URL and its `host:port`. */
+interface Scan {
+	readonly bin: FilePath;
+	readonly url: Url;
+	readonly hostPort: string;
+}
+
+const testsslArgs = (scan: Scan, out: FilePath) => [
+	scan.bin,
+	"--protocols",
+	"--server-defaults",
+	"--vulnerable",
+	"--std",
+	"--jsonfile",
+	out,
+	"--quiet",
+	"--warnings",
+	"off",
+	"--color",
+	"0",
+	"--ip",
+	"one",
+	scan.hostPort,
+];
+
+/** Runs testssl.sh with its JSON report written into `dir`, then parses it. */
+const scanInto = (ctx: AuditContext, scan: Scan, dir: FilePath) =>
+	Effect.gen(function* () {
+		const out = join(dir, "report.json");
+		const res = yield* ctx.exec.run(testsslArgs(scan, out), {
+			cwd: dir,
+			timeoutMs: 15 * 60_000,
+		});
+		const text = yield* Effect.promise(() =>
+			readFile(out, "utf8").catch(() => ""),
+		);
+		// Exit codes 240+ are testssl.sh fatal errors.
+		if (!text.trim() || res.code >= 240)
+			return yield* Effect.fail(
+				new AuditorError({
+					message: `testssl.sh exited with code ${res.code} and no report: ${truncate((res.stderr || res.stdout).trim(), 300)}`,
+				}),
+			);
+		return parseTestsslReport(yield* parseJson(text, "testssl.sh"), scan.url);
+	});
+
+const runScan = (ctx: AuditContext, scan: Scan) =>
+	Effect.gen(function* () {
+		const dir = yield* Effect.promise(() =>
+			mkdtemp(join(tmpdir(), "openaudit-testssl-")),
+		);
+		return yield* scanInto(ctx, scan, dir).pipe(
+			Effect.ensuring(
+				Effect.promise(() => rm(dir, { recursive: true, force: true })),
+			),
+		);
+	});
 
 /** Deep TLS scan with testssl.sh (protocols, ciphers, known vulnerabilities, server defaults). */
 export const testssl = defineAuditor({
@@ -251,55 +337,10 @@ export const testssl = defineAuditor({
 				return yield* skip(
 					"testssl.sh not found on PATH. Install: brew install testssl (https://testssl.sh/).",
 				);
-			const dir = yield* Effect.promise(() =>
-				mkdtemp(join(tmpdir(), "openaudit-testssl-")),
-			);
-			const out = join(dir, "report.json");
-			const hostPort = `${parsed.hostname}:${parsed.port || "443"}`;
-			return yield* Effect.gen(function* () {
-				const res = yield* ctx.exec.run(
-					[
-						bin,
-						"--protocols",
-						"--server-defaults",
-						"--vulnerable",
-						"--std",
-						"--jsonfile",
-						out,
-						"--quiet",
-						"--warnings",
-						"off",
-						"--color",
-						"0",
-						"--ip",
-						"one",
-						hostPort,
-					],
-					{ cwd: dir, timeoutMs: 15 * 60_000 },
-				);
-				const text = yield* Effect.promise(() =>
-					readFile(out, "utf8").catch(() => ""),
-				);
-				// Exit codes 240+ are testssl.sh fatal errors.
-				if (!text.trim() || res.code >= 240)
-					return yield* Effect.fail(
-						new AuditorError({
-							message: `testssl.sh exited with code ${res.code} and no report: ${truncate((res.stderr || res.stdout).trim(), 300)}`,
-						}),
-					);
-				const json = yield* Effect.try({
-					try: () => JSON.parse(text) as unknown,
-					catch: (cause) =>
-						new AuditorError({
-							message: "testssl.sh produced invalid JSON output",
-							cause,
-						}),
-				});
-				return parseTestsslReport(json, url);
-			}).pipe(
-				Effect.ensuring(
-					Effect.promise(() => rm(dir, { recursive: true, force: true })),
-				),
-			);
+			return yield* runScan(ctx, {
+				bin,
+				url,
+				hostPort: `${parsed.hostname}:${parsed.port || "443"}`,
+			});
 		}),
 });
