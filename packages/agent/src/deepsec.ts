@@ -60,6 +60,33 @@ const CHUNK_SIZE = 5;
 const RULE_PREFIX = "agent.deepsec";
 const MAX_TEXT = 2_000;
 
+/** A duration setting such as `30m`. */
+type Duration = string;
+/** A directory on the local filesystem. */
+type DirPath = string;
+/** A file on the local filesystem. */
+type FilePath = string;
+/** A path as deepsec or git reported it, not yet validated. */
+type ReportedPath = string;
+/** An upper bound on files to review. */
+type FileCount = number;
+/** A timeout in milliseconds. */
+type Millis = number;
+/** Raw `git diff --name-only -z` output. */
+type GitOutput = string;
+/** Markdown text from the deepsec export. */
+type Markdown = string;
+/** deepsec's vulnerability class, such as `sql-injection`. */
+type VulnSlug = string;
+/** deepsec's revalidation verdict, such as `true-positive`. */
+type Verdict = string;
+/** deepsec's own confidence label. */
+type ConfidenceLabel = string;
+/** A `## <heading>` section of an exported description. */
+type SectionHeading = "Finding" | "Recommendation";
+/** The deepsec subcommand an exit code belongs to. */
+type DeepsecStep = "scan" | "process" | "export";
+
 /* -------------------------------------------------------------------------- */
 /*                                  Settings                                  */
 /* -------------------------------------------------------------------------- */
@@ -90,7 +117,7 @@ export const DeepsecSettings = z.object({
 });
 export type DeepsecSettings = z.infer<typeof DeepsecSettings>;
 
-export const durationMs = (d: string): number => {
+export const durationMs = (d: Duration): number => {
 	const n = Number.parseInt(d, 10);
 	const unit = d.slice(-1);
 	return n * (unit === "h" ? 3_600_000 : unit === "m" ? 60_000 : 1_000);
@@ -230,16 +257,17 @@ const RESOLVED = new Set([
 const str = (v: unknown): string | undefined =>
 	typeof v === "string" && v.length > 0 ? v : undefined;
 
-const obj = (v: unknown): Record<string, unknown> | undefined =>
-	v && typeof v === "object" && !Array.isArray(v)
-		? (v as Record<string, unknown>)
-		: undefined;
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+	!!v && typeof v === "object" && !Array.isArray(v);
 
-const clip = (s: string) =>
+const obj = (v: unknown): Record<string, unknown> | undefined =>
+	isPlainObject(v) ? v : undefined;
+
+const clip = (s: Markdown) =>
 	s.length > MAX_TEXT ? `${s.slice(0, MAX_TEXT)}…` : s;
 
 /** Relative POSIX path inside the root, or undefined for anything else. */
-const safeRel = (p: string | undefined): string | undefined => {
+const safeRel = (p: ReportedPath | undefined): string | undefined => {
 	if (!p) return undefined;
 	const n = p.replace(/\\/g, "/").replace(/^\.\//, "");
 	if (n.startsWith("/") || /^[A-Za-z]:/.test(n)) return undefined;
@@ -248,7 +276,7 @@ const safeRel = (p: string | undefined): string | undefined => {
 };
 
 /** Body of a `## <heading>` section of the exported markdown description. */
-const section = (md: string, heading: string): string | undefined => {
+const section = (md: Markdown, heading: SectionHeading): string | undefined => {
 	// heading is one of this module's literals.
 	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 	const m = new RegExp(
@@ -258,11 +286,133 @@ const section = (md: string, heading: string): string | undefined => {
 	return m?.[1]?.trim() || undefined;
 };
 
-const slugOf = (raw: string | undefined): string =>
+const slugOf = (raw: VulnSlug | undefined): string =>
 	(raw ?? "")
 		.toLowerCase()
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/^-+|-+$/g, "") || "finding";
+
+/** One exported item with its `metadata` object. */
+interface ExportEntry {
+	readonly item: Record<string, unknown>;
+	readonly meta: Record<string, unknown>;
+}
+
+/** deepsec's severity and revalidation for one item. */
+interface Triage {
+	readonly sevRaw: string;
+	readonly severity: Severity;
+	readonly verdict: Verdict | undefined;
+	readonly reasoning: Markdown | undefined;
+}
+
+const parseJson = (input: unknown): unknown => {
+	if (typeof input !== "string") return input;
+	try {
+		return JSON.parse(input);
+	} catch {
+		return undefined;
+	}
+};
+
+const exportEntry = (item: unknown): ExportEntry | undefined => {
+	const o = obj(item);
+	const meta = obj(o?.metadata);
+	return o && meta ? { item: o, meta } : undefined;
+};
+
+const isResolved = (verdict: Verdict | undefined) =>
+	!!verdict && RESOLVED.has(verdict);
+
+const confidenceOf = (
+	verdict: Verdict | undefined,
+	own: ConfidenceLabel | undefined,
+) => {
+	if (verdict === "true-positive") return "high";
+	return verdict === "uncertain" || own === "low" ? "low" : "medium";
+};
+
+/** CWE numbers mentioned in `text`, deduplicated in order. */
+const cwesIn = (text: Markdown): string[] => [
+	...new Set(
+		[...text.matchAll(/\bCWE-(\d{1,5})\b/gi)].map((m) => m[1] as string),
+	),
+];
+
+const locationOf = (meta: Record<string, unknown>) => {
+	const lines = Array.isArray(meta.lineNumbers)
+		? meta.lineNumbers.filter((n): n is number => Number.isInteger(n) && n > 0)
+		: [];
+	const file = safeRel(str(meta.filePath));
+	return file
+		? { location: { file, ...(lines[0] ? { line: lines[0] } : {}) } }
+		: {};
+};
+
+const evidenceOf = ({ verdict, reasoning }: Triage) =>
+	reasoning
+		? {
+				evidence: scrubSecrets(
+					clip(`Revalidation (${verdict ?? "unknown"}): ${reasoning}`),
+				),
+			}
+		: {};
+
+const referencesOf = (cwes: ReadonlyArray<string>) =>
+	cwes.length
+		? {
+				references: cwes.map(
+					(n) => `https://cwe.mitre.org/data/definitions/${n}.html`,
+				),
+			}
+		: {};
+
+const toFinding = (
+	{ item, meta }: ExportEntry,
+	triage: Triage,
+): FindingInput => {
+	const description = str(item.description) ?? "";
+	const title = (str(item.title) ?? "deepsec finding").replace(
+		/^\[[A-Z_]+\]\s*/,
+		"",
+	);
+	const finding = section(description, "Finding") ?? title;
+	const recommendation = section(description, "Recommendation");
+	const cwes = cwesIn(`${title} ${finding}`);
+	return {
+		ruleId: `${RULE_PREFIX}/${slugOf(str(meta.vulnSlug))}`,
+		title: scrubSecrets(title),
+		severity: triage.severity,
+		category: triage.sevRaw.endsWith("BUG") ? "reliability" : "security",
+		message: scrubSecrets(clip(finding)),
+		...locationOf(meta),
+		...evidenceOf(triage),
+		...(recommendation
+			? { remediation: scrubSecrets(clip(recommendation)) }
+			: {}),
+		...referencesOf(cwes),
+		confidence: confidenceOf(triage.verdict, str(meta.confidence)),
+		tags: ["ai", "deepsec", ...cwes.map((n) => `cwe-${n}`)],
+	};
+};
+
+/** One exported item as a finding, or undefined when it is unusable or resolved. */
+const deepsecFinding = (raw: unknown): FindingInput | undefined => {
+	const entry = exportEntry(raw);
+	if (!entry) return undefined;
+	const sevRaw = str(entry.meta.severity) ?? str(entry.item.severity) ?? "";
+	const severity = SEVERITY[sevRaw];
+	if (!severity) return undefined;
+	const reval = obj(entry.meta.revalidation);
+	const verdict = str(reval?.verdict);
+	if (isResolved(verdict)) return undefined;
+	return toFinding(entry, {
+		sevRaw,
+		severity,
+		verdict,
+		reasoning: str(reval?.reasoning),
+	});
+};
 
 /**
  * Parses `deepsec export --format json`: an array of
@@ -272,91 +422,11 @@ const slugOf = (raw: string | undefined): string =>
  * deepsec's own CRITICAL/HIGH/MEDIUM/LOW scale.
  */
 export const parseDeepsecExport = (input: unknown): FindingInput[] => {
-	let data = input;
-	if (typeof input === "string") {
-		try {
-			data = JSON.parse(input);
-		} catch {
-			return [];
-		}
-	}
+	const data = parseJson(input);
 	if (!Array.isArray(data)) return [];
-	const out: FindingInput[] = [];
-	for (const item of data) {
-		const o = obj(item);
-		const meta = obj(o?.metadata);
-		if (!o || !meta) continue;
-		const sevRaw = str(meta.severity) ?? str(o.severity) ?? "";
-		const severity = SEVERITY[sevRaw];
-		if (!severity) continue;
-		const reval = obj(meta.revalidation);
-		const verdict = str(reval?.verdict);
-		if (verdict && RESOLVED.has(verdict)) continue;
-
-		const description = str(o.description) ?? "";
-		const title = (str(o.title) ?? "deepsec finding").replace(
-			/^\[[A-Z_]+\]\s*/,
-			"",
-		);
-		const finding = section(description, "Finding") ?? title;
-		const recommendation = section(description, "Recommendation");
-		const lines = Array.isArray(meta.lineNumbers)
-			? meta.lineNumbers.filter(
-					(n): n is number => Number.isInteger(n) && n > 0,
-				)
-			: [];
-		const file = safeRel(str(meta.filePath));
-		const own = str(meta.confidence);
-		const confidence =
-			verdict === "true-positive"
-				? "high"
-				: verdict === "uncertain" || own === "low"
-					? "low"
-					: "medium";
-		const cwes = [
-			...new Set(
-				[...`${title} ${finding}`.matchAll(/\bCWE-(\d{1,5})\b/gi)].map(
-					(m) => m[1] as string,
-				),
-			),
-		];
-		const reasoning = str(reval?.reasoning);
-		out.push({
-			ruleId: `${RULE_PREFIX}/${slugOf(str(meta.vulnSlug))}`,
-			title: scrubSecrets(title),
-			severity,
-			category: sevRaw.endsWith("BUG") ? "reliability" : "security",
-			message: scrubSecrets(clip(finding)),
-			...(file
-				? {
-						location: {
-							file,
-							...(lines[0] ? { line: lines[0] } : {}),
-						},
-					}
-				: {}),
-			...(reasoning
-				? {
-						evidence: scrubSecrets(
-							clip(`Revalidation (${verdict ?? "unknown"}): ${reasoning}`),
-						),
-					}
-				: {}),
-			...(recommendation
-				? { remediation: scrubSecrets(clip(recommendation)) }
-				: {}),
-			...(cwes.length
-				? {
-						references: cwes.map(
-							(n) => `https://cwe.mitre.org/data/definitions/${n}.html`,
-						),
-					}
-				: {}),
-			confidence,
-			tags: ["ai", "deepsec", ...cwes.map((n) => `cwe-${n}`)],
-		});
-	}
-	return out;
+	return data
+		.map(deepsecFinding)
+		.filter((f): f is FindingInput => f !== undefined);
 };
 
 /* -------------------------------------------------------------------------- */
@@ -368,38 +438,43 @@ interface FileInfo {
 	readonly candidates: number;
 }
 
-/** Walk `<dataRoot>/<project>/files/**` (our own temp dir, no symlinks). */
-const readRecords = (dataRoot: string): Array<Record<string, unknown>> => {
-	const base = join(dataRoot, PROJECT_ID, "files");
-	const records: Array<Record<string, unknown>> = [];
-	const walk = (dir: string) => {
-		let entries: Dirent[];
-		try {
-			entries = readdirSync(dir, { withFileTypes: true });
-		} catch {
-			return;
-		}
-		for (const e of entries) {
-			const p = join(dir, e.name);
-			if (e.isDirectory()) walk(p);
-			else if (e.isFile() && e.name.endsWith(".json")) {
-				try {
-					const r = obj(JSON.parse(readFileSync(p, "utf8")));
-					if (r) records.push(r);
-				} catch {}
-			}
-		}
-	};
-	walk(base);
-	return records;
+const isJsonFile = (e: Dirent) => e.isFile() && e.name.endsWith(".json");
+
+/** `.json` files under `dir`, depth first. */
+const jsonFiles = (dir: DirPath): string[] => {
+	let entries: Dirent[];
+	try {
+		entries = readdirSync(dir, { withFileTypes: true });
+	} catch {
+		return [];
+	}
+	return entries.flatMap((e) => {
+		const p = join(dir, e.name);
+		if (e.isDirectory()) return jsonFiles(p);
+		return isJsonFile(e) ? [p] : [];
+	});
 };
 
+const readRecord = (path: FilePath): Record<string, unknown> | undefined => {
+	try {
+		return obj(JSON.parse(readFileSync(path, "utf8")));
+	} catch {
+		return undefined;
+	}
+};
+
+/** Walk `<dataRoot>/<project>/files/**` (our own temp dir, no symlinks). */
+const readRecords = (dataRoot: DirPath): Array<Record<string, unknown>> =>
+	jsonFiles(join(dataRoot, PROJECT_ID, "files"))
+		.map(readRecord)
+		.filter((r): r is Record<string, unknown> => r !== undefined);
+
 /** Chunk files travel through a comma-separated flag: keep them boring. */
-const passableFile = (path: string | undefined): path is string =>
+const passableFile = (path: ReportedPath | undefined): path is string =>
 	!!path && /^[A-Za-z0-9_./@+-]+$/.test(path) && !path.startsWith("-");
 
 /** Paths from `git diff --name-only -z`, filtered and capped. */
-export const changedFiles = (stdout: string, max: number): string[] =>
+export const changedFiles = (stdout: GitOutput, max: FileCount): string[] =>
 	[
 		...new Set(
 			stdout
@@ -410,7 +485,7 @@ export const changedFiles = (stdout: string, max: number): string[] =>
 	].slice(0, max);
 
 /** Files with regex candidates, most suspicious first. */
-export const candidateFiles = (dataRoot: string, max: number): string[] => {
+export const candidateFiles = (dataRoot: DirPath, max: FileCount): string[] => {
 	const infos: FileInfo[] = [];
 	for (const r of readRecords(dataRoot)) {
 		const path = safeRel(str(r.filePath));
@@ -423,24 +498,166 @@ export const candidateFiles = (dataRoot: string, max: number): string[] => {
 		.map((i) => i.path);
 };
 
+const isCost = (c: unknown): c is number =>
+	typeof c === "number" && Number.isFinite(c);
+
+/** The finite `costUsd` values of one record's analyses. */
+const costsOf = (record: Record<string, unknown>): number[] =>
+	Array.isArray(record.analysisHistory)
+		? record.analysisHistory.map((h) => obj(h)?.costUsd).filter(isCost)
+		: [];
+
 /** Total `costUsd` deepsec recorded across all analyses. */
-export const recordedCostUsd = (dataRoot: string): number => {
-	let total = 0;
-	for (const r of readRecords(dataRoot)) {
-		if (!Array.isArray(r.analysisHistory)) continue;
-		for (const h of r.analysisHistory) {
-			const c = obj(h)?.costUsd;
-			if (typeof c === "number" && Number.isFinite(c)) total += c;
-		}
-	}
-	return total;
-};
+export const recordedCostUsd = (dataRoot: DirPath): number =>
+	readRecords(dataRoot)
+		.flatMap(costsOf)
+		.reduce((total, c) => total + c, 0);
 
 /* -------------------------------------------------------------------------- */
 /*                                   Auditor                                  */
 /* -------------------------------------------------------------------------- */
 
 const INSTALL = `Install: npm i -g deepsec@${DEEPSEC_VERSION}`;
+
+type ExecResult = Effect.Success<ReturnType<AuditContext["exec"]["run"]>>;
+
+/** One deepsec run: its temp dirs, commands and time budget. */
+interface DeepsecJob {
+	readonly ctx: AuditContext;
+	readonly settings: DeepsecSettings;
+	readonly cmds: ReturnType<typeof deepsecCommands>;
+	readonly tmp: DirPath;
+	readonly dataRoot: DirPath;
+	readonly exportFile: FilePath;
+	readonly remaining: () => Millis;
+	readonly run: (
+		cmd: string[],
+		ms: Millis,
+	) => Effect.Effect<ExecResult, AuditorError>;
+}
+
+const parseSettings = (
+	ctx: AuditContext,
+): Effect.Effect<DeepsecSettings, AuditorError> => {
+	const parsed = DeepsecSettings.safeParse(
+		ctx.options.settings?.["agent.deepsec"] ?? {},
+	);
+	return parsed.success
+		? Effect.succeed(parsed.data)
+		: Effect.fail(
+				new AuditorError({
+					message: `Invalid agent.deepsec settings: ${z.prettifyError(parsed.error)}`,
+				}),
+			);
+};
+
+/** Creates the temp dirs; deepsec runs with cwd there, never in the target. */
+const startJob = (
+	ctx: AuditContext,
+	settings: DeepsecSettings,
+	root: DirPath,
+	agent: DeepsecAgent,
+): DeepsecJob => {
+	const tmp = mkdtempSync(join(tmpdir(), "openaudit-deepsec-"));
+	const dataRoot = join(tmp, "data");
+	const exportFile = join(tmp, "export.json");
+	mkdirSync(dataRoot);
+	const cmds = deepsecCommands(settings, { root, exportFile }, agent);
+	const budgetMs = durationMs(settings.maxDuration);
+	const started = Date.now();
+	return {
+		ctx,
+		settings,
+		cmds,
+		tmp,
+		dataRoot,
+		exportFile,
+		remaining: () => budgetMs - (Date.now() - started),
+		run: (cmd, ms) =>
+			ctx.exec.run(cmd, {
+				cwd: tmp,
+				env: { ...GIT_HARDENING_ENV, DEEPSEC_DATA_ROOT: dataRoot },
+				timeoutMs: Math.max(60_000, ms) + 60_000,
+			}),
+	};
+};
+
+// 0 = clean, 1 = findings produced; anything else is a failure.
+const checkExit = (step: DeepsecStep, r: { code: number; stderr: string }) =>
+	r.code === 0 || r.code === 1
+		? Effect.void
+		: Effect.fail(
+				new AuditorError({
+					message: `deepsec ${step} exited ${r.code}: ${scrubSecrets(r.stderr).slice(0, 500)}`,
+				}),
+			);
+
+/** Changed files in diff mode, otherwise the files with most regex candidates. */
+const filesToReview = (job: DeepsecJob) =>
+	Effect.gen(function* () {
+		const { cmds, settings } = job;
+		if (!cmds.gitDiff) {
+			yield* checkExit("scan", yield* job.run(cmds.scan, job.remaining()));
+			return candidateFiles(job.dataRoot, settings.maxFiles);
+		}
+		const diff = yield* job.run(cmds.gitDiff, 120_000);
+		if (diff.code !== 0)
+			return yield* Effect.fail(
+				new AuditorError({
+					message: `git diff ${cmds.diffRef} HEAD failed: ${scrubSecrets(diff.stderr).slice(0, 300)}`,
+				}),
+			);
+		return changedFiles(diff.stdout, settings.maxFiles);
+	});
+
+/** True (after logging why) once the duration or cost budget is used up. */
+const budgetSpent = (job: DeepsecJob) =>
+	Effect.gen(function* () {
+		if (job.remaining() <= 0) {
+			yield* job.ctx.log("deepsec: duration budget reached, stopping");
+			return true;
+		}
+		const spent = recordedCostUsd(job.dataRoot);
+		if (spent >= job.settings.maxCostUsd) {
+			yield* job.ctx.log(
+				`deepsec: cost cap reached ($${spent.toFixed(2)} of $${job.settings.maxCostUsd})`,
+			);
+			return true;
+		}
+		return false;
+	});
+
+const processChunks = (job: DeepsecJob, files: ReadonlyArray<string>) =>
+	Effect.gen(function* () {
+		for (let i = 0; i < files.length; i += CHUNK_SIZE) {
+			if (yield* budgetSpent(job)) break;
+			yield* checkExit(
+				"process",
+				yield* job.run(
+					job.cmds.process(files.slice(i, i + CHUNK_SIZE)),
+					job.remaining(),
+				),
+			);
+		}
+	});
+
+const readExport = (exportFile: FilePath): string | undefined => {
+	try {
+		return readFileSync(exportFile, "utf8");
+	} catch {
+		return undefined;
+	}
+};
+
+const review = (job: DeepsecJob) =>
+	Effect.gen(function* () {
+		const files = yield* filesToReview(job);
+		if (files.length === 0) return [] as FindingInput[];
+		yield* processChunks(job, files);
+		yield* checkExit("export", yield* job.run(job.cmds.export, 120_000));
+		const json = readExport(job.exportFile);
+		return json === undefined ? [] : parseDeepsecExport(json);
+	});
 
 /** `env` is injectable for tests; defaults to the process environment. */
 export const makeDeepsecAuditor = (
@@ -465,94 +682,19 @@ export const makeDeepsecAuditor = (
 					return yield* skip("deepsec needs network access to an AI provider");
 				yield* requireTool(ctx, "deepsec", INSTALL);
 
-				const parsed = DeepsecSettings.safeParse(
-					ctx.options.settings?.["agent.deepsec"] ?? {},
-				);
-				if (!parsed.success)
-					return yield* Effect.fail(
-						new AuditorError({
-							message: `Invalid agent.deepsec settings: ${z.prettifyError(parsed.error)}`,
-						}),
-					);
-				const settings = parsed.data;
+				const settings = yield* parseSettings(ctx);
 				const agent = agentFor(settings, env);
 				if (!hasCredentials(agent, env))
 					return yield* skip(
 						`No AI credentials in the environment for deepsec (${agent}). Set one of: ${CREDENTIALS[agent].join(", ")}`,
 					);
 
-				const root = ws.root;
-				const tmp = mkdtempSync(join(tmpdir(), "openaudit-deepsec-"));
-				const dataRoot = join(tmp, "data");
-				const exportFile = join(tmp, "export.json");
-				mkdirSync(dataRoot);
-				const cmds = deepsecCommands(settings, { root, exportFile }, agent);
-				const budgetMs = durationMs(settings.maxDuration);
-				const started = Date.now();
-				const remaining = () => budgetMs - (Date.now() - started);
-				const run = (cmd: string[], ms: number) =>
-					ctx.exec.run(cmd, {
-						cwd: tmp,
-						env: { ...GIT_HARDENING_ENV, DEEPSEC_DATA_ROOT: dataRoot },
-						timeoutMs: Math.max(60_000, ms) + 60_000,
-					});
-				// 0 = clean, 1 = findings produced; anything else is a failure.
-				const check = (what: string, r: { code: number; stderr: string }) =>
-					r.code === 0 || r.code === 1
-						? Effect.void
-						: Effect.fail(
-								new AuditorError({
-									message: `deepsec ${what} exited ${r.code}: ${scrubSecrets(r.stderr).slice(0, 500)}`,
-								}),
-							);
-
-				return yield* Effect.gen(function* () {
-					let files: string[];
-					if (cmds.gitDiff) {
-						const diff = yield* run(cmds.gitDiff, 120_000);
-						if (diff.code !== 0)
-							return yield* Effect.fail(
-								new AuditorError({
-									message: `git diff ${cmds.diffRef} HEAD failed: ${scrubSecrets(diff.stderr).slice(0, 300)}`,
-								}),
-							);
-						files = changedFiles(diff.stdout, settings.maxFiles);
-					} else {
-						yield* check("scan", yield* run(cmds.scan, remaining()));
-						files = candidateFiles(dataRoot, settings.maxFiles);
-					}
-					if (files.length === 0) return [] as FindingInput[];
-					for (let i = 0; i < files.length; i += CHUNK_SIZE) {
-						if (remaining() <= 0) {
-							yield* ctx.log("deepsec: duration budget reached, stopping");
-							break;
-						}
-						const spent = recordedCostUsd(dataRoot);
-						if (spent >= settings.maxCostUsd) {
-							yield* ctx.log(
-								`deepsec: cost cap reached ($${spent.toFixed(2)} of $${settings.maxCostUsd})`,
-							);
-							break;
-						}
-						yield* check(
-							"process",
-							yield* run(
-								cmds.process(files.slice(i, i + CHUNK_SIZE)),
-								remaining(),
-							),
-						);
-					}
-					yield* check("export", yield* run(cmds.export, 120_000));
-					let json: string;
-					try {
-						json = readFileSync(exportFile, "utf8");
-					} catch {
-						return [] as FindingInput[];
-					}
-					return parseDeepsecExport(json);
-				}).pipe(
+				const job = startJob(ctx, settings, ws.root, agent);
+				return yield* review(job).pipe(
 					Effect.ensuring(
-						Effect.sync(() => rmSync(tmp, { recursive: true, force: true })),
+						Effect.sync(() =>
+							rmSync(job.tmp, { recursive: true, force: true }),
+						),
 					),
 				);
 			}),

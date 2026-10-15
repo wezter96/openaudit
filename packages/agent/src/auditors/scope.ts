@@ -20,30 +20,40 @@ export interface Scope {
 const CODE_KINDS = new Set(["codebase", "container", "iac", "mobile"]);
 const WEB_KINDS = new Set(["url", "webapp"]);
 
+/** True when the playbook and the target share one of `kinds`. */
+const appliesTo = (
+	playbook: Playbook,
+	ctx: AuditContext,
+	kinds: Set<string>,
+): boolean =>
+	playbook.targets.some((t) => kinds.has(t) && ctx.target.kinds.includes(t));
+
+const unsupportedTarget = (playbook: Playbook, ctx: AuditContext) =>
+	new SkipAudit({
+		reason:
+			ctx.target.type === "image"
+				? "Container images are not unpacked for agentic review; run against the directory with the Dockerfile/IaC instead"
+				: `${playbook.id} needs local files or a URL target`,
+	});
+
+const browserScope = (
+	playbook: Playbook,
+	ctx: AuditContext,
+	url: string | undefined,
+): Pick<Scope, "browser" | "reducedCoverage"> => {
+	const wantsBrowser = playbook.needs.includes("browser") && url !== undefined;
+	const browser = wantsBrowser && ctx.options.browser === true;
+	return { browser, reducedCoverage: wantsBrowser && !browser };
+};
+
 export const resolveScope = (
 	playbook: Playbook,
 	ctx: AuditContext,
 ): Effect.Effect<Scope, SkipAudit> => {
-	const applies = (kinds: Set<string>) =>
-		playbook.targets.some((t) => kinds.has(t) && ctx.target.kinds.includes(t));
-	const url = applies(WEB_KINDS) ? ctx.target.url : undefined;
-	const root = applies(CODE_KINDS) ? ctx.workspace?.root : undefined;
-	if (!url && !root) {
-		return Effect.fail(
-			new SkipAudit({
-				reason:
-					ctx.target.type === "image"
-						? "Container images are not unpacked for agentic review; run against the directory with the Dockerfile/IaC instead"
-						: `${playbook.id} needs local files or a URL target`,
-			}),
-		);
-	}
-	const wantsBrowser = playbook.needs.includes("browser") && url !== undefined;
-	const browser = wantsBrowser && ctx.options.browser === true;
-	return Effect.succeed({
-		root,
-		url,
-		browser,
-		reducedCoverage: wantsBrowser && !browser,
-	});
+	const url = appliesTo(playbook, ctx, WEB_KINDS) ? ctx.target.url : undefined;
+	const root = appliesTo(playbook, ctx, CODE_KINDS)
+		? ctx.workspace?.root
+		: undefined;
+	if (!url && !root) return Effect.fail(unsupportedTarget(playbook, ctx));
+	return Effect.succeed({ root, url, ...browserScope(playbook, ctx, url) });
 };

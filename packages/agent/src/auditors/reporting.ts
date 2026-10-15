@@ -84,6 +84,7 @@ const FindingShape = {
 		.describe("e.g. cwe-639, owasp-a01, wcag-2.4.3"),
 };
 const FindingArgs = z.object(FindingShape);
+type FindingArgs = z.infer<typeof FindingArgs>;
 
 const FinishShape = {
 	summary: z.string().max(4_000).describe("What you reviewed and concluded."),
@@ -136,7 +137,28 @@ const normalizeRuleId = (playbookId: string, raw: string): string => {
 	return `${playbookId}/${suffix || "finding"}`;
 };
 
-interface Session {
+/** The agent's reported finding as a `FindingInput`, secrets masked. */
+const toFinding = (
+	playbookId: string,
+	f: FindingArgs,
+	location: FindingArgs["location"],
+): FindingInput => ({
+	ruleId: normalizeRuleId(playbookId, f.ruleId),
+	title: f.title,
+	severity: f.severity,
+	category: f.category,
+	message: scrubSecrets(f.message),
+	...(location ? { location } : {}),
+	...(f.evidence
+		? { evidence: truncate(scrubSecrets(f.evidence), MAX_EVIDENCE_CHARS) }
+		: {}),
+	...(f.remediation ? { remediation: f.remediation } : {}),
+	...(f.references?.length ? { references: f.references } : {}),
+	confidence: f.confidence ?? "medium",
+	tags: ["agentic", ...(f.tags ?? [])],
+});
+
+export interface Session {
 	readonly findings: FindingInput[];
 	finished: { summary: string; coverage?: string } | undefined;
 	httpCalls: number;
@@ -191,21 +213,7 @@ export const makeSession = (
 			if (typeof file !== "string") return text(file.error, true);
 			location = { ...location, file };
 		}
-		const finding: FindingInput = {
-			ruleId: normalizeRuleId(playbook.id, f.ruleId),
-			title: f.title,
-			severity: f.severity,
-			category: f.category,
-			message: scrubSecrets(f.message),
-			...(location ? { location } : {}),
-			...(f.evidence
-				? { evidence: truncate(scrubSecrets(f.evidence), MAX_EVIDENCE_CHARS) }
-				: {}),
-			...(f.remediation ? { remediation: f.remediation } : {}),
-			...(f.references?.length ? { references: f.references } : {}),
-			confidence: f.confidence ?? "medium",
-			tags: ["agentic", ...(f.tags ?? [])],
-		};
+		const finding = toFinding(playbook.id, f, location);
 		session.findings.push(finding);
 		return text(
 			`Recorded ${finding.ruleId} (${session.findings.length}/${maxFindings}).`,

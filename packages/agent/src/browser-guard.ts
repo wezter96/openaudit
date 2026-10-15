@@ -71,6 +71,7 @@ export async function installOriginGuard(
 			return false;
 		}
 	};
+	const isRedirect = (status: number) => status >= 300 && status < 400;
 	await context.routeWebSocket(
 		() => true,
 		(ws) =>
@@ -87,7 +88,7 @@ export async function installOriginGuard(
 				const response = await route.fetch({ url, maxRedirects: 0 });
 				const status = response.status();
 				const location = response.headers().location;
-				if (status >= 300 && status < 400 && location) {
+				if (isRedirect(status) && location) {
 					url = new URL(location, url).toString();
 					continue;
 				}

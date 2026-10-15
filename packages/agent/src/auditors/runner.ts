@@ -1,6 +1,7 @@
 import {
 	type Options,
 	query,
+	type SDKAssistantMessage,
 	type SDKMessage,
 	type SDKResultMessage,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -50,6 +51,23 @@ export interface RunState {
 	stderr: string[];
 }
 
+const recordAssistant = (state: RunState, message: SDKAssistantMessage) => {
+	if (!message.error) state.started = true;
+	else if (SKIP_ERRORS.has(message.error))
+		state.skipReason = `Claude authentication failed (${message.error}). ${AUTH_HINT}`;
+	else state.assistantError = message.error;
+};
+
+const recordMessage = (state: RunState, message: SDKMessage) => {
+	if (message.type === "assistant") {
+		recordAssistant(state, message);
+	} else if (message.type === "auth_status" && message.error) {
+		state.skipReason = `Claude authentication failed: ${message.error}. ${AUTH_HINT}`;
+	} else if (message.type === "result") {
+		state.result = message;
+	}
+};
+
 export const pump = async (
 	runner: ClaudeRunner,
 	input: ClaudeRunInput,
@@ -60,18 +78,7 @@ export const pump = async (
 	const onAbort = () => controller?.abort();
 	signal.addEventListener("abort", onAbort);
 	try {
-		for await (const message of runner(input)) {
-			if (message.type === "assistant") {
-				if (!message.error) state.started = true;
-				else if (SKIP_ERRORS.has(message.error))
-					state.skipReason = `Claude authentication failed (${message.error}). ${AUTH_HINT}`;
-				else state.assistantError = message.error;
-			} else if (message.type === "auth_status" && message.error) {
-				state.skipReason = `Claude authentication failed: ${message.error}. ${AUTH_HINT}`;
-			} else if (message.type === "result") {
-				state.result = message;
-			}
-		}
+		for await (const message of runner(input)) recordMessage(state, message);
 	} catch (cause) {
 		state.thrown = cause;
 	} finally {

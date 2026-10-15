@@ -16,34 +16,55 @@ Rules:
 - Work breadth-first: inventory first, then go deep on the highest-risk areas. Prefer few, well-evidenced findings over many speculative ones.
 - When you are done, call \`mcp__openaudit__finish\` once with a summary and coverage notes, then stop.`;
 
-const describeScope = (
-	playbook: Playbook,
-	ctx: AuditContext,
-	scope: Scope,
-	limits: { maxTurns: number; maxFindings: number },
-): string => {
+export interface AgentLimits {
+	readonly maxTurns: number;
+	readonly maxFindings: number;
+}
+
+export interface SystemPromptInput {
+	readonly playbook: Playbook;
+	readonly ctx: AuditContext;
+	readonly scope: Scope;
+	readonly settings: AgentSettings;
+	readonly limits: AgentLimits;
+}
+
+const rootLines = (scope: Scope, ctx: AuditContext): string[] => {
+	if (!scope.root) return [];
+	const lines = [
+		`- Project root (your working directory): \`${scope.root}\`. Use Read, Grep and Glob; access outside it is denied.`,
+	];
+	if (ctx.target.file)
+		lines.push(`- File under review: \`${ctx.target.file}\``);
+	return lines;
+};
+
+const urlLines = (scope: Scope, ctx: AuditContext): string[] => {
+	if (!scope.url) return [];
+	const lines = [
+		`- URL: ${scope.url}. Use \`mcp__openaudit__http_get\` for raw responses on this origin (max ${MAX_HTTP_CALLS} requests). Other origins are refused.`,
+	];
+	const headers = Object.keys(ctx.options.headers ?? {});
+	if (headers.length)
+		lines.push(
+			`- The user configured request headers for the target origin (${headers.join(", ")}); \`http_get\` sends them automatically. Their values are intentionally hidden.`,
+		);
+	return lines;
+};
+
+const describeScope = ({
+	playbook,
+	ctx,
+	scope,
+	limits,
+}: SystemPromptInput): string => {
 	const info = ctx.target;
 	const lines = [
 		`- Target: \`${info.input}\` (type ${info.type}; kinds ${info.kinds.join(", ")})`,
 	];
 	if (info.technologies.length)
 		lines.push(`- Detected technologies: ${info.technologies.join(", ")}`);
-	if (scope.root) {
-		lines.push(
-			`- Project root (your working directory): \`${scope.root}\`. Use Read, Grep and Glob; access outside it is denied.`,
-		);
-		if (info.file) lines.push(`- File under review: \`${info.file}\``);
-	}
-	if (scope.url) {
-		lines.push(
-			`- URL: ${scope.url}. Use \`mcp__openaudit__http_get\` for raw responses on this origin (max ${MAX_HTTP_CALLS} requests). Other origins are refused.`,
-		);
-		const headers = Object.keys(ctx.options.headers ?? {});
-		if (headers.length)
-			lines.push(
-				`- The user configured request headers for the target origin (${headers.join(", ")}); \`http_get\` sends them automatically. Their values are intentionally hidden.`,
-			);
-	}
+	lines.push(...rootLines(scope, ctx), ...urlLines(scope, ctx));
 	if (scope.browser)
 		lines.push(
 			"- A headless browser is available through the `mcp__playwright__*` tools. Arbitrary script evaluation and file upload are disabled.",
@@ -61,19 +82,13 @@ const describeScope = (
 	return `## Target\n\n${lines.join("\n")}\n\nAll findings are recorded under the playbook id \`${playbook.id}\`.`;
 };
 
-export const buildSystemPrompt = (
-	playbook: Playbook,
-	ctx: AuditContext,
-	scope: Scope,
-	settings: AgentSettings,
-	limits: { maxTurns: number; maxFindings: number },
-): string =>
+export const buildSystemPrompt = (input: SystemPromptInput): string =>
 	[
 		PREAMBLE,
-		`# Playbook \`${playbook.id}\`: ${playbook.title}\n\n${renderPlaybook(playbook)}`,
-		describeScope(playbook, ctx, scope, limits),
-		settings.instructions
-			? `## Notes from the user (test accounts, scope)\n\n${settings.instructions}`
+		`# Playbook \`${input.playbook.id}\`: ${input.playbook.title}\n\n${renderPlaybook(input.playbook)}`,
+		describeScope(input),
+		input.settings.instructions
+			? `## Notes from the user (test accounts, scope)\n\n${input.settings.instructions}`
 			: "",
 	]
 		.filter(Boolean)

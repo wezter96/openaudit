@@ -81,6 +81,30 @@ const location = (f: Finding): string | undefined => {
 const truncate = (value: string, max: number) =>
 	value.length > max ? `${value.slice(0, max)}…` : value;
 
+type OmittedRule = { severity: string; count: number; fingerprints: string[] };
+
+const describeFinding = (f: Finding): Record<string, unknown> => ({
+	fingerprint: f.fingerprint,
+	ruleId: f.ruleId,
+	severity: f.severity,
+	category: f.category,
+	title: truncate(scrubSecrets(f.title), 160),
+	location: location(f),
+	message: truncate(scrubSecrets(f.message), MAX_MESSAGE_CHARS),
+	...(f.confidence ? { confidence: f.confidence } : {}),
+});
+
+const countOmitted = (omitted: Map<string, OmittedRule>, f: Finding) => {
+	const entry = omitted.get(f.ruleId) ?? {
+		severity: f.severity,
+		count: 0,
+		fingerprints: [],
+	};
+	entry.count++;
+	if (entry.fingerprints.length < 100) entry.fingerprints.push(f.fingerprint);
+	omitted.set(f.ruleId, entry);
+};
+
 /**
  * The model input: finding metadata only. Evidence, remediation and file
  * contents are never sent, so secrets that scanners found do not leave the
@@ -90,35 +114,13 @@ export const compactReport = (report: Report) => {
 	const findings = allFindings(report);
 	const perRule = new Map<string, number>();
 	const detailed: Array<Record<string, unknown>> = [];
-	const omitted = new Map<
-		string,
-		{ severity: string; count: number; fingerprints: string[] }
-	>();
+	const omitted = new Map<string, OmittedRule>();
 	for (const f of findings) {
 		const seen = perRule.get(f.ruleId) ?? 0;
 		perRule.set(f.ruleId, seen + 1);
-		if (seen < MAX_PER_RULE && detailed.length < MAX_DETAILED) {
-			detailed.push({
-				fingerprint: f.fingerprint,
-				ruleId: f.ruleId,
-				severity: f.severity,
-				category: f.category,
-				title: truncate(scrubSecrets(f.title), 160),
-				location: location(f),
-				message: truncate(scrubSecrets(f.message), MAX_MESSAGE_CHARS),
-				...(f.confidence ? { confidence: f.confidence } : {}),
-			});
-		} else {
-			const entry = omitted.get(f.ruleId) ?? {
-				severity: f.severity,
-				count: 0,
-				fingerprints: [],
-			};
-			entry.count++;
-			if (entry.fingerprints.length < 100)
-				entry.fingerprints.push(f.fingerprint);
-			omitted.set(f.ruleId, entry);
-		}
+		if (seen < MAX_PER_RULE && detailed.length < MAX_DETAILED)
+			detailed.push(describeFinding(f));
+		else countOmitted(omitted, f);
 	}
 	const target = report.target;
 	return {
@@ -171,6 +173,77 @@ const describeApiError = (cause: unknown): string => {
 	return cause instanceof Error ? cause.message : String(cause);
 };
 
+const hasApiAccess = (options: AiInsightsOptions): boolean =>
+	Boolean(
+		options.client ||
+			process.env.ANTHROPIC_API_KEY ||
+			process.env.ANTHROPIC_AUTH_TOKEN,
+	);
+
+const requestParams = (
+	model: string,
+	input: ReturnType<typeof compactReport>,
+): MessageCreateParamsNonStreaming => ({
+	model,
+	max_tokens: 16_000,
+	system: SYSTEM,
+	messages: [
+		{
+			role: "user",
+			content: `Triage this openaudit report.\n\n<report>\n${JSON.stringify(input)}\n</report>`,
+		},
+	],
+	output_config: {
+		effort: "medium",
+		format: betaZodOutputFormat(InsightsOutput),
+	},
+	...(DEFAULT_FALLBACK_MODELS.has(model)
+		? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" }
+		: {}),
+});
+
+/** An error for responses that stopped without a complete answer. */
+const stopError = (response: BetaMessage): AuditorError | undefined => {
+	if (response.stop_reason === "refusal")
+		return new AuditorError({
+			message: `Claude declined to triage this report${response.stop_details?.category ? ` (${response.stop_details.category})` : ""}.`,
+		});
+	if (response.stop_reason === "max_tokens")
+		return new AuditorError({
+			message: "AI insights response was truncated (max_tokens).",
+		});
+	return undefined;
+};
+
+const parseOutput = (response: BetaMessage) => {
+	const textBlock = response.content.find((b) => b.type === "text");
+	return Effect.try({
+		try: () =>
+			InsightsOutput.parse(
+				JSON.parse(textBlock?.type === "text" ? textBlock.text : ""),
+			),
+		catch: (cause) =>
+			new AuditorError({
+				message: "AI insights returned output that does not match the schema",
+				cause,
+			}),
+	});
+};
+
+/** Priorities capped, with only fingerprints that exist in the report. */
+const knownPriorities = (
+	report: Report,
+	priorities: z.infer<typeof InsightsOutput>["priorities"],
+) => {
+	const known = new Set(allFindings(report).map((f) => f.fingerprint));
+	return priorities.slice(0, MAX_PRIORITIES).map((p) => ({
+		title: p.title,
+		why: p.why,
+		fix: p.fix,
+		fingerprints: [...new Set(p.fingerprints)].filter((f) => known.has(f)),
+	}));
+};
+
 /**
  * Summarises and prioritises a report with Claude (Messages API, structured
  * output). Sends finding metadata only — never evidence or file contents.
@@ -190,37 +263,14 @@ export const aiInsights = (
 				priorities: [],
 			};
 
-		if (
-			!options.client &&
-			!process.env.ANTHROPIC_API_KEY &&
-			!process.env.ANTHROPIC_AUTH_TOKEN
-		)
+		if (!hasApiAccess(options))
 			return yield* new AuditorError({
 				message:
 					"AI insights need an Anthropic API key. Set ANTHROPIC_API_KEY (https://platform.claude.com/settings/keys).",
 			});
 
 		const client = options.client ?? defaultClient();
-		const fallback = DEFAULT_FALLBACK_MODELS.has(model);
-		const params: MessageCreateParamsNonStreaming = {
-			model,
-			max_tokens: 16_000,
-			system: SYSTEM,
-			messages: [
-				{
-					role: "user",
-					content: `Triage this openaudit report.\n\n<report>\n${JSON.stringify(input)}\n</report>`,
-				},
-			],
-			output_config: {
-				effort: "medium",
-				format: betaZodOutputFormat(InsightsOutput),
-			},
-			...(fallback
-				? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" }
-				: {}),
-		};
-
+		const params = requestParams(model, input);
 		const response = yield* Effect.tryPromise({
 			try: (signal) => client.create(params, { signal }),
 			catch: (cause) =>
@@ -230,37 +280,12 @@ export const aiInsights = (
 				}),
 		});
 
-		if (response.stop_reason === "refusal")
-			return yield* new AuditorError({
-				message: `Claude declined to triage this report${response.stop_details?.category ? ` (${response.stop_details.category})` : ""}.`,
-			});
-		if (response.stop_reason === "max_tokens")
-			return yield* new AuditorError({
-				message: "AI insights response was truncated (max_tokens).",
-			});
-
-		const textBlock = response.content.find((b) => b.type === "text");
-		const parsed = yield* Effect.try({
-			try: () =>
-				InsightsOutput.parse(
-					JSON.parse(textBlock?.type === "text" ? textBlock.text : ""),
-				),
-			catch: (cause) =>
-				new AuditorError({
-					message: "AI insights returned output that does not match the schema",
-					cause,
-				}),
-		});
-
-		const known = new Set(allFindings(report).map((f) => f.fingerprint));
+		const stopped = stopError(response);
+		if (stopped) return yield* stopped;
+		const parsed = yield* parseOutput(response);
 		return {
 			model: response.model || model,
 			summary: parsed.summary,
-			priorities: parsed.priorities.slice(0, MAX_PRIORITIES).map((p) => ({
-				title: p.title,
-				why: p.why,
-				fix: p.fix,
-				fingerprints: [...new Set(p.fingerprints)].filter((f) => known.has(f)),
-			})),
+			priorities: knownPriorities(report, parsed.priorities),
 		};
 	});
