@@ -2,10 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { summarize } from "../src/summary";
 
-const selfAudit = join(
-	import.meta.dir,
-	"../../../apps/site/public/report/openaudit-report.json",
-);
+/** A real report: the hosted scan of this repository, with its suppressions. */
+const selfAudit = join(import.meta.dir, "fixtures/self-audit.json");
 
 const report = (overrides: Record<string, unknown> = {}) =>
 	JSON.stringify({
@@ -86,7 +84,7 @@ describe("summarize", () => {
 		expect(summary?.suppressed).toBe(0);
 	});
 
-	test("summarises the site's own self-audit report", async () => {
+	test("summarises a real self-audit report", async () => {
 		const summary = summarize(await Bun.file(selfAudit).text());
 		expect(summary?.grade).toMatch(/^[A-F]$/);
 		expect(summary?.suppressed).toBeGreaterThan(0);

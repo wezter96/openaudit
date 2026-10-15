@@ -1,0 +1,1334 @@
+{
+  "schemaVersion": "1",
+  "tool": {
+    "name": "openaudit",
+    "version": "0.3.0"
+  },
+  "target": {
+    "input": "/tmp/oa-badge-MeiJ1r/repo",
+    "type": "directory",
+    "kinds": [
+      "codebase",
+      "container",
+      "iac",
+      "mobile"
+    ],
+    "root": "/tmp/oa-badge-MeiJ1r/repo",
+    "technologies": [
+      "android",
+      "docker",
+      "docker-compose",
+      "github-actions",
+      "go",
+      "html",
+      "ios",
+      "jvm",
+      "kubernetes",
+      "node",
+      "python",
+      "react",
+      "ruby",
+      "rust",
+      "terraform",
+      "typescript",
+      "vite",
+      "vue"
+    ]
+  },
+  "startedAt": "2026-10-15T15:36:16.258Z",
+  "finishedAt": "2026-10-15T15:37:41.157Z",
+  "durationMs": 84899,
+  "summary": {
+    "categories": [
+      {
+        "category": "security",
+        "score": 57,
+        "grade": "D",
+        "counts": {
+          "critical": 0,
+          "high": 1,
+          "medium": 3,
+          "low": 0,
+          "info": 0
+        }
+      },
+      {
+        "category": "accessibility",
+        "score": 100,
+        "grade": "A",
+        "counts": {
+          "critical": 0,
+          "high": 0,
+          "medium": 0,
+          "low": 0,
+          "info": 0
+        }
+      },
+      {
+        "category": "performance",
+        "score": 100,
+        "grade": "A",
+        "counts": {
+          "critical": 0,
+          "high": 0,
+          "medium": 0,
+          "low": 0,
+          "info": 0
+        }
+      },
+      {
+        "category": "privacy",
+        "score": 100,
+        "grade": "A",
+        "counts": {
+          "critical": 0,
+          "high": 0,
+          "medium": 0,
+          "low": 0,
+          "info": 0
+        }
+      },
+      {
+        "category": "best-practices",
+        "score": 100,
+        "grade": "A",
+        "counts": {
+          "critical": 0,
+          "high": 0,
+          "medium": 0,
+          "low": 0,
+          "info": 0
+        }
+      },
+      {
+        "category": "reliability",
+        "score": 80,
+        "grade": "B",
+        "counts": {
+          "critical": 0,
+          "high": 0,
+          "medium": 2,
+          "low": 0,
+          "info": 0
+        }
+      },
+      {
+        "category": "maintainability",
+        "score": 95,
+        "grade": "A",
+        "counts": {
+          "critical": 0,
+          "high": 0,
+          "medium": 0,
+          "low": 2,
+          "info": 9
+        }
+      },
+      {
+        "category": "supply-chain",
+        "score": 100,
+        "grade": "A",
+        "counts": {
+          "critical": 0,
+          "high": 0,
+          "medium": 0,
+          "low": 0,
+          "info": 0
+        }
+      },
+      {
+        "category": "compliance",
+        "score": 100,
+        "grade": "A",
+        "counts": {
+          "critical": 0,
+          "high": 0,
+          "medium": 0,
+          "low": 0,
+          "info": 0
+        }
+      }
+    ],
+    "score": 92,
+    "grade": "A",
+    "counts": {
+      "critical": 0,
+      "high": 1,
+      "medium": 5,
+      "low": 2,
+      "info": 9
+    },
+    "auditors": {
+      "error": 0,
+      "failed": 3,
+      "passed": 42,
+      "skipped": 16
+    }
+  },
+  "results": [
+    {
+      "durationMs": 23,
+      "auditor": "code.hygiene",
+      "title": "Repository hygiene",
+      "engine": "builtin",
+      "categories": [
+        "best-practices",
+        "maintainability",
+        "security"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 417,
+      "auditor": "code.secrets",
+      "title": "Secrets in source",
+      "engine": "builtin",
+      "categories": [
+        "security"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 280,
+      "auditor": "code.security",
+      "title": "Static security analysis",
+      "engine": "builtin",
+      "categories": [
+        "security"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 431,
+      "auditor": "code.unicode",
+      "title": "Hidden Unicode",
+      "engine": "builtin",
+      "categories": [
+        "security"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 3201,
+      "auditor": "code.dependencies",
+      "title": "Vulnerable dependencies",
+      "engine": "builtin",
+      "categories": [
+        "supply-chain",
+        "security"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 1,
+      "auditor": "code.licenses",
+      "title": "Dependency licence policy",
+      "engine": "builtin",
+      "categories": [
+        "compliance"
+      ],
+      "status": "skipped",
+      "message": "No licence policy configured. Set options.settings[\"code.licenses\"] in openaudit.config.json, for example {\"deny\": [\"AGPL-*\", \"GPL-*\"]} or {\"allow\": [\"MIT\", \"Apache-2.0\", \"BSD-*\", \"ISC\"]}.",
+      "findings": []
+    },
+    {
+      "durationMs": 11,
+      "auditor": "code.lockfiles",
+      "title": "Lockfile integrity and install scripts",
+      "engine": "builtin",
+      "categories": [
+        "supply-chain"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 169,
+      "auditor": "code.accessibility",
+      "title": "Accessibility (static)",
+      "engine": "builtin",
+      "categories": [
+        "accessibility"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 73,
+      "auditor": "code.performance",
+      "title": "Performance (static)",
+      "engine": "builtin",
+      "categories": [
+        "performance"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 173,
+      "auditor": "code.quality",
+      "title": "Code quality",
+      "engine": "builtin",
+      "categories": [
+        "maintainability",
+        "reliability",
+        "best-practices"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 2788,
+      "auditor": "code.health",
+      "title": "Code Health",
+      "engine": "builtin",
+      "categories": [
+        "maintainability"
+      ],
+      "status": "passed",
+      "findings": [
+        {
+          "ruleId": "code.health/summary",
+          "auditor": "code.health",
+          "title": "Code Health 10.0/10",
+          "message": "Average 10.00/10 across 506 files (weighted by lines of code); no hotspots (no history); worst 10.00 in apps/badge-scanner/src/audit.ts; 0 files below 10; 1 rule sets from .codescene/code-health-rules.json applied.",
+          "severity": "info",
+          "category": "maintainability",
+          "references": [
+            "https://openaudit.se/auditors/code.health/"
+          ],
+          "tags": [
+            "code-health"
+          ],
+          "fingerprint": "595e1cd1ae041b21"
+        }
+      ]
+    },
+    {
+      "durationMs": 109,
+      "auditor": "code.history",
+      "title": "Change coupling and knowledge",
+      "engine": "builtin",
+      "categories": [
+        "maintainability"
+      ],
+      "status": "passed",
+      "findings": [
+        {
+          "ruleId": "code.history/truck-factor",
+          "auditor": "code.history",
+          "title": "Truck factor 1",
+          "message": "One person wrote all the changes to 583 files in the last year, so everything the code does lives in one head.",
+          "severity": "info",
+          "category": "maintainability",
+          "remediation": "Spread knowledge: pair on changes, review each other's code and write down the decisions behind the main modules.",
+          "references": [
+            "https://openaudit.se/auditors/code.history/"
+          ],
+          "tags": [
+            "code-history",
+            "knowledge"
+          ],
+          "fingerprint": "6caa774bbc992f9b"
+        }
+      ]
+    },
+    {
+      "durationMs": 10,
+      "auditor": "code.strictness",
+      "title": "Language strictness config",
+      "engine": "builtin",
+      "categories": [
+        "maintainability"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 386,
+      "auditor": "code.api",
+      "title": "API definition and server configuration",
+      "engine": "builtin",
+      "categories": [
+        "security",
+        "best-practices"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 255,
+      "auditor": "code.privacy",
+      "title": "Privacy (code)",
+      "engine": "builtin",
+      "categories": [
+        "privacy",
+        "compliance"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 117,
+      "auditor": "code.agent-config",
+      "title": "AI agent configuration",
+      "engine": "builtin",
+      "categories": [
+        "security",
+        "supply-chain"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 2262,
+      "auditor": "code.gitleaks",
+      "title": "gitleaks secret scan",
+      "engine": "external",
+      "categories": [
+        "security"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 83871,
+      "auditor": "code.semgrep",
+      "title": "Semgrep SAST",
+      "engine": "external",
+      "categories": [
+        "security",
+        "best-practices"
+      ],
+      "status": "failed",
+      "findings": [
+        {
+          "ruleId": "code.semgrep/javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp",
+          "auditor": "code.semgrep",
+          "title": "detect non literal regexp",
+          "message": "RegExp() called with a `name` function argument, this might allow an attacker to cause a Regular Expression Denial-of-Service (ReDoS) within your application as RegExP blocks the main thread. For this reason, it is recommended to use hardcoded regexes instead. If your regex is run on user-controlled input, consider performing input validation or use a regex checking/sanitization library such as https://www.npmjs.com/package/recheck to verify that the regex does not appear vulnerable to ReDoS.",
+          "severity": "medium",
+          "category": "security",
+          "location": {
+            "file": "packages/auditors/src/codebase/quality-ci.ts",
+            "line": 90,
+            "column": 2
+          },
+          "remediation": "See the rule documentation for the recommended fix.",
+          "references": [
+            "https://owasp.org/www-community/attacks/Regular_expression_Denial_of_Service_-_ReDoS",
+            "https://semgrep.dev/r/javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp"
+          ],
+          "confidence": "low",
+          "tags": [
+            "cwe-1333",
+            "owasp-a05"
+          ],
+          "fingerprint": "3bfb8bbb9d47e6e2"
+        },
+        {
+          "ruleId": "code.semgrep/javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp",
+          "auditor": "code.semgrep",
+          "title": "detect non literal regexp",
+          "message": "RegExp() called with a `name` function argument, this might allow an attacker to cause a Regular Expression Denial-of-Service (ReDoS) within your application as RegExP blocks the main thread. For this reason, it is recommended to use hardcoded regexes instead. If your regex is run on user-controlled input, consider performing input validation or use a regex checking/sanitization library such as https://www.npmjs.com/package/recheck to verify that the regex does not appear vulnerable to ReDoS.",
+          "severity": "medium",
+          "category": "security",
+          "location": {
+            "file": "packages/auditors/src/codebase/supply-chain/guarddog.ts",
+            "line": 77,
+            "column": 14
+          },
+          "remediation": "See the rule documentation for the recommended fix.",
+          "references": [
+            "https://owasp.org/www-community/attacks/Regular_expression_Denial_of_Service_-_ReDoS",
+            "https://semgrep.dev/r/javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp"
+          ],
+          "confidence": "low",
+          "tags": [
+            "cwe-1333",
+            "owasp-a05"
+          ],
+          "fingerprint": "5b10880c12533849"
+        },
+        {
+          "ruleId": "code.semgrep/javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp",
+          "auditor": "code.semgrep",
+          "title": "detect non literal regexp",
+          "message": "RegExp() called with a `layout` function argument, this might allow an attacker to cause a Regular Expression Denial-of-Service (ReDoS) within your application as RegExP blocks the main thread. For this reason, it is recommended to use hardcoded regexes instead. If your regex is run on user-controlled input, consider performing input validation or use a regex checking/sanitization library such as https://www.npmjs.com/package/recheck to verify that the regex does not appear vulnerable to ReDoS.",
+          "severity": "medium",
+          "category": "security",
+          "location": {
+            "file": "packages/auditors/src/mobile/android-inputs.ts",
+            "line": 121,
+            "column": 16
+          },
+          "remediation": "See the rule documentation for the recommended fix.",
+          "references": [
+            "https://owasp.org/www-community/attacks/Regular_expression_Denial_of_Service_-_ReDoS",
+            "https://semgrep.dev/r/javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp"
+          ],
+          "confidence": "low",
+          "tags": [
+            "cwe-1333",
+            "owasp-a05"
+          ],
+          "fingerprint": "2ab5a767f3e11de4"
+        }
+      ]
+    },
+    {
+      "durationMs": 5821,
+      "auditor": "code.osv-scanner",
+      "title": "osv-scanner dependency scan",
+      "engine": "external",
+      "categories": [
+        "supply-chain",
+        "security"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 71308,
+      "auditor": "code.trivy-fs",
+      "title": "Trivy filesystem scan",
+      "engine": "external",
+      "categories": [
+        "security",
+        "supply-chain"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 2137,
+      "auditor": "code.trufflehog",
+      "title": "trufflehog secret scan",
+      "engine": "external",
+      "categories": [
+        "security"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 176,
+      "auditor": "code.bandit",
+      "title": "Bandit Python SAST",
+      "engine": "external",
+      "categories": [
+        "security"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 1,
+      "auditor": "code.gosec",
+      "title": "gosec Go SAST",
+      "engine": "external",
+      "categories": [
+        "security"
+      ],
+      "status": "skipped",
+      "message": "gosec not found on PATH. Install: brew install gosec or go install github.com/securego/gosec/v2/cmd/gosec@latest.",
+      "findings": []
+    },
+    {
+      "durationMs": 1,
+      "auditor": "code.brakeman",
+      "title": "Brakeman Rails SAST",
+      "engine": "external",
+      "categories": [
+        "security",
+        "supply-chain"
+      ],
+      "status": "skipped",
+      "message": "brakeman not found on PATH. Install: gem install brakeman or brew install brakeman (https://brakemanscanner.org).",
+      "findings": []
+    },
+    {
+      "durationMs": 481,
+      "auditor": "code.jscpd",
+      "title": "jscpd copy-paste detection",
+      "engine": "external",
+      "categories": [
+        "maintainability"
+      ],
+      "status": "passed",
+      "findings": [
+        {
+          "ruleId": "code.jscpd/duplicate-block",
+          "auditor": "code.jscpd",
+          "title": "Duplicated code between .github/workflows/docker.yml and .github/workflows/docker.yml",
+          "message": "11 lines (77 tokens) are copy-pasted between .github/workflows/docker.yml:90-100 and .github/workflows/docker.yml:144-154.",
+          "severity": "info",
+          "category": "maintainability",
+          "location": {
+            "file": ".github/workflows/docker.yml",
+            "line": 90
+          },
+          "evidence": ".github/workflows/docker.yml:90-100 <-> .github/workflows/docker.yml:144-154",
+          "remediation": "Extract the shared logic into one function or module and call it from both places.",
+          "references": [
+            "https://github.com/kucherenko/jscpd"
+          ],
+          "confidence": "high",
+          "tags": [
+            "duplication"
+          ],
+          "fingerprint": "a66bef4a479ed482"
+        },
+        {
+          "ruleId": "code.jscpd/duplicate-block",
+          "auditor": "code.jscpd",
+          "title": "Duplicated code between apps/site/src/components/home/Agents.astro:css and apps/site/src/components/home/Steps.astro:css",
+          "message": "13 lines (74 tokens) are copy-pasted between apps/site/src/components/home/Agents.astro:css:53-65 and apps/site/src/components/home/Steps.astro:css:51-63.",
+          "severity": "info",
+          "category": "maintainability",
+          "location": {
+            "file": "apps/site/src/components/home/Agents.astro:css",
+            "line": 53
+          },
+          "evidence": "apps/site/src/components/home/Agents.astro:css:53-65 <-> apps/site/src/components/home/Steps.astro:css:51-63",
+          "remediation": "Extract the shared logic into one function or module and call it from both places.",
+          "references": [
+            "https://github.com/kucherenko/jscpd"
+          ],
+          "confidence": "high",
+          "tags": [
+            "duplication"
+          ],
+          "fingerprint": "217e7bae2e88d5a6"
+        },
+        {
+          "ruleId": "code.jscpd/duplicate-block",
+          "auditor": "code.jscpd",
+          "title": "Duplicated code between apps/site/src/components/home/Faq.astro:css and apps/site/src/styles/global.css",
+          "message": "14 lines (76 tokens) are copy-pasted between apps/site/src/components/home/Faq.astro:css:66-79 and apps/site/src/styles/global.css:1161-1174.",
+          "severity": "info",
+          "category": "maintainability",
+          "location": {
+            "file": "apps/site/src/components/home/Faq.astro:css",
+            "line": 66
+          },
+          "evidence": "apps/site/src/components/home/Faq.astro:css:66-79 <-> apps/site/src/styles/global.css:1161-1174",
+          "remediation": "Extract the shared logic into one function or module and call it from both places.",
+          "references": [
+            "https://github.com/kucherenko/jscpd"
+          ],
+          "confidence": "high",
+          "tags": [
+            "duplication"
+          ],
+          "fingerprint": "5b8433ee57dccf68"
+        },
+        {
+          "ruleId": "code.jscpd/duplicate-block",
+          "auditor": "code.jscpd",
+          "title": "Duplicated code between packages/api/src/schemas.ts and packages/mcp/src/schemas.ts",
+          "message": "16 lines (87 tokens) are copy-pasted between packages/api/src/schemas.ts:128-143 and packages/mcp/src/schemas.ts:132-147.",
+          "severity": "info",
+          "category": "maintainability",
+          "location": {
+            "file": "packages/api/src/schemas.ts",
+            "line": 128
+          },
+          "evidence": "packages/api/src/schemas.ts:128-143 <-> packages/mcp/src/schemas.ts:132-147",
+          "remediation": "Extract the shared logic into one function or module and call it from both places.",
+          "references": [
+            "https://github.com/kucherenko/jscpd"
+          ],
+          "confidence": "high",
+          "tags": [
+            "duplication"
+          ],
+          "fingerprint": "6d019d0397292200"
+        },
+        {
+          "ruleId": "code.jscpd/duplicate-block",
+          "auditor": "code.jscpd",
+          "title": "Duplicated code between packages/auditors/src/infra/actionlint.ts and packages/auditors/src/infra/kics.ts",
+          "message": "12 lines (51 tokens) are copy-pasted between packages/auditors/src/infra/actionlint.ts:2-13 and packages/auditors/src/infra/kics.ts:6-17.",
+          "severity": "info",
+          "category": "maintainability",
+          "location": {
+            "file": "packages/auditors/src/infra/actionlint.ts",
+            "line": 2
+          },
+          "evidence": "packages/auditors/src/infra/actionlint.ts:2-13 <-> packages/auditors/src/infra/kics.ts:6-17",
+          "remediation": "Extract the shared logic into one function or module and call it from both places.",
+          "references": [
+            "https://github.com/kucherenko/jscpd"
+          ],
+          "confidence": "high",
+          "tags": [
+            "duplication"
+          ],
+          "fingerprint": "f8d36b80c3d49d5d"
+        },
+        {
+          "ruleId": "code.jscpd/duplicate-block",
+          "auditor": "code.jscpd",
+          "title": "Duplicated code between packages/auditors/src/infra/actionlint.ts and packages/auditors/src/infra/zizmor.ts",
+          "message": "14 lines (60 tokens) are copy-pasted between packages/auditors/src/infra/actionlint.ts:3-16 and packages/auditors/src/infra/zizmor.ts:3-17.",
+          "severity": "info",
+          "category": "maintainability",
+          "location": {
+            "file": "packages/auditors/src/infra/actionlint.ts",
+            "line": 3
+          },
+          "evidence": "packages/auditors/src/infra/actionlint.ts:3-16 <-> packages/auditors/src/infra/zizmor.ts:3-17",
+          "remediation": "Extract the shared logic into one function or module and call it from both places.",
+          "references": [
+            "https://github.com/kucherenko/jscpd"
+          ],
+          "confidence": "high",
+          "tags": [
+            "duplication"
+          ],
+          "fingerprint": "fc85636298ce1ad9"
+        },
+        {
+          "ruleId": "code.jscpd/duplicate-block",
+          "auditor": "code.jscpd",
+          "title": "Duplicated code between packages/badge/package.json and packages/core/package.json",
+          "message": "19 lines (53 tokens) are copy-pasted between packages/badge/package.json:2-20 and packages/core/package.json:2-20.",
+          "severity": "info",
+          "category": "maintainability",
+          "location": {
+            "file": "packages/badge/package.json",
+            "line": 2
+          },
+          "evidence": "packages/badge/package.json:2-20 <-> packages/core/package.json:2-20",
+          "remediation": "Extract the shared logic into one function or module and call it from both places.",
+          "references": [
+            "https://github.com/kucherenko/jscpd"
+          ],
+          "confidence": "high",
+          "tags": [
+            "duplication"
+          ],
+          "fingerprint": "b766db4e05af1879"
+        }
+      ]
+    },
+    {
+      "durationMs": 1327,
+      "auditor": "code.pip-audit",
+      "title": "pip-audit (Python vulnerabilities)",
+      "engine": "external",
+      "categories": [
+        "supply-chain",
+        "security"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 1,
+      "auditor": "code.cargo-audit",
+      "title": "cargo-audit (Rust advisories)",
+      "engine": "external",
+      "categories": [
+        "supply-chain",
+        "security"
+      ],
+      "status": "skipped",
+      "message": "cargo-audit not found on PATH. Install: cargo install cargo-audit --locked (or brew install cargo-audit).",
+      "findings": []
+    },
+    {
+      "durationMs": 1,
+      "auditor": "code.npm-audit",
+      "title": "npm audit",
+      "engine": "external",
+      "categories": [
+        "supply-chain",
+        "security"
+      ],
+      "status": "skipped",
+      "message": "npm not found on PATH. Install Node.js (npm ships with it): https://nodejs.org.",
+      "findings": []
+    },
+    {
+      "durationMs": 0,
+      "auditor": "code.pnpm-audit",
+      "title": "pnpm audit",
+      "engine": "external",
+      "categories": [
+        "supply-chain",
+        "security"
+      ],
+      "status": "skipped",
+      "message": "pnpm not found on PATH. Install: npm install -g pnpm (or corepack enable).",
+      "findings": []
+    },
+    {
+      "durationMs": 566,
+      "auditor": "code.bun-audit",
+      "title": "bun audit",
+      "engine": "external",
+      "categories": [
+        "supply-chain",
+        "security"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 1,
+      "auditor": "code.scorecard",
+      "title": "OpenSSF Scorecard",
+      "engine": "external",
+      "categories": [
+        "supply-chain"
+      ],
+      "status": "skipped",
+      "message": "Set GITHUB_AUTH_TOKEN or GITHUB_TOKEN to run OpenSSF Scorecard",
+      "findings": []
+    },
+    {
+      "durationMs": 3,
+      "auditor": "code.typecheck",
+      "title": "TypeScript type-check (tsc)",
+      "engine": "external",
+      "categories": [
+        "reliability",
+        "maintainability"
+      ],
+      "status": "skipped",
+      "message": "No node_modules directory: dependencies are not installed, so every import would fail to resolve. Install them (openaudit never does) and re-run.",
+      "findings": []
+    },
+    {
+      "durationMs": 220,
+      "auditor": "code.oxlint",
+      "title": "oxlint",
+      "engine": "external",
+      "categories": [
+        "maintainability",
+        "reliability",
+        "accessibility",
+        "performance"
+      ],
+      "status": "failed",
+      "findings": [
+        {
+          "ruleId": "code.oxlint/react-hooks-rules-of-hooks",
+          "auditor": "code.oxlint",
+          "title": "rules-of-hooks: React Hook \"useLinter\" is called in function \"Anonymous\" that is neither a React function component nor …",
+          "message": "React Hook \"useLinter\" is called in function \"Anonymous\" that is neither a React function component nor a custom React Hook function. React component names must start with an uppercase letter. React Hook names must start with the word \"use\".",
+          "severity": "medium",
+          "category": "reliability",
+          "location": {
+            "file": "packages/auditors/src/codebase/strictness-python.ts",
+            "line": 88,
+            "column": 3
+          },
+          "evidence": "React Hook \"useLinter\" is called in function \"Anonymous\" that is neither a React function component nor a custom React Hook function. React component names must…",
+          "remediation": "Fix the reported issue, or configure the rule in .oxlintrc.json if it does not fit your code base.",
+          "references": [
+            "https://oxc.rs/docs/guide/usage/linter/rules/react/rules-of-hooks.html"
+          ],
+          "confidence": "high",
+          "tags": [
+            "react-hooks",
+            "eslint:react-hooks/rules-of-hooks"
+          ],
+          "fingerprint": "28ed1649dae8a509"
+        },
+        {
+          "ruleId": "code.oxlint/react-hooks-rules-of-hooks",
+          "auditor": "code.oxlint",
+          "title": "rules-of-hooks: React Hook \"useTypeChecker\" is called in function \"Anonymous\" that is neither a React function component…",
+          "message": "React Hook \"useTypeChecker\" is called in function \"Anonymous\" that is neither a React function component nor a custom React Hook function. React component names must start with an uppercase letter. React Hook names must start with the word \"use\".",
+          "severity": "medium",
+          "category": "reliability",
+          "location": {
+            "file": "packages/auditors/src/codebase/strictness-python.ts",
+            "line": 97,
+            "column": 3
+          },
+          "evidence": "React Hook \"useTypeChecker\" is called in function \"Anonymous\" that is neither a React function component nor a custom React Hook function. React component names…",
+          "remediation": "Fix the reported issue, or configure the rule in .oxlintrc.json if it does not fit your code base.",
+          "references": [
+            "https://oxc.rs/docs/guide/usage/linter/rules/react/rules-of-hooks.html"
+          ],
+          "confidence": "high",
+          "tags": [
+            "react-hooks",
+            "eslint:react-hooks/rules-of-hooks"
+          ],
+          "fingerprint": "53dc8b1f40671416"
+        },
+        {
+          "ruleId": "code.oxlint/unicorn-prefer-string-starts-ends-with",
+          "auditor": "code.oxlint",
+          "title": "prefer-string-starts-ends-with: Prefer String#startsWith over a regex with a caret.",
+          "message": "Prefer String#startsWith over a regex with a caret. Replace `/^report\\//.test(relative(dist, f))` with `relative(dist, f).startsWith('report/')`.",
+          "severity": "low",
+          "category": "maintainability",
+          "location": {
+            "file": "apps/site/scripts/postbuild.ts",
+            "line": 63,
+            "column": 31
+          },
+          "evidence": "Prefer String#startsWith over a regex with a caret.",
+          "remediation": "Replace `/^report\\//.test(relative(dist, f))` with `relative(dist, f).startsWith('report/')`.",
+          "references": [
+            "https://oxc.rs/docs/guide/usage/linter/rules/unicorn/prefer-string-starts-ends-with.html"
+          ],
+          "confidence": "high",
+          "tags": [
+            "unicorn",
+            "eslint:unicorn/prefer-string-starts-ends-with"
+          ],
+          "fingerprint": "fd6823745e8192e0"
+        },
+        {
+          "ruleId": "code.oxlint/no-unused-expressions",
+          "auditor": "code.oxlint",
+          "title": "no-unused-expressions: Expected expression to be used",
+          "message": "Expected expression to be used Consider using this expression or removing it",
+          "severity": "low",
+          "category": "maintainability",
+          "location": {
+            "file": "packages/auditors/src/infra/shared.ts",
+            "line": 212,
+            "column": 1
+          },
+          "evidence": "Expected expression to be used",
+          "remediation": "Consider using this expression or removing it",
+          "references": [
+            "https://oxc.rs/docs/guide/usage/linter/rules/eslint/no-unused-expressions.html"
+          ],
+          "confidence": "high",
+          "tags": [
+            "eslint",
+            "eslint:no-unused-expressions"
+          ],
+          "fingerprint": "9dbe9f9d6ee51a56"
+        }
+      ]
+    },
+    {
+      "durationMs": 2581,
+      "auditor": "code.biome",
+      "title": "Biome lint",
+      "engine": "external",
+      "categories": [
+        "maintainability",
+        "reliability"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 15,
+      "auditor": "code.ruff",
+      "title": "Ruff Python lints",
+      "engine": "external",
+      "categories": [
+        "reliability",
+        "maintainability",
+        "security"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 1,
+      "auditor": "code.staticcheck",
+      "title": "staticcheck Go lints",
+      "engine": "external",
+      "categories": [
+        "reliability",
+        "maintainability"
+      ],
+      "status": "skipped",
+      "message": "staticcheck not found on PATH. Install: brew install staticcheck or go install honnef.co/go/tools/cmd/staticcheck@latest.",
+      "findings": []
+    },
+    {
+      "durationMs": 2,
+      "auditor": "code.shellcheck",
+      "title": "ShellCheck",
+      "engine": "external",
+      "categories": [
+        "reliability",
+        "security"
+      ],
+      "status": "skipped",
+      "message": "No shell scripts in the workspace",
+      "findings": []
+    },
+    {
+      "durationMs": 14092,
+      "auditor": "code.mobsfscan",
+      "title": "mobsfscan mobile SAST",
+      "engine": "external",
+      "categories": [
+        "security",
+        "privacy"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 1,
+      "auditor": "code.phpstan",
+      "title": "PHPStan PHP static analysis",
+      "engine": "external",
+      "categories": [
+        "reliability",
+        "maintainability"
+      ],
+      "status": "skipped",
+      "message": "phpstan not found on PATH. Install: download phpstan.phar from https://github.com/phpstan/phpstan/releases (needs PHP 7.4+) or composer global require phpstan/phpstan.",
+      "findings": []
+    },
+    {
+      "durationMs": 1,
+      "auditor": "code.pmd",
+      "title": "PMD Java analysis",
+      "engine": "external",
+      "categories": [
+        "reliability",
+        "maintainability",
+        "security",
+        "performance"
+      ],
+      "status": "skipped",
+      "message": "pmd not found on PATH. Install: brew install pmd, or unzip pmd-dist-<version>-bin.zip from https://github.com/pmd/pmd/releases (needs Java 8+).",
+      "findings": []
+    },
+    {
+      "durationMs": 3,
+      "auditor": "code.spectral",
+      "title": "Spectral API linting",
+      "engine": "external",
+      "categories": [
+        "best-practices",
+        "reliability"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 0,
+      "auditor": "code.oasdiff",
+      "title": "oasdiff breaking API changes",
+      "engine": "external",
+      "categories": [
+        "reliability"
+      ],
+      "status": "skipped",
+      "message": "Only runs with --diff <ref>: it compares OpenAPI specs with their version at that ref.",
+      "findings": []
+    },
+    {
+      "durationMs": 6,
+      "auditor": "container.dockerfile",
+      "title": "Dockerfile security & best practices",
+      "engine": "builtin",
+      "categories": [
+        "security",
+        "supply-chain",
+        "best-practices",
+        "performance"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 15,
+      "auditor": "container.compose",
+      "title": "Docker Compose security",
+      "engine": "builtin",
+      "categories": [
+        "security",
+        "supply-chain",
+        "reliability"
+      ],
+      "status": "failed",
+      "findings": [
+        {
+          "ruleId": "container.compose/plaintext-secret",
+          "auditor": "container.compose",
+          "title": "Plaintext secret in environment",
+          "message": "Service `scanner` sets `SCANNER_TOKEN` to a literal value in the compose file.",
+          "severity": "high",
+          "category": "security",
+          "location": {
+            "file": "apps/badge-scanner/compose.yml",
+            "line": 27
+          },
+          "evidence": "SCANNER_TOKEN=${SC************",
+          "remediation": "Interpolate it from an untracked `.env` file (`$VAR`) or use Compose `secrets:`; rotate the exposed value.",
+          "references": [
+            "https://docs.docker.com/compose/how-tos/use-secrets/"
+          ],
+          "tags": [
+            "cwe-798"
+          ],
+          "fingerprint": "5785dae634f64fa3"
+        }
+      ]
+    },
+    {
+      "durationMs": 0,
+      "auditor": "container.image",
+      "title": "Container image scan",
+      "engine": "external",
+      "categories": [
+        "security",
+        "supply-chain"
+      ],
+      "status": "skipped",
+      "message": "Only runs for image:<ref> targets",
+      "findings": []
+    },
+    {
+      "durationMs": 679,
+      "auditor": "container.hadolint",
+      "title": "Hadolint",
+      "engine": "external",
+      "categories": [
+        "best-practices",
+        "security"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 21,
+      "auditor": "iac.github-actions",
+      "title": "GitHub Actions workflows",
+      "engine": "builtin",
+      "categories": [
+        "security",
+        "supply-chain",
+        "best-practices"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 171,
+      "auditor": "iac.zizmor",
+      "title": "zizmor",
+      "engine": "external",
+      "categories": [
+        "security",
+        "supply-chain"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 207,
+      "auditor": "iac.actionlint",
+      "title": "actionlint",
+      "engine": "external",
+      "categories": [
+        "reliability",
+        "best-practices",
+        "security"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 9,
+      "auditor": "iac.kubernetes",
+      "title": "Kubernetes manifests",
+      "engine": "builtin",
+      "categories": [
+        "security",
+        "reliability",
+        "supply-chain"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 90,
+      "auditor": "iac.kube-linter",
+      "title": "kube-linter",
+      "engine": "external",
+      "categories": [
+        "security",
+        "reliability",
+        "best-practices"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 4601,
+      "auditor": "iac.kubeconform",
+      "title": "kubeconform",
+      "engine": "external",
+      "categories": [
+        "reliability",
+        "best-practices"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 301,
+      "auditor": "iac.terraform",
+      "title": "Terraform configuration",
+      "engine": "builtin",
+      "categories": [
+        "security"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 6020,
+      "auditor": "iac.tflint",
+      "title": "TFLint",
+      "engine": "external",
+      "categories": [
+        "reliability",
+        "best-practices",
+        "supply-chain"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 51821,
+      "auditor": "iac.checkov",
+      "title": "Checkov",
+      "engine": "external",
+      "categories": [
+        "security",
+        "best-practices"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 7,
+      "auditor": "mobile.android",
+      "title": "Android app configuration",
+      "engine": "builtin",
+      "categories": [
+        "security",
+        "privacy",
+        "best-practices"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 7,
+      "auditor": "mobile.ios",
+      "title": "iOS app configuration",
+      "engine": "builtin",
+      "categories": [
+        "security",
+        "privacy"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 2,
+      "auditor": "mobile.secrets",
+      "title": "Mobile app secrets",
+      "engine": "builtin",
+      "categories": [
+        "security"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 0,
+      "auditor": "mobile.dependencies",
+      "title": "Mobile dependencies",
+      "engine": "builtin",
+      "categories": [
+        "supply-chain",
+        "security"
+      ],
+      "status": "skipped",
+      "message": "Target is a source tree, not a built APK/AAB/IPA (code.dependencies covers lockfiles)",
+      "findings": []
+    },
+    {
+      "durationMs": 1,
+      "auditor": "mobile.accessibility",
+      "title": "Mobile accessibility",
+      "engine": "builtin",
+      "categories": [
+        "accessibility"
+      ],
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "durationMs": 0,
+      "auditor": "mobile.performance",
+      "title": "Mobile app size and build quality",
+      "engine": "builtin",
+      "categories": [
+        "performance"
+      ],
+      "status": "skipped",
+      "message": "Target is a source tree, not a built APK/AAB/IPA (size checks need the artifact)",
+      "findings": []
+    }
+  ],
+  "suppressed": [
+    {
+      "entries": [
+        {
+          "count": 1036,
+          "kind": "path",
+          "reason": "Test suites and fixtures: deliberately vulnerable code, fake secrets and recorded scanner output for the auditors to find",
+          "value": "**/test/**"
+        },
+        {
+          "count": 3,
+          "kind": "path",
+          "reason": "Tests outside test/ (packages/api/src) embed the same kind of sample payloads",
+          "value": "**/*.test.ts"
+        },
+        {
+          "count": 1,
+          "kind": "fingerprint",
+          "reason": "gitleaks generic-api-key false positive: prose in the severity guide of packages/agent/src/playbooks/ux-content.ts",
+          "value": "fec97ae0392386ac"
+        },
+        {
+          "count": 1,
+          "kind": "fingerprint",
+          "reason": "gitleaks generic-api-key false positive: the OWASP API Top 10 page slug for api10 in packages/auditors/src/codebase/api-shared.ts",
+          "value": "335b7e5bf3fd6a37"
+        },
+        {
+          "count": 1,
+          "kind": "fingerprint",
+          "reason": "jscpd: the dark palette in apps/site/src/styles/global.css appears twice on purpose, once for the system setting and once for the explicit data-theme toggle; one CSS rule cannot sit both inside and outside a media query",
+          "value": "073efb043367d01d"
+        }
+      ],
+      "fingerprints": 3,
+      "paths": 1039,
+      "rules": 0,
+      "source": "repo/openaudit.config.json"
+    }
+  ]
+}
