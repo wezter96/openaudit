@@ -53,7 +53,7 @@ export const guardedFetch = (
 	},
 	signal?: AbortSignal,
 ): Promise<HttpResponse> =>
-	coreGuardedFetch(input, init, guard, URL_AUDIT_LIMITS, signal);
+	coreGuardedFetch(input, init, { guard, limits: URL_AUDIT_LIMITS, signal });
 
 const guardedHttpLayer = (guard: GuardOptions) =>
 	coreGuardedHttpLayer(guard, URL_AUDIT_LIMITS);

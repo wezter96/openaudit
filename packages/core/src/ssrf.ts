@@ -473,6 +473,13 @@ type FetchGuard = GuardOptions & {
 	readonly fetch?: (url: string, init: RequestInit) => Promise<Response>;
 };
 
+export interface GuardedFetchOptions {
+	readonly guard: FetchGuard;
+	readonly limits: GuardedFetchLimits;
+	/** Aborts the request, e.g. when the caller's effect is interrupted. */
+	readonly signal?: AbortSignal;
+}
+
 /** What every hop of one guarded request shares. */
 interface GuardedRequest {
 	readonly guard: FetchGuard;
@@ -583,9 +590,7 @@ const followGuarded = async (
 export const guardedFetch = async (
 	input: UrlText,
 	init: HttpRequest,
-	guard: FetchGuard,
-	limits: GuardedFetchLimits,
-	signal?: AbortSignal,
+	{ guard, limits, signal }: GuardedFetchOptions,
 ): Promise<HttpResponse> => {
 	const controller = new AbortController();
 	signal?.addEventListener("abort", () => controller.abort());
@@ -634,7 +639,7 @@ export const guardedHttpLayer = (
 	Layer.succeed(Http, {
 		request: (url, init = {}) =>
 			Effect.tryPromise({
-				try: (signal) => guardedFetch(url, init, guard, limits, signal),
+				try: (signal) => guardedFetch(url, init, { guard, limits, signal }),
 				catch: (cause) =>
 					new AuditorError({
 						message: `Request to ${url} failed: ${cause instanceof Error ? cause.message : String(cause)}`,
