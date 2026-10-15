@@ -28,6 +28,17 @@ const MAGIC = [0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30]; // "bplist00"
 export const isBinaryPlist = (bytes: Uint8Array): boolean =>
 	bytes.length >= MAGIC.length && MAGIC.every((b, i) => bytes[i] === b);
 
+/** A byte offset into the plist. */
+type Offset = number;
+/** A number of bytes. */
+type ByteCount = number;
+/** An object's index in the offset table. */
+type ObjectRef = number;
+/** The low nibble of an object's marker byte. */
+type Nibble = number;
+/** A position in a ref list. */
+type ListIndex = number;
+
 /** An object's position in the file and the low nibble of its marker. */
 interface ObjectHeader {
 	readonly ref: number;
@@ -35,7 +46,7 @@ interface ObjectHeader {
 	readonly info: number;
 }
 
-const outOfBounds = (pos: number, n: number, length: number) =>
+const outOfBounds = (pos: Offset, n: ByteCount, length: ByteCount) =>
 	pos < 0 || n < 0 || pos + n > length;
 
 /** Reads objects from one binary plist, memoised by ref and budgeted. */
@@ -74,12 +85,12 @@ class BplistReader {
 		);
 	}
 
-	need(pos: number, n: number) {
+	need(pos: Offset, n: ByteCount) {
 		if (outOfBounds(pos, n, this.bytes.length))
 			throw new Error("Truncated binary plist");
 	}
 
-	uint(pos: number, size: number): number {
+	uint(pos: Offset, size: ByteCount): number {
 		this.need(pos, size);
 		let v = 0;
 		for (let i = 0; i < size; i++) v = v * 256 + (this.bytes[pos + i] ?? 0);
@@ -87,7 +98,7 @@ class BplistReader {
 	}
 
 	/** Length nibble, or a following int object when the nibble is 0xF. */
-	lengthAt(pos: number, info: number): [number, number] {
+	lengthAt(pos: Offset, info: Nibble): [number, number] {
 		if (info !== 0xf) return [info, pos + 1];
 		const marker = this.bytes[pos + 1] ?? 0;
 		if (marker >> 4 !== 0x1) throw new Error("Invalid length marker");
@@ -96,7 +107,7 @@ class BplistReader {
 	}
 
 	/** Length and start of a payload of `unit`-byte items, charged as bytes. */
-	payload(o: ObjectHeader, unit: number): [number, number] {
+	payload(o: ObjectHeader, unit: ByteCount): [number, number] {
 		const [len, start] = this.lengthAt(o.pos, o.info);
 		this.need(start, len * unit);
 		this.budget.bytes(len * unit);
@@ -104,12 +115,12 @@ class BplistReader {
 	}
 
 	/** The object at the `i`th ref of a ref list starting at `start`. */
-	refAt(start: number, i: number): PlistValue {
+	refAt(start: Offset, i: ListIndex): PlistValue {
 		return this.parse(this.uint(start + i * this.refSize, this.refSize));
 	}
 
 	/** Runs `fn` with `ref` marked as being parsed, to detect cycles. */
-	nested<A>(ref: number, fn: () => A): A {
+	nested<A>(ref: ObjectRef, fn: () => A): A {
 		this.active.add(ref);
 		const out = fn();
 		this.active.delete(ref);
@@ -120,13 +131,13 @@ class BplistReader {
 		return this.parse(this.topObject);
 	}
 
-	private offsetOf(ref: number): number {
+	private offsetOf(ref: ObjectRef): number {
 		if (ref >= this.numObjects)
 			throw new Error(`Object ref ${ref} out of range`);
 		return this.uint(this.tableOffset + ref * this.offsetSize, this.offsetSize);
 	}
 
-	private parse(ref: number): PlistValue {
+	private parse(ref: ObjectRef): PlistValue {
 		const cached = this.memo.get(ref);
 		if (cached) {
 			this.budget.node(cached.size);
@@ -141,7 +152,7 @@ class BplistReader {
 		return value;
 	}
 
-	private parseObject(ref: number): PlistValue {
+	private parseObject(ref: ObjectRef): PlistValue {
 		const pos = this.offsetOf(ref);
 		this.need(pos, 1);
 		const marker = this.bytes[pos] ?? 0;

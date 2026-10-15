@@ -82,25 +82,35 @@ class Reader {
 	private comment(): boolean {
 		if (this.text[this.i] !== "/") return false;
 		const next = this.text[this.i + 1];
-		if (next === "/") {
-			const e = this.text.indexOf("\n", this.i);
-			this.i = e === -1 ? this.n : e + 1;
-			return true;
-		}
-		if (next !== "*") return false;
+		if (next === "/") return this.lineComment();
+		return next === "*" && this.blockComment();
+	}
+
+	private lineComment(): true {
+		const e = this.text.indexOf("\n", this.i);
+		this.i = e === -1 ? this.n : e + 1;
+		return true;
+	}
+
+	private blockComment(): true {
 		const e = this.text.indexOf("*/", this.i + 2);
 		if (e === -1) throw new Bad("unterminated block comment", this.i);
 		this.i = e + 2;
 		return true;
 	}
 
-	private string(): string {
-		const start = this.i;
+	/** Moves the cursor past the closing quote of the string opening at `start`. */
+	private stringEnd(start: Offset) {
 		this.i++;
 		while (this.i < this.n && this.text[this.i] !== '"')
 			this.i += this.text[this.i] === "\\" ? 2 : 1;
 		if (this.i >= this.n) throw new Bad("unterminated string", start);
 		this.i++;
+	}
+
+	private string(): string {
+		const start = this.i;
+		this.stringEnd(start);
 		try {
 			return JSON.parse(this.text.slice(start, this.i)) as string;
 		} catch {
@@ -120,18 +130,27 @@ class Reader {
 		return this.scalar();
 	}
 
-	private object(depth: Depth): JsonNode {
+	/** The members of the container opening at the cursor, and its offset. */
+	private members<T>(
+		close: "}" | "]",
+		member: () => T,
+	): { readonly offset: Offset; readonly members: T[] } {
 		const offset = this.i++;
-		const entries: JsonEntry[] = [];
+		const members: T[] = [];
 		for (;;) {
 			this.skip();
-			if (this.text[this.i] === "}") {
+			if (this.text[this.i] === close) {
 				this.i++;
-				return { kind: "object", offset, entries };
+				return { offset, members };
 			}
-			entries.push(this.entry(depth));
-			this.separator("}");
+			members.push(member());
+			this.separator(close);
 		}
+	}
+
+	private object(depth: Depth): JsonNode {
+		const { offset, members } = this.members("}", () => this.entry(depth));
+		return { kind: "object", offset, entries: members };
 	}
 
 	private entry(depth: Depth): JsonEntry {
@@ -146,17 +165,8 @@ class Reader {
 	}
 
 	private array(depth: Depth): JsonNode {
-		const offset = this.i++;
-		const items: JsonNode[] = [];
-		for (;;) {
-			this.skip();
-			if (this.text[this.i] === "]") {
-				this.i++;
-				return { kind: "array", offset, items };
-			}
-			items.push(this.value(depth + 1));
-			this.separator("]");
-		}
+		const { offset, members } = this.members("]", () => this.value(depth + 1));
+		return { kind: "array", offset, items: members };
 	}
 
 	/** After a member: steps over a comma, or checks the container closes. */
@@ -177,19 +187,23 @@ class Reader {
 	}
 }
 
+/** The parse of `root`, unless more than comments and whitespace follow it. */
+const complete = (reader: Reader, root: JsonNode): JsonParse => {
+	reader.skip();
+	return reader.i === reader.n
+		? { ok: true, root }
+		: {
+				ok: false,
+				reason: "unexpected content after the value",
+				offset: reader.i,
+			};
+};
+
 /** Parses JSONC into a tree, or says why and where it is not JSONC. */
 export const parseJsoncDetailed = (text: JsonText): JsonParse => {
 	const reader = new Reader(text);
 	try {
-		const root = reader.value(0);
-		reader.skip();
-		return reader.i === reader.n
-			? { ok: true, root }
-			: {
-					ok: false,
-					reason: "unexpected content after the value",
-					offset: reader.i,
-				};
+		return complete(reader, reader.value(0));
 	} catch (e) {
 		if (e instanceof Bad)
 			return { ok: false, reason: e.reason, offset: e.offset };
@@ -216,22 +230,35 @@ export const stringItems = (
 			: [],
 	);
 
+/** Finds where a key or string value sits in the source text. */
+type Locate = (needle: string) => number;
+
+const scalarNode = (v: unknown): JsonNode => ({
+	kind: "scalar",
+	offset: 0,
+	value: typeof v === "number" || typeof v === "boolean" ? v : null,
+});
+
+/** A string node at its located offset, or a scalar one. */
+const leafNode = (v: unknown, locate: Locate): JsonNode =>
+	typeof v === "string"
+		? { kind: "string", offset: locate(v), value: v }
+		: scalarNode(v);
+
+const isObject = (v: unknown): v is object =>
+	typeof v === "object" && v !== null;
+
 /** Builds a tree from an already-parsed value (TOML), locating offsets by search. */
-export const treeOf = (
-	value: unknown,
-	locate: (needle: string) => number,
-): JsonNode => {
-	const offset = (v: unknown) =>
-		typeof v === "string" ? locate(v) : locate(String(v));
+export const treeOf = (value: unknown, locate: Locate): JsonNode => {
 	const build = (v: unknown, depth: Depth): JsonNode => {
-		if (depth > MAX_DEPTH) return { kind: "scalar", offset: 0, value: null };
+		if (depth > MAX_DEPTH) return scalarNode(null);
 		if (Array.isArray(v))
 			return {
 				kind: "array",
 				offset: 0,
 				items: v.map((x) => build(x, depth + 1)),
 			};
-		if (typeof v === "object" && v !== null)
+		if (isObject(v))
 			return {
 				kind: "object",
 				offset: 0,
@@ -241,13 +268,7 @@ export const treeOf = (
 					value: build(x, depth + 1),
 				})),
 			};
-		if (typeof v === "string")
-			return { kind: "string", offset: offset(v), value: v };
-		return {
-			kind: "scalar",
-			offset: 0,
-			value: typeof v === "number" || typeof v === "boolean" ? v : null,
-		};
+		return leafNode(v, locate);
 	};
 	return build(value, 0);
 };

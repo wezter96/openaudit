@@ -69,17 +69,22 @@ const SKIPPERS: ReadonlyArray<readonly [ReadonlyArray<string>, Skipper]> = [
 const skipperAt = (text: HclText, i: Offset): Skipper | undefined =>
 	SKIPPERS.find(([starts]) => starts.some((s) => text.startsWith(s, i)))?.[1];
 
+/** How a brace changes the nesting depth; other characters leave it. */
+const BRACE_STEP: Readonly<Record<string, number>> = { "{": 1, "}": -1 };
+
+/** The next index to scan after `i`, past a string, comment or heredoc that starts there. */
+const nextScanIndex = (text: HclText, i: Offset): Offset => {
+	const skipper = skipperAt(text, i);
+	return (skipper ? skipper(text, i) : i) + 1;
+};
+
 /** Index of the brace closing the one at `open`, skipping strings, comments and heredocs. */
 const matchBrace = (text: HclText, open: Offset): Offset => {
 	let depth = 0;
-	for (let i = open; i < text.length; i++) {
-		const skipper = skipperAt(text, i);
-		if (skipper) i = skipper(text, i);
-		else if (text[i] === "{") depth++;
-		else if (text[i] === "}") {
-			depth--;
-			if (depth === 0) return i;
-		}
+	for (let i = open; i < text.length; i = nextScanIndex(text, i)) {
+		// Strings, comments and heredocs never start with a brace.
+		depth += BRACE_STEP[text[i] ?? ""] ?? 0;
+		if (depth === 0 && text[i] === "}") return i;
 	}
 	return text.length;
 };

@@ -20,10 +20,19 @@ export interface RedirectHop {
 	readonly location: string;
 }
 
-const isRedirect = (status: number) => status >= 300 && status < 400;
+/** An absolute URL. */
+type Url = string;
+/** A URL's origin, such as `https://example.com`. */
+type Origin = string;
+/** A host name. */
+type Hostname = string;
+/** An HTTP status code. */
+type Status = number;
+
+const isRedirect = (status: Status) => status >= 300 && status < 400;
 
 /** Walks redirects one request at a time so every hop is visible. */
-const walkRedirects = (ctx: AuditContext, startUrl: string) =>
+const walkRedirects = (ctx: AuditContext, startUrl: Url) =>
 	Effect.gen(function* () {
 		const hops: RedirectHop[] = [];
 		const seen = new Set<string>();
@@ -60,7 +69,7 @@ export const isDefault404 = (res: Pick<HttpResponse, "body">): boolean => {
 };
 
 /** Apex <-> www counterpart of a host, or undefined when neither applies. */
-export const wwwCounterpart = (hostname: string): string | undefined => {
+export const wwwCounterpart = (hostname: Hostname): string | undefined => {
 	const scope = domainScope(hostname);
 	if (scope.kind !== "domain") return undefined;
 	if (scope.host === scope.domain) return `www.${scope.domain}`;
@@ -77,7 +86,7 @@ const isUnreachable = (walked: RedirectWalk) =>
 	walked.loop || walked.hops.length >= MAX_HOPS;
 
 const redirectLoopFinding = (
-	targetUrl: string,
+	targetUrl: Url,
 	walked: RedirectWalk,
 ): FindingInput => ({
 	ruleId: "web.reliability/redirect-loop",
@@ -96,7 +105,7 @@ const redirectLoopFinding = (
 });
 
 const redirectChainFindings = (
-	targetUrl: string,
+	targetUrl: Url,
 	hops: ReadonlyArray<RedirectHop>,
 ): FindingInput[] =>
 	hops.length > 2
@@ -145,7 +154,7 @@ const apexWwwFinding = (p: AltProbe): FindingInput => {
 };
 
 /** Checks that the apex/www counterpart of the start host answers too. */
-const apexWwwFindings = (ctx: AuditContext, startUrl: string) =>
+const apexWwwFindings = (ctx: AuditContext, startUrl: Url) =>
 	Effect.gen(function* () {
 		const start = new URL(startUrl);
 		const host = start.hostname;
@@ -188,7 +197,7 @@ const serverErrorFinding = (e: ServerError): FindingInput => ({
 	confidence: "medium",
 });
 
-const noRetryAfterFinding = (url: string): FindingInput => ({
+const noRetryAfterFinding = (url: Url): FindingInput => ({
 	ruleId: "web.reliability/503-no-retry-after",
 	title: "503 without a Retry-After header",
 	severity: "low",
@@ -217,7 +226,7 @@ const urlErrorFindings = (ctx: AuditContext, e: ServerError) =>
 
 const manyServerErrorsFinding = (
 	count: number,
-	startUrl: string,
+	startUrl: Url,
 ): FindingInput => ({
 	ruleId: "web.reliability/server-error-many",
 	title: `${count - MAX_REPORTED_5XX} more pages return 5xx`,
@@ -230,7 +239,7 @@ const manyServerErrorsFinding = (
 	tags: ["errors"],
 });
 
-const serverErrorFindings = (ctx: AuditContext, c: Crawl, targetUrl: string) =>
+const serverErrorFindings = (ctx: AuditContext, c: Crawl, targetUrl: Url) =>
 	Effect.gen(function* () {
 		const findings: FindingInput[] = [];
 		const errors = [...c.statuses.entries()].filter(([, s]) => s >= 500);
@@ -249,8 +258,8 @@ const serverErrorFindings = (ctx: AuditContext, c: Crawl, targetUrl: string) =>
 /** A redirect from the 404 probe to the site's home page. */
 const redirectsHome = (
 	res: HttpResponse,
-	probeUrl: string,
-	origin: string,
+	probeUrl: Url,
+	origin: Origin,
 ): boolean => {
 	const target = res.headers.get("location");
 	if (!isRedirect(res.status) || target === null) return false;
@@ -259,7 +268,7 @@ const redirectsHome = (
 };
 
 const soft404Finding = (
-	status: number,
+	status: Status,
 	toHome: boolean,
 	location: FindingInput["location"],
 ): FindingInput => ({
@@ -280,7 +289,7 @@ const soft404Finding = (
 });
 
 const notFoundServerErrorFinding = (
-	status: number,
+	status: Status,
 	location: FindingInput["location"],
 ): FindingInput => ({
 	ruleId: "web.reliability/404-server-error",
@@ -320,8 +329,8 @@ const default404Finding = (
 /** How the site answers a random unknown path, or undefined when it is fine. */
 const notFoundFinding = (
 	res: HttpResponse,
-	probeUrl: string,
-	origin: string,
+	probeUrl: Url,
+	origin: Origin,
 ): FindingInput | undefined => {
 	const { status } = res;
 	const location = { url: `${origin}/<random-path>` };
@@ -333,7 +342,7 @@ const notFoundFinding = (
 	return undefined;
 };
 
-const notFoundFindings = (ctx: AuditContext, origin: string) =>
+const notFoundFindings = (ctx: AuditContext, origin: Origin) =>
 	Effect.gen(function* () {
 		const probeUrl = `${origin}/openaudit-${Date.now().toString(36)}-not-found`;
 		const nf = yield* fetchCached(ctx, probeUrl, {

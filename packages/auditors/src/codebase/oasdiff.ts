@@ -48,6 +48,25 @@ const OID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 /** oasdiff exit codes for a spec that could not be loaded or flattened. */
 const NOT_LOADED = new Set([102, 122, 123]);
 
+/** An OpenAPI spec's text. */
+type SpecText = string;
+/** A key in a spec: `paths`, an API path such as `/users/{id}`, or a method. */
+type SpecKey = string;
+/** An offset into a spec's text. */
+type Offset = number;
+/** A file path relative to the repository root. */
+type RelPath = string;
+/** A directory on the local filesystem. */
+type DirPath = string;
+/** The git ref given with `--diff`. */
+type GitRef = string;
+/** What git or oasdiff printed. */
+type ToolOutput = string;
+/** What failed, or why a spec was not compared, for a message. */
+type Reason = string;
+/** A spec's position in the list, which names its temp subdirectory. */
+type SpecIndex = number;
+
 const REFERENCES = [
 	"https://www.oasdiff.com/docs/breaking-changes",
 	"https://github.com/oasdiff/oasdiff/blob/main/docs/BREAKING-CHANGES.md",
@@ -77,25 +96,25 @@ const REMEDIATION: Readonly<Record<Severity, string>> = {
 /*                                   Parsing                                  */
 /* -------------------------------------------------------------------------- */
 
-const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const keyAt = (name: string) =>
+const escapeRegExp = (s: SpecKey) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const keyAt = (name: SpecKey) =>
 	// name is escaped, so it only matches itself.
 	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 	new RegExp(`(?:^|[{,\\s])["']?${escapeRegExp(name)}["']?\\s*:`, "gm");
 /** Any key that looks like an API path, to bound the method search. */
 const PATH_KEY = /(?:^|[{,\s])["']?\/[^"'\s:]*["']?\s*:/gm;
 
-const indexFrom = (re: RegExp, text: string, from: number) => {
+const indexFrom = (re: RegExp, text: SpecText, from: Offset) => {
 	re.lastIndex = from;
 	const m = re.exec(text);
 	return m ? { start: m.index, end: m.index + m[0].length } : undefined;
 };
 
-const lineAt = (text: string, i: number) =>
+const lineAt = (text: SpecText, i: Offset) =>
 	lineOf(text, text[i] === "\n" ? i + 1 : i);
 
 /** Start of the `method` key after a path key ending at `from`, before the next path. */
-const methodStart = (text: string, from: number, method: string) => {
+const methodStart = (text: SpecText, from: Offset, method: SpecKey) => {
 	const bound = indexFrom(PATH_KEY, text, from)?.start ?? text.length;
 	const op = indexFrom(keyAt(method.toLowerCase()), text, from);
 	return op && op.start < bound ? op.start : undefined;
@@ -106,9 +125,9 @@ const methodStart = (text: string, from: number, method: string) => {
  * A cheap text search, not a parse: good enough to point a reviewer at it.
  */
 export const operationLine = (
-	text: string,
-	path: string | undefined,
-	method: string | undefined,
+	text: SpecText,
+	path: SpecKey | undefined,
+	method: SpecKey | undefined,
 ): number | undefined => {
 	if (!path) return undefined;
 	const paths = indexFrom(keyAt("paths"), text, 0);
@@ -150,8 +169,8 @@ const changeOf = (item: unknown): Change | undefined => {
 const changeLine = (
 	{ item }: Change,
 	ctx: CompareContext,
-	path: string | undefined,
-	method: string | undefined,
+	path: SpecKey | undefined,
+	method: SpecKey | undefined,
 ) => {
 	const rev = isRecord(item.revisionSource) ? item.revisionSource : {};
 	const reported =
@@ -191,7 +210,7 @@ export const parseOasdiffOutput = (
 		return change ? [changeFinding(change, ctx)] : [];
 	});
 
-const notCompared = (file: string, why: string): FindingInput => ({
+const notCompared = (file: RelPath, why: Reason): FindingInput => ({
 	ruleId: `${ID}/not-compared`,
 	title: "OpenAPI spec not checked for breaking changes",
 	severity: "info",
@@ -212,7 +231,7 @@ interface TreeEntry {
 }
 
 /** One `ls-tree -l` record as `[path, entry]`; every group is non-empty when it matches. */
-const lsTreeRecord = (record: string): [string, TreeEntry] | undefined => {
+const lsTreeRecord = (record: ToolOutput): [string, TreeEntry] | undefined => {
 	const m = /^\d+ (\w+) ([0-9a-f]+) +(\d+|-)\t(.+)$/s.exec(record);
 	if (!m) return undefined;
 	const [, type = "", oid = "", size = "", path = ""] = m;
@@ -220,7 +239,7 @@ const lsTreeRecord = (record: string): [string, TreeEntry] | undefined => {
 };
 
 /** Parses `git ls-tree -l -z` output, keyed by path. */
-export const parseLsTree = (stdout: string): Map<string, TreeEntry> => {
+export const parseLsTree = (stdout: ToolOutput): Map<string, TreeEntry> => {
 	const out = new Map<string, TreeEntry>();
 	for (const record of stdout.split("\0")) {
 		const entry = lsTreeRecord(record);
@@ -238,14 +257,14 @@ export const parseLsTree = (stdout: string): Map<string, TreeEntry> => {
  * system config, no transports, and no lazy fetch of missing objects from a
  * promisor remote (which could run `core.sshCommand`).
  */
-export const oasdiffGitEnv = (home: string): Record<string, string> => ({
+export const oasdiffGitEnv = (home: DirPath): Record<string, string> => ({
 	...gitHardeningEnv(home, [["protocol.allow", "never"]]),
 	GIT_NO_LAZY_FETCH: "1",
 	GIT_LITERAL_PATHSPECS: "1",
 	GIT_OPTIONAL_LOCKS: "0",
 });
 
-const fail = (what: string, res: { code: number; stderr: string }) =>
+const fail = (what: Reason, res: { code: number; stderr: string }) =>
 	Effect.fail(
 		new AuditorError({
 			message: `${what} exited with code ${res.code}: ${truncate(res.stderr.trim(), 300)}`,
@@ -306,7 +325,7 @@ const baseTree = (s: Session, specs: ReadonlyArray<SpecFile>) =>
 const isBaseBlob = (entry: TreeEntry | undefined): entry is TreeEntry =>
 	entry?.type === "blob" && OID.test(entry.oid);
 
-const notLoadedReason = (s: Session, pair: Pair, stderr: string) =>
+const notLoadedReason = (s: Session, pair: Pair, stderr: ToolOutput) =>
 	/disallowed external ref/i.test(stderr)
 		? "it uses external $refs, which oasdiff is not allowed to follow (they could make it fetch URLs chosen by the repository)."
 		: truncate(
@@ -350,7 +369,12 @@ const runOasdiff = (s: Session, pair: Pair) =>
 	});
 
 /** Writes both versions of the `i`th spec to the temp dir and compares them. */
-const comparePair = (s: Session, spec: SpecFile, i: number, baseText: string) =>
+const comparePair = (
+	s: Session,
+	spec: SpecFile,
+	i: SpecIndex,
+	baseText: SpecText,
+) =>
 	Effect.gen(function* () {
 		const ext = extOf(spec.path) === "json" ? ".json" : ".yaml";
 		const pair: Pair = {
@@ -370,7 +394,7 @@ const compareSpec = (
 	s: Session,
 	entry: TreeEntry | undefined,
 	spec: SpecFile,
-	i: number,
+	i: SpecIndex,
 ) =>
 	Effect.gen(function* () {
 		// Missing at the base: a new API, nothing to break.
@@ -385,8 +409,8 @@ const compareSpec = (
 
 const compare = (
 	ctx: AuditContext,
-	root: string,
-	base: string,
+	root: DirPath,
+	base: GitRef,
 	specs: ReadonlyArray<SpecFile>,
 ) =>
 	Effect.gen(function* () {

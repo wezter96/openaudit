@@ -22,19 +22,28 @@ import { normalize, sentences } from "./text";
 /*                           Hidden Unicode characters                        */
 /* -------------------------------------------------------------------------- */
 
-const isTag = (cp: number) => cp >= 0xe0000 && cp <= 0xe007f;
-const isBidi = (cp: number) =>
+/** A Unicode code point. */
+type CodePoint = number;
+/** A file's text, or a sentence or slice of it. */
+type Text = string;
+/** A UTF-16 offset into a text, or an index into its code points. */
+type Offset = number;
+/** Whether a sentence is already known to address the agent. */
+type Imperative = boolean;
+
+const isTag = (cp: CodePoint) => cp >= 0xe0000 && cp <= 0xe007f;
+const isBidi = (cp: CodePoint) =>
 	(cp >= 0x202a && cp <= 0x202e) || (cp >= 0x2066 && cp <= 0x2069);
-const isVariationSelector = (cp: number) =>
+const isVariationSelector = (cp: CodePoint) =>
 	(cp >= 0xfe00 && cp <= 0xfe0f) || (cp >= 0xe0100 && cp <= 0xe01ef);
 /** Zero-width characters with no legitimate use inside instruction prose. */
-const isZeroWidth = (cp: number) =>
+const isZeroWidth = (cp: CodePoint) =>
 	cp === 0x200b ||
 	cp === 0x180e ||
 	cp === 0xfeff ||
 	(cp >= 0x2060 && cp <= 0x2064);
 /** ZWNJ/ZWJ, which emoji sequences and several scripts rely on. */
-const isJoiner = (cp: number) => cp === 0x200c || cp === 0x200d;
+const isJoiner = (cp: CodePoint) => cp === 0x200c || cp === 0x200d;
 
 type UnicodeKind = "invisible-text" | "bidi" | "zero-width";
 
@@ -63,7 +72,10 @@ const decodeSelectors = (cps: ReadonlyArray<number>): string =>
 	);
 
 /** Subdivision flags such as 🏴 + tags `gbsct` + CANCEL TAG. */
-const isFlagSequence = (prev: number | undefined, run: ReadonlyArray<number>) =>
+const isFlagSequence = (
+	prev: CodePoint | undefined,
+	run: ReadonlyArray<CodePoint>,
+) =>
 	prev === 0x1f3f4 &&
 	run.at(-1) === 0xe007f &&
 	run
@@ -73,7 +85,7 @@ const isFlagSequence = (prev: number | undefined, run: ReadonlyArray<number>) =>
 				(cp >= 0xe0030 && cp <= 0xe0039) || (cp >= 0xe0061 && cp <= 0xe007a),
 		);
 
-const isZeroWidthOrJoiner = (cp: number) => isZeroWidth(cp) || isJoiner(cp);
+const isZeroWidthOrJoiner = (cp: CodePoint) => isZeroWidth(cp) || isJoiner(cp);
 const never = () => false;
 
 /** A run of hidden characters and the code points around it. */
@@ -86,12 +98,12 @@ interface Run {
 
 /** One kind of hidden character: what starts a run, what extends it, and when it is a hit. */
 interface HiddenKind {
-	readonly starts: (cp: number) => boolean;
-	readonly extends: (cp: number) => boolean;
+	readonly starts: (cp: CodePoint) => boolean;
+	readonly extends: (cp: CodePoint) => boolean;
 	readonly hit: (run: Run) => UnicodeHit | undefined;
 }
 
-const isAlnum = (c: number | undefined) =>
+const isAlnum = (c: CodePoint | undefined) =>
 	c !== undefined && /[A-Za-z0-9]/.test(String.fromCharCode(c));
 const insideWord = (run: Run) => isAlnum(run.prev) && isAlnum(run.next);
 /** Several selectors, at least one of them a supplementary one (VS17–256). */
@@ -145,7 +157,7 @@ const HIDDEN_KINDS: ReadonlyArray<HiddenKind> = [
 ];
 
 /** Code points of `text` with the UTF-16 offset of each. */
-const codePoints = (text: string) => {
+const codePoints = (text: Text) => {
 	const cps: number[] = [];
 	const offsets: number[] = [];
 	let offset = 0;
@@ -160,15 +172,15 @@ const codePoints = (text: string) => {
 /** End (exclusive) of the run from `k` whose code points satisfy `test`. */
 const runEnd = (
 	cps: ReadonlyArray<number>,
-	k: number,
-	test: (cp: number) => boolean,
+	k: Offset,
+	test: (cp: CodePoint) => boolean,
 ) => {
 	let j = k;
 	while (j < cps.length && test(cps[j] ?? 0)) j++;
 	return j;
 };
 
-export const hiddenUnicode = (text: string): UnicodeHit[] => {
+export const hiddenUnicode = (text: Text): UnicodeHit[] => {
 	const { cps, offsets } = codePoints(text);
 	const hits: UnicodeHit[] = [];
 	let k = 0;
@@ -192,7 +204,7 @@ export const hiddenUnicode = (text: string): UnicodeHit[] => {
 	return hits;
 };
 
-const isInvisible = (cp: number) =>
+const isInvisible = (cp: CodePoint) =>
 	isTag(cp) ||
 	isBidi(cp) ||
 	isVariationSelector(cp) ||
@@ -202,7 +214,7 @@ const isInvisible = (cp: number) =>
 	cp === 0x200f;
 
 /** The line with invisible characters spelled out as `<U+XXXX>`. */
-const visibleLine = (text: string, index: number): string =>
+const visibleLine = (text: Text, index: Offset): string =>
 	truncate(
 		scrubLine(
 			[...fullLineAt(text, index)]
@@ -304,12 +316,12 @@ const SEND_SOMEWHERE =
 
 interface InstructionPattern {
 	readonly label: string;
-	readonly test: (text: string) => number | undefined;
+	readonly test: (text: Text) => number | undefined;
 	/** Also suspicious in a collapsed <details> block, which readers can open. */
 	readonly inDetails: boolean;
 }
 
-const at = (re: RegExp) => (text: string) => re.exec(text)?.index;
+const at = (re: RegExp) => (text: Text) => re.exec(text)?.index;
 
 /** Agent-directed imperatives that have no business being hidden. */
 const HIDDEN_INSTRUCTIONS: ReadonlyArray<InstructionPattern> = [
@@ -405,8 +417,8 @@ const ISOLATED_CONTEXT =
 
 /** Offset within `sentence` of an un-negated safety bypass, if any. */
 const safetyBypass = (
-	sentence: string,
-	imperative: boolean,
+	sentence: Text,
+	imperative: Imperative,
 ): number | undefined => {
 	const words = SAFETY_IMPERATIVE.exec(sentence.trim());
 	if (words) return sentence.length - sentence.trimStart().length;
@@ -427,9 +439,9 @@ const safetyBypass = (
 
 /** Raw offset of the first un-negated safety bypass in `raw`, if any. */
 const bypassIn = (
-	raw: string,
-	offset: number,
-	imperative: boolean,
+	raw: Text,
+	offset: Offset,
+	imperative: Imperative,
 ): number | undefined => {
 	for (const [start, end] of sentences(raw)) {
 		const norm = normalize(raw.slice(start, end));
@@ -442,7 +454,7 @@ const bypassIn = (
 /** A file being scanned and how to turn offsets into lines. */
 interface Scan {
 	readonly file: SourceFile;
-	readonly lineOf: (offset: number) => number;
+	readonly lineOf: (offset: Offset) => number;
 }
 
 interface Match {
@@ -451,7 +463,7 @@ interface Match {
 }
 
 /** What a hidden region tells the agent to do, at raw offsets. */
-const regionMatches = (text: string, region: Region): Match[] => {
+const regionMatches = (text: Text, region: Region): Match[] => {
 	const raw = text.slice(region.start, region.end);
 	const body = normalize(raw);
 	const details = region.kind === DETAILS;
@@ -502,7 +514,7 @@ const hiddenInstructions = (
 };
 
 /** `text` with hidden regions blanked (keeping line breaks), so only visible text is read. */
-const visibleText = (text: string, hidden: ReadonlyArray<Region>): string => {
+const visibleText = (text: Text, hidden: ReadonlyArray<Region>): string => {
 	const parts: string[] = [];
 	let last = 0;
 	for (const r of [...hidden].sort((a, b) => a.start - b.start)) {
@@ -520,7 +532,7 @@ const visibleText = (text: string, hidden: ReadonlyArray<Region>): string => {
 
 const safetyBypasses = (
 	{ file, lineOf }: Scan,
-	visible: string,
+	visible: Text,
 ): FindingInput[] => {
 	const { path, text } = file;
 	const flagged = new Set<number>();

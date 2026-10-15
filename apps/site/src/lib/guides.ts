@@ -31,30 +31,55 @@ const FILE_PREFIX = "apps/site/src/guides";
 const DIR = join(ROOT, FILE_PREFIX);
 
 type FrontMatter = Partial<Record<string, unknown>>;
+/** A guide's file name in src/guides/, such as `mcp-security.md`. */
+type FileName = string;
+/** A front matter key. */
+type FieldName = string;
+/** A guide's whole Markdown file, front matter included. */
+type FileText = string;
+/** The last part of a guide's URL. */
+type Slug = string;
 
 /** A required front matter field, trimmed; `name` is the guide's file name. */
-const field = (meta: FrontMatter, key: string, name: string) => {
+const field = (meta: FrontMatter, key: FieldName, name: FileName) => {
 	const value = meta[key];
 	if (typeof value !== "string" || !value.trim())
 		throw new Error(`guides/${name}: missing ${key}`);
 	return value.trim();
 };
 
+/** A house rule: whether a guide (and its whole file text) breaks it. */
+interface HouseRule {
+	readonly breaks: (guide: Guide, text: FileText) => boolean;
+	readonly message: string;
+}
+
+const HOUSE_RULES: ReadonlyArray<HouseRule> = [
+	{
+		breaks: (guide) => guide.title.length > 60,
+		message: "title is over 60 characters",
+	},
+	{
+		breaks: (guide) => guide.description.length > 155,
+		message: "description is over 155 characters",
+	},
+	{
+		breaks: (_, text) => /[–—]/.test(text),
+		message: "use a comma, colon or period, not a dash",
+	},
+	{
+		breaks: (guide) => /^#\s/m.test(guide.body),
+		message: 'the H1 comes from "heading"; use ## in the body',
+	},
+];
+
 /** Throws on the first house rule the guide in file `name` breaks. */
-const checkGuide = (guide: Guide, text: string, name: string) => {
-	if (guide.title.length > 60)
-		throw new Error(`guides/${name}: title is over 60 characters`);
-	if (guide.description.length > 155)
-		throw new Error(`guides/${name}: description is over 155 characters`);
-	if (/[–—]/.test(text))
-		throw new Error(`guides/${name}: use a comma, colon or period, not a dash`);
-	if (/^#\s/m.test(guide.body))
-		throw new Error(
-			`guides/${name}: the H1 comes from "heading"; use ## in the body`,
-		);
+const checkGuide = (guide: Guide, text: FileText, name: FileName) => {
+	const broken = HOUSE_RULES.find((rule) => rule.breaks(guide, text));
+	if (broken) throw new Error(`guides/${name}: ${broken.message}`);
 };
 
-const load = (name: string): Guide => {
+const load = (name: FileName): Guide => {
 	const text = readFileSync(join(DIR, name), "utf8");
 	const m = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(text);
 	if (!m) throw new Error(`guides/${name}: no front matter`);
@@ -77,4 +102,4 @@ export const guides: ReadonlyArray<Guide> = readdirSync(DIR)
 	.map(load)
 	.sort((a, b) => a.order - b.order || a.slug.localeCompare(b.slug));
 
-export const guidePath = (slug: string) => `/guides/${slug}/`;
+export const guidePath = (slug: Slug) => `/guides/${slug}/`;

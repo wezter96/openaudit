@@ -552,16 +552,17 @@ const routeResponse = (
 	return undefined;
 };
 
-/** Refuses tokens the Authorization check cannot match, and missing or short ones on remote binds. */
-const checkToken = (
-	host: Host,
-	supplied: BearerToken | undefined,
-	loopback: boolean,
-): void => {
-	// The Authorization check matches a whitespace-free token exactly.
+/** The Authorization check matches a whitespace-free token exactly. */
+const checkTokenShape = (supplied: BearerToken | undefined): void => {
 	if (supplied && /\s/.test(supplied))
 		throw new Error("The bearer token must not contain whitespace.");
-	if (loopback) return;
+};
+
+/** A non-loopback bind needs a token of at least `MIN_REMOTE_TOKEN_LENGTH` characters. */
+const checkRemoteToken = (
+	host: Host,
+	supplied: BearerToken | undefined,
+): void => {
 	if (!supplied)
 		throw new Error(
 			`Refusing to bind ${host} without a bearer token. Pass --token or set OPENAUDIT_MCP_TOKEN, or bind 127.0.0.1.`,
@@ -570,6 +571,16 @@ const checkToken = (
 		throw new Error(
 			`Bearer token must be at least ${MIN_REMOTE_TOKEN_LENGTH} characters when binding a non-loopback host.`,
 		);
+};
+
+/** Refuses tokens the Authorization check cannot match, and missing or short ones on remote binds. */
+const checkToken = (
+	host: Host,
+	supplied: BearerToken | undefined,
+	loopback: boolean,
+): void => {
+	checkTokenShape(supplied);
+	if (!loopback) checkRemoteToken(host, supplied);
 };
 
 const realRoots = (roots: ReadonlyArray<string>): Promise<string[]> =>

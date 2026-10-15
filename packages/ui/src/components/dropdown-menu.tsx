@@ -173,31 +173,45 @@ function ChoiceIndicator({
 	);
 }
 
-function DropdownMenuCheckboxItem({
-	className,
-	children,
-	checked,
-	inset,
-	...props
-}: MenuPrimitive.CheckboxItem.Props & {
-	inset?: boolean;
-}) {
-	return (
-		<MenuPrimitive.CheckboxItem
-			data-slot="dropdown-menu-checkbox-item"
-			data-inset={inset}
-			className={cn(choiceItemClass, className)}
-			checked={checked}
-			{...props}
-		>
-			<ChoiceIndicator
-				slot="dropdown-menu-checkbox-item-indicator"
-				Indicator={MenuPrimitive.CheckboxItemIndicator}
-			/>
-			{children}
-		</MenuPrimitive.CheckboxItem>
-	);
+/** What a checkbox or radio item is built from. */
+interface ChoiceParts<P> {
+	readonly Item: React.ComponentType<P>;
+	readonly Indicator: React.ComponentType<{ children: React.ReactNode }>;
+	readonly slot: string;
 }
+
+/** A checkbox or radio item, with the check mark at its end. */
+function choiceItem<
+	P extends {
+		className?: Parameters<typeof cn>[number];
+		children?: React.ReactNode;
+	},
+>({ Item, Indicator, slot }: ChoiceParts<P>) {
+	return function ChoiceItem({
+		className,
+		children,
+		inset,
+		...props
+	}: P & { inset?: boolean }) {
+		return (
+			<Item
+				data-slot={slot}
+				data-inset={inset}
+				className={cn(choiceItemClass, className)}
+				{...(props as P)}
+			>
+				<ChoiceIndicator slot={`${slot}-indicator`} Indicator={Indicator} />
+				{children}
+			</Item>
+		);
+	};
+}
+
+const DropdownMenuCheckboxItem = choiceItem({
+	Item: MenuPrimitive.CheckboxItem,
+	Indicator: MenuPrimitive.CheckboxItemIndicator,
+	slot: "dropdown-menu-checkbox-item",
+});
 
 function DropdownMenuRadioGroup({ ...props }: MenuPrimitive.RadioGroup.Props) {
 	return (
@@ -208,29 +222,11 @@ function DropdownMenuRadioGroup({ ...props }: MenuPrimitive.RadioGroup.Props) {
 	);
 }
 
-function DropdownMenuRadioItem({
-	className,
-	children,
-	inset,
-	...props
-}: MenuPrimitive.RadioItem.Props & {
-	inset?: boolean;
-}) {
-	return (
-		<MenuPrimitive.RadioItem
-			data-slot="dropdown-menu-radio-item"
-			data-inset={inset}
-			className={cn(choiceItemClass, className)}
-			{...props}
-		>
-			<ChoiceIndicator
-				slot="dropdown-menu-radio-item-indicator"
-				Indicator={MenuPrimitive.RadioItemIndicator}
-			/>
-			{children}
-		</MenuPrimitive.RadioItem>
-	);
-}
+const DropdownMenuRadioItem = choiceItem({
+	Item: MenuPrimitive.RadioItem,
+	Indicator: MenuPrimitive.RadioItemIndicator,
+	slot: "dropdown-menu-radio-item",
+});
 
 function DropdownMenuSeparator({
 	className,

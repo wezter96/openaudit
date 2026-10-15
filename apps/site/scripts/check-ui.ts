@@ -60,8 +60,17 @@ const MENUS: Record<string, string> = {
 /** Theme switches: one click must change the theme, a second puts it back. */
 const THEMES = ["[data-theme-toggle]", "[data-oa-theme]"];
 
+/** Where a problem showed up: browser, viewport width and page. */
+type Where = string;
+/** A site path such as `/docs/`. */
+type SitePath = string;
+/** A CSS selector. */
+type Selector = string;
+/** What went wrong, for the failure list. */
+type Problem = string;
+
 const failures: string[] = [];
-const fail = (where: string, what: string) =>
+const fail = (where: Where, what: Problem) =>
 	failures.push(`${where}: ${what}`);
 
 /** Where the page's main parts are, to compare before and after a menu opens. */
@@ -81,7 +90,7 @@ const layout = (page: Page) =>
 		});
 	});
 
-const open = async (page: Page, path: string) => {
+const open = async (page: Page, path: SitePath) => {
 	// WebKit never fires load on http://localhost pages whose CSP upgrades
 	// requests; the page is usable once the DOM is there.
 	await page.goto(base + path, { waitUntil: "commit", timeout: 30_000 });
@@ -107,7 +116,7 @@ const sidewaysScroll = () => {
 };
 
 /** Where an open menu panel sticks out of the viewport, or "". */
-const panelOffScreen = (sel: string) => {
+const panelOffScreen = (sel: Selector) => {
 	const el = document.querySelector(sel);
 	if (!el) return "";
 	const r = el.getBoundingClientRect();
@@ -163,8 +172,8 @@ const footerBelowScreen = () => {
 
 const checkMenu = async (
 	page: Page,
-	where: string,
-	[selector, panel]: [string, string],
+	where: Where,
+	[selector, panel]: [Selector, Selector],
 ) => {
 	const trigger = page.locator(selector).first();
 	if (!(await isVisible(trigger))) return;
@@ -185,7 +194,7 @@ const checkMenu = async (
 	await page.waitForTimeout(200);
 };
 
-const checkTheme = async (page: Page, where: string, selector: string) => {
+const checkTheme = async (page: Page, where: Where, selector: Selector) => {
 	const button = page.locator(selector).first();
 	if (!(await isVisible(button))) return;
 	const theme = () => page.evaluate(currentTheme);
@@ -198,7 +207,7 @@ const checkTheme = async (page: Page, where: string, selector: string) => {
 		fail(where, `${selector} doesn't switch the theme back`);
 };
 
-const checkBottom = async (page: Page, where: string) => {
+const checkBottom = async (page: Page, where: Where) => {
 	await page.evaluate(scrollToBottom);
 	await page.waitForTimeout(500);
 	if (!(await page.evaluate(homeLinkOnScreen)))
@@ -207,7 +216,7 @@ const checkBottom = async (page: Page, where: string) => {
 	if (footer) fail(where, footer);
 };
 
-const checkPage = async (page: Page, where: string, path: string) => {
+const checkPage = async (page: Page, where: Where, path: SitePath) => {
 	await open(page, path);
 	const wide = await page.evaluate(sidewaysScroll);
 	if (wide) fail(where, `scrolls sideways (${wide})`);
@@ -216,7 +225,7 @@ const checkPage = async (page: Page, where: string, path: string) => {
 	await checkBottom(page, where);
 };
 
-const run = async (name: string, type: BrowserType) => {
+const run = async (name: Where, type: BrowserType) => {
 	let browser: Browser;
 	try {
 		browser = await type.launch();

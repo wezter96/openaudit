@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { correlate, type FindingInput, fingerprintOf } from "@openaudit/core";
+import {
+	type Auditor,
+	correlate,
+	type ExecResult,
+	type FindingInput,
+	fingerprintOf,
+} from "@openaudit/core";
 
 import {
 	biome,
@@ -19,6 +25,32 @@ import {
 	summary,
 	withProject,
 } from "./lint-js-harness";
+
+/** A project the auditor should skip, the binary `which` finds, and the reason it gives. */
+interface SkipCase {
+	readonly files: Record<string, string>;
+	readonly bin: string | undefined;
+	readonly reason: string;
+}
+
+/** Runs `auditor` on each project in turn and expects it to skip with that reason. */
+const expectSkips = async (
+	auditor: Auditor,
+	output: ExecResult,
+	cases: ReadonlyArray<SkipCase>,
+) => {
+	for (const { files, bin, reason } of cases)
+		await withProject(files, async (dir) => {
+			const { report } = await runFake(
+				auditor,
+				dir,
+				() => bin,
+				() => output,
+			);
+			expect(statusOf(report)).toBe("skipped");
+			expect(report.results[0]?.message).toContain(reason);
+		});
+};
 
 describe("biome", () => {
 	test("parser on a recorded biome 2.5.15 run", () => {
@@ -70,28 +102,15 @@ describe("biome", () => {
 		]);
 	});
 
-	test("skips without biome.json or the binary", async () => {
-		await withProject({ "a.ts": "1" }, async (dir) => {
-			const { report } = await runFake(
-				biome,
-				dir,
-				() => "/bin/biome",
-				() => ok("{}"),
-			);
-			expect(statusOf(report)).toBe("skipped");
-			expect(report.results[0]?.message).toContain("biome.json");
-		});
-		await withProject({ "biome.jsonc": "{}", "a.ts": "1" }, async (dir) => {
-			const { report } = await runFake(
-				biome,
-				dir,
-				() => undefined,
-				() => ok("{}"),
-			);
-			expect(statusOf(report)).toBe("skipped");
-			expect(report.results[0]?.message).toContain("@biomejs/biome");
-		});
-	});
+	test("skips without biome.json or the binary", () =>
+		expectSkips(biome, ok("{}"), [
+			{ files: { "a.ts": "1" }, bin: "/bin/biome", reason: "biome.json" },
+			{
+				files: { "biome.jsonc": "{}", "a.ts": "1" },
+				bin: undefined,
+				reason: "@biomejs/biome",
+			},
+		]));
 
 	test("runs lint from a temp cwd with the config loaded from the target", async () => {
 		await withProject(
@@ -189,28 +208,15 @@ describe("eslint", () => {
 		expect(findings[16]?.tags).toEqual(["eslint:@next/next/no-sync-scripts"]);
 	});
 
-	test("is opt-in and skips without a flat config", async () => {
-		await withProject({ ".eslintrc.json": "{}", "a.js": "1" }, async (dir) => {
-			const { report } = await runFake(
-				eslint,
-				dir,
-				() => "/bin/eslint",
-				() => ok("[]"),
-			);
-			expect(statusOf(report)).toBe("skipped");
-			expect(report.results[0]?.message).toContain("legacy");
-		});
-		await withProject({ "a.js": "1" }, async (dir) => {
-			const { report } = await runFake(
-				eslint,
-				dir,
-				() => "/bin/eslint",
-				() => ok("[]"),
-			);
-			expect(statusOf(report)).toBe("skipped");
-			expect(report.results[0]?.message).toContain("eslint.config");
-		});
-	});
+	test("is opt-in and skips without a flat config", () =>
+		expectSkips(eslint, ok("[]"), [
+			{
+				files: { ".eslintrc.json": "{}", "a.js": "1" },
+				bin: "/bin/eslint",
+				reason: "legacy",
+			},
+			{ files: { "a.js": "1" }, bin: "/bin/eslint", reason: "eslint.config" },
+		]));
 
 	test("runs from the target root, preferring the project's own eslint", async () => {
 		await withProject(

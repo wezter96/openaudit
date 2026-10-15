@@ -41,6 +41,11 @@ export interface AuditFlags {
 
 export class UsageError extends Error {}
 
+/** A file path given on the command line. */
+type FilePath = string;
+/** One `--header` value, `Name: value`. */
+type HeaderFlag = string;
+
 /** Splits repeatable, comma-separated flag values: `-f json,sarif -f html`. */
 export const splitList = (values: ReadonlyArray<string>): string[] =>
 	values
@@ -51,18 +56,24 @@ export const splitList = (values: ReadonlyArray<string>): string[] =>
 /** A non-empty header name without whitespace. */
 const isHeaderName = (name: string): boolean => name !== "" && !/\s/.test(name);
 
+/** One `Name: value` header flag, as its name and value. */
+const parseHeader = (raw: HeaderFlag): [string, string] => {
+	const i = raw.indexOf(":");
+	const name = i > 0 ? raw.slice(0, i).trim() : "";
+	if (!isHeaderName(name))
+		throw new UsageError(
+			`Invalid --header "${raw}". Use "Name: value", e.g. --header "Cookie: session=abc".`,
+		);
+	return [name, raw.slice(i + 1).trim()];
+};
+
 export const parseHeaders = (
 	values: ReadonlyArray<string>,
 ): Record<string, string> => {
 	const headers: Record<string, string> = {};
 	for (const raw of values) {
-		const i = raw.indexOf(":");
-		const name = i > 0 ? raw.slice(0, i).trim() : "";
-		if (!isHeaderName(name))
-			throw new UsageError(
-				`Invalid --header "${raw}". Use "Name: value", e.g. --header "Cookie: session=abc".`,
-			);
-		headers[name] = raw.slice(i + 1).trim();
+		const [name, value] = parseHeader(raw);
+		headers[name] = value;
 	}
 	return headers;
 };
@@ -86,34 +97,51 @@ const parseCategories = (values: ReadonlyArray<string>): Category[] => {
 	return values as Category[];
 };
 
-/** Fingerprints of every finding in an earlier JSON report. */
-export const readBaseline = async (path: string): Promise<string[]> => {
-	const file = Bun.file(path);
-	if (!(await file.exists()))
-		throw new UsageError(`Baseline not found: ${path}`);
-	let report: {
-		results?: Array<{ findings?: Array<{ fingerprint?: unknown }> }>;
-	};
+type BaselineResults = Array<{
+	findings?: Array<{ fingerprint?: unknown }>;
+}>;
+
+/** The baseline file's JSON, or a usage error when it is not JSON. */
+const parseBaseline = async (
+	file: ReturnType<typeof Bun.file>,
+	path: FilePath,
+): Promise<{ results?: BaselineResults }> => {
 	try {
-		report = JSON.parse(await file.text());
+		return JSON.parse(await file.text());
 	} catch {
 		throw new UsageError(`Baseline is not valid JSON: ${path}`);
 	}
-	if (!Array.isArray(report?.results))
-		throw new UsageError(
-			`Baseline is not an openaudit JSON report: ${path} (create one with --format json)`,
-		);
-	return report.results.flatMap((r) =>
+};
+
+const fingerprintsOf = (results: BaselineResults): string[] =>
+	results.flatMap((r) =>
 		(r.findings ?? [])
 			.map((f) => f.fingerprint)
 			.filter((fp): fp is string => typeof fp === "string"),
 	);
+
+/** Fingerprints of every finding in an earlier JSON report. */
+export const readBaseline = async (path: FilePath): Promise<string[]> => {
+	const file = Bun.file(path);
+	if (!(await file.exists()))
+		throw new UsageError(`Baseline not found: ${path}`);
+	const report = await parseBaseline(file, path);
+	if (!Array.isArray(report?.results))
+		throw new UsageError(
+			`Baseline is not an openaudit JSON report: ${path} (create one with --format json)`,
+		);
+	return fingerprintsOf(report.results);
+};
+
+/** The format names asked for, `terminal` when none. */
+const requestedFormats = (flags: AuditFlags): string[] => {
+	const formats = flags.json ? ["json"] : splitList(flags.format);
+	return formats.length ? formats : ["terminal"];
 };
 
 /** The report formats asked for; stdout takes one, so several need `--out`. */
 const parseFormats = (flags: AuditFlags): ReportFormat[] => {
-	const formats = flags.json ? ["json"] : splitList(flags.format);
-	if (!formats.length) formats.push("terminal");
+	const formats = requestedFormats(flags);
 	const unknown = formats.find((f) => !isReportFormat(f));
 	if (unknown !== undefined)
 		throw new UsageError(
@@ -127,6 +155,15 @@ const parseFormats = (flags: AuditFlags): ReportFormat[] => {
 	return unique;
 };
 
+/** `--only` when given, otherwise what the config may enable. */
+const onlyOf = (flags: AuditFlags, fromConfig: string[]): string[] =>
+	flags.only.length ? splitList(flags.only) : fromConfig;
+
+const categoriesOf = (flags: AuditFlags, config: Config): Category[] =>
+	flags.category.length
+		? parseCategories(splitList(flags.category))
+		: [...(config.categories ?? [])];
+
 /**
  * Which auditors run. A config inside the target may only narrow the default
  * set; `--only` and `--config <path>` can also enable opt-in auditors.
@@ -134,12 +171,10 @@ const parseFormats = (flags: AuditFlags): ReportFormat[] => {
 const selectionOf = (flags: AuditFlags, { config, trusted }: LoadedConfig) => {
 	const configOnly = [...(config.only ?? [])];
 	return {
-		only: flags.only.length ? splitList(flags.only) : trusted ? configOnly : [],
+		only: onlyOf(flags, trusted ? configOnly : []),
 		narrow: trusted ? [] : configOnly,
 		exclude: [...(config.exclude ?? []), ...splitList(flags.exclude)],
-		categories: flags.category.length
-			? parseCategories(splitList(flags.category))
-			: [...(config.categories ?? [])],
+		categories: categoriesOf(flags, config),
 	};
 };
 

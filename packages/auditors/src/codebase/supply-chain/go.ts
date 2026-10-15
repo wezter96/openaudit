@@ -158,18 +158,30 @@ const keepBest = (best: Map<string, GoFinding>, f: GoFinding): void => {
 		best.set(key, f);
 };
 
+const keepFinding = (
+	best: Map<string, GoFinding>,
+	raw: Record<string, unknown>,
+): void => {
+	const f = goFinding(raw);
+	if (f) keepBest(best, f);
+};
+
+/** Records one govulncheck message: an OSV entry or a finding. */
+const readGoMessage = (
+	msg: unknown,
+	osvs: Map<string, OsvVuln>,
+	best: Map<string, GoFinding>,
+): void => {
+	if (!isRecord(msg)) return;
+	if (isRecord(msg.osv) && typeof msg.osv.id === "string")
+		osvs.set(msg.osv.id, msg.osv as unknown as OsvVuln);
+	else if (isRecord(msg.finding)) keepFinding(best, msg.finding);
+};
+
 const readGoStream = (stdout: FileText) => {
 	const osvs = new Map<string, OsvVuln>();
 	const best = new Map<string, GoFinding>();
-	for (const msg of splitJsonStream(stdout)) {
-		if (!isRecord(msg)) continue;
-		if (isRecord(msg.osv) && typeof msg.osv.id === "string") {
-			osvs.set(msg.osv.id, msg.osv as unknown as OsvVuln);
-		} else if (isRecord(msg.finding)) {
-			const f = goFinding(msg.finding);
-			if (f) keepBest(best, f);
-		}
-	}
+	for (const msg of splitJsonStream(stdout)) readGoMessage(msg, osvs, best);
 	return { osvs, findings: [...best.values()] };
 };
 

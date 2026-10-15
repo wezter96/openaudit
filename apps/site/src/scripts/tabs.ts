@@ -24,6 +24,21 @@ interface TabSet {
 	readonly box: HTMLElement | null;
 }
 
+/** How a selection shows: whether it moves focus and whether it animates. */
+interface Motion {
+	readonly focus: boolean;
+	readonly animate: boolean;
+}
+
+/** A tab's position in its set. */
+type TabIndex = number;
+/** How many tabs a set has. */
+type TabCount = number;
+/** A height in CSS pixels. */
+type Pixels = number;
+/** Whether a tab is the selected one. */
+type Selected = boolean;
+
 const isSelected = (t: HTMLButtonElement) =>
 	t.getAttribute("aria-selected") === "true";
 
@@ -36,15 +51,15 @@ const moveInk = ({ list, ink, tabs }: TabSet) => {
 		: `translateX(${tab.offsetLeft}px) scaleX(${tab.offsetWidth})`;
 };
 
-const markTab = (tab: HTMLButtonElement, on: boolean) => {
+const markTab = (tab: HTMLButtonElement, on: Selected) => {
 	tab.setAttribute("aria-selected", String(on));
 	tab.tabIndex = on ? 0 : -1;
 };
 
 const showPanel = (
 	panel: HTMLElement | null | undefined,
-	on: boolean,
-	animate: boolean,
+	on: Selected,
+	{ animate }: Motion,
 ) => {
 	if (!panel) return;
 	panel.hidden = !on;
@@ -56,7 +71,7 @@ const showPanel = (
 };
 
 /** Eases the panels' box from its old height to its new one. */
-const easeHeight = (box: HTMLElement, before: number, after: number) => {
+const easeHeight = (box: HTMLElement, before: Pixels, after: Pixels) => {
 	if (!before || after === before) return;
 	box.style.overflow = "clip";
 	box
@@ -68,7 +83,11 @@ const easeHeight = (box: HTMLElement, before: number, after: number) => {
 		.catch(() => box.style.removeProperty("overflow"));
 };
 
-const revealTab = ({ list, tabs }: TabSet, index: number, focus: boolean) => {
+const revealTab = (
+	{ list, tabs }: TabSet,
+	index: TabIndex,
+	{ focus }: Motion,
+) => {
 	const tab = tabs[index];
 	if (focus) tab?.focus({ preventScroll: true });
 	// On narrow screens the tabs scroll sideways; keep the chosen one in view.
@@ -77,27 +96,23 @@ const revealTab = ({ list, tabs }: TabSet, index: number, focus: boolean) => {
 	}
 };
 
-const select = (
-	set: TabSet,
-	index: number,
-	{ focus, animate }: { readonly focus: boolean; readonly animate: boolean },
-) => {
+const select = (set: TabSet, index: TabIndex, motion: Motion) => {
 	const before = set.box?.offsetHeight ?? 0;
 	set.tabs.forEach((t, i) => {
 		markTab(t, i === index);
-		showPanel(set.panels[i], i === index, animate);
+		showPanel(set.panels[i], i === index, motion);
 	});
 	const after = set.box?.offsetHeight ?? 0;
-	const ease = animate && !still;
+	const ease = motion.animate && !still;
 	if (set.box && ease) easeHeight(set.box, before, after);
-	revealTab(set, index, focus);
+	revealTab(set, index, motion);
 	moveInk(set);
 };
 
 /** Where each key moves from tab `i` of `n` (automatic activation). */
-const next = (i: number, n: number) => (i + 1) % n;
-const previous = (i: number, n: number) => (i - 1 + n) % n;
-const KEY_MOVES = new Map<string, (i: number, n: number) => number>([
+const next = (i: TabIndex, n: TabCount) => (i + 1) % n;
+const previous = (i: TabIndex, n: TabCount) => (i - 1 + n) % n;
+const KEY_MOVES = new Map<string, (i: TabIndex, n: TabCount) => TabIndex>([
 	["ArrowDown", next],
 	["ArrowRight", next],
 	["ArrowUp", previous],

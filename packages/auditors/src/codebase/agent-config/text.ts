@@ -45,6 +45,15 @@ const ENTITIES: Readonly<Record<string, string>> = {
 	lcub: "{",
 	rcub: "}",
 };
+/** A Unicode code point. */
+type CodePoint = number;
+/** One character, as a string. */
+type Char = string;
+/** Raw or normalized instruction text, or one line of it. */
+type Text = string;
+/** An index into a text or its folded characters. */
+type Offset = number;
+
 const ENTITY = /&(?:#(\d{1,7})|#[xX]([0-9A-Fa-f]{1,6})|([A-Za-z]{2,8}));/y;
 
 const decodeEntity = (m: RegExpExecArray): string | undefined => {
@@ -108,16 +117,16 @@ const VARIATION_SELECTORS: ReadonlyArray<readonly [number, number]> = [
 	[0xe0100, 0xe01ef],
 ];
 
-const isVariationSelector = (cp: number) =>
+const isVariationSelector = (cp: CodePoint) =>
 	VARIATION_SELECTORS.some(([lo, hi]) => cp >= lo && cp <= hi);
 
 /** Format characters, variation selectors and fillers that render as nothing. */
-const isInvisible = (cp: number, c: string) =>
+const isInvisible = (cp: CodePoint, c: Char) =>
 	FORMAT.test(c) || isVariationSelector(cp) || FILLERS.has(cp);
 
-const isAlnum = (c: string | undefined) =>
+const isAlnum = (c: Char | undefined) =>
 	c !== undefined && /[A-Za-z0-9]/.test(c);
-const isSpace = (c: string | undefined) => c !== undefined && /\s/.test(c);
+const isSpace = (c: Char | undefined) => c !== undefined && /\s/.test(c);
 
 export interface Normalized {
 	readonly text: string;
@@ -139,7 +148,7 @@ interface Token {
 
 const EMPHASIS = new Set(["*", "~", "`"]);
 
-const foldChar = (out: Folded, c: string, at: number) => {
+const foldChar = (out: Folded, c: Char, at: Offset) => {
 	const cp = c.codePointAt(0) ?? 0;
 	if (isInvisible(cp, c)) return;
 	for (const folded of CONFUSABLES.get(cp) ?? c.normalize("NFKC")) {
@@ -149,7 +158,7 @@ const foldChar = (out: Folded, c: string, at: number) => {
 	}
 };
 
-const entityAt = (raw: string, i: number): Token | undefined => {
+const entityAt = (raw: Text, i: Offset): Token | undefined => {
 	if (raw[i] !== "&") return undefined;
 	ENTITY.lastIndex = i;
 	const m = ENTITY.exec(raw);
@@ -159,12 +168,12 @@ const entityAt = (raw: string, i: number): Token | undefined => {
 		: undefined;
 };
 
-const codePointAt = (raw: string, i: number): Token => {
+const codePointAt = (raw: Text, i: Offset): Token => {
 	const c = String.fromCodePoint(raw.codePointAt(i) ?? 0);
 	return { text: c, length: c.length };
 };
 
-const fold = (raw: string): Folded => {
+const fold = (raw: Text): Folded => {
 	const out: Folded = { chars: [], from: [] };
 	let i = 0;
 	while (i < raw.length) {
@@ -176,11 +185,11 @@ const fold = (raw: string): Folded => {
 };
 
 /** `_word_` emphasis, but keep snake_case such as id_rsa. */
-const isEmphasisUnderscore = (chars: ReadonlyArray<string>, k: number) =>
+const isEmphasisUnderscore = (chars: ReadonlyArray<Char>, k: Offset) =>
 	chars[k] === "_" && !(isAlnum(chars[k - 1]) && isAlnum(chars[k + 1]));
 
 /** What the k-th folded character adds to `text` once whitespace collapses. */
-const appended = (text: string, chars: ReadonlyArray<string>, k: number) => {
+const appended = (text: Text, chars: ReadonlyArray<Char>, k: Offset) => {
 	const c = chars[k] ?? "";
 	if (isEmphasisUnderscore(chars, k)) return "";
 	if (!isSpace(c)) return c;
@@ -203,7 +212,7 @@ const collapse = ({ chars, from }: Folded): Normalized => {
  * removes Markdown emphasis (`*`, `~`, backticks, and `_` at word edges) and
  * collapses whitespace to single spaces.
  */
-export const normalize = (raw: string): Normalized => collapse(fold(raw));
+export const normalize = (raw: Text): Normalized => collapse(fold(raw));
 
 const BLOCK_START = /^ {0,3}(?:[-*+>]\s|\d{1,9}[.)]\s|#|\||<)/;
 const FENCE = /^ {0,3}(?:`{3,}|~{3,})/;
@@ -219,10 +228,10 @@ interface Splitter {
 	inFence: boolean;
 }
 
-const endsSentence = (text: string, k: number) =>
+const endsSentence = (text: Text, k: Offset) =>
 	SENTENCE_END.has(text.charAt(k)) && isSpace(text[k + 1]);
 
-const split = (text: string, [start, end]: Span, out: Span[]) => {
+const split = (text: Text, [start, end]: Span, out: Span[]) => {
 	let from = start;
 	for (let k = start; k < end - 1; k++) {
 		if (!endsSentence(text, k)) continue;
@@ -237,12 +246,12 @@ const flush = (s: Splitter) => {
 	s.para = undefined;
 };
 
-const paragraphLine = (s: Splitter, line: string, [start, end]: Span) => {
+const paragraphLine = (s: Splitter, line: Text, [start, end]: Span) => {
 	if (BLOCK_START.test(line)) flush(s);
 	s.para = s.para ? [s.para[0], end] : [start, end];
 };
 
-const addLine = (s: Splitter, line: string, start: number) => {
+const addLine = (s: Splitter, line: Text, start: Offset) => {
 	const span: Span = [start, start + line.length];
 	if (FENCE.test(line)) {
 		flush(s);
@@ -259,7 +268,7 @@ const addLine = (s: Splitter, line: string, start: number) => {
  * fenced code block start a new one. Sentences end at `.;!?` before
  * whitespace.
  */
-export const sentences = (text: string): Array<[number, number]> => {
+export const sentences = (text: Text): Array<[number, number]> => {
 	const s: Splitter = { text, out: [], para: undefined, inFence: false };
 	let pos = 0;
 	for (const line of text.split("\n")) {
