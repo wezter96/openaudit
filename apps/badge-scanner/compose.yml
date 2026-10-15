@@ -8,6 +8,13 @@ services:
       dockerfile: apps/badge-scanner/Dockerfile
     image: openaudit-badge-scanner
     restart: unless-stopped
+    # The scanner serves nothing, so the check is that its process (PID 1) is
+    # alive; Docker restarts it when it exits.
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
     mem_limit: 4g
     cpus: 2
     # Scans clone and write reports under /tmp.

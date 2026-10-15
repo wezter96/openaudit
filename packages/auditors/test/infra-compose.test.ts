@@ -98,3 +98,21 @@ describe("container.compose", () => {
 		expect(findings[0]?.location?.line).toBe(10);
 	});
 });
+
+test("environment interpolation is not a plaintext secret, a literal default is", async () => {
+	const { isPlaceholderValue } = await import("../src/infra/shared");
+	for (const v of [
+		"$" + "{API_TOKEN}",
+		"$" + "{API_TOKEN:?API_TOKEN is required}",
+		"$" + "{API_TOKEN?missing}",
+		"$" + "{API_TOKEN:-}",
+		"$API_TOKEN",
+	])
+		expect(isPlaceholderValue(v)).toBe(true);
+	for (const v of [
+		"$" + "{API_TOKEN:-s3cr3t-value}",
+		"$" + "{API_TOKEN-s3cr3t-value}",
+		"s3cr3t-value",
+	])
+		expect(isPlaceholderValue(v)).toBe(false);
+});

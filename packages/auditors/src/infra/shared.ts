@@ -201,11 +201,27 @@ export const SECRET_NAME_RE =
 	/pass(word|wd)?$|passwd|secret|token|api[_-]?key|private[_-]?key|access[_-]?key|credentials?$/i;
 
 /** True when a value is empty, a variable reference or an obvious placeholder. */
+/**
+ * `${VAR}`, `${VAR:?message}` or `${VAR+alt}`: the value comes from the
+ * environment. `${VAR:-default}` counts only when the default is itself a
+ * placeholder, since a literal default is a secret written in the file.
+ */
+const COMPOSE_INTERPOLATION =
+	/^\$\{[A-Za-z_]\w*(?:(:?[?+])[^}]*|:?-([^}]*))?\}$/;
+
+const isInterpolation = (v: string): boolean => {
+	const m = COMPOSE_INTERPOLATION.exec(v);
+	if (!m) return false;
+	const fallback = m[2];
+	return fallback === undefined || isPlaceholderValue(fallback);
+};
+
 export const isPlaceholderValue = (value: string): boolean => {
 	const v = value.trim().replace(/^["']|["']$/g, "");
 	return (
 		v === "" ||
-		/^\$\{?[\w:-]+\}?$/.test(v) ||
+		isInterpolation(v) ||
+		/^\$[A-Za-z_]\w*$/.test(v) ||
 		/^(changeme|change_me|xxx+|\*+|<.*>|your[_-].*|example|placeholder|dummy|none|null|false|true)$/i.test(
 			v,
 		)
