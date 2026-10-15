@@ -536,7 +536,7 @@ const withoutSensitive = (
 const followHop = (
 	hop: GuardedHop,
 	res: Response,
-	location: string,
+	location: UrlText,
 	url: URL,
 ): GuardedHop => {
 	const next = new URL(location, url.toString());

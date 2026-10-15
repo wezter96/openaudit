@@ -393,7 +393,7 @@ const WEB_PROTOCOLS = new Set(["http:", "https:"]);
 
 const nextHop = (
 	hop: Hop,
-	location: string,
+	location: Url,
 	res: Response,
 	first: Url,
 ): Hop => {
