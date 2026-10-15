@@ -23,8 +23,8 @@
 				"reason": "gitleaks generic-api-key false positive: prose in the severity guide of packages/agent/src/playbooks/ux-content.ts"
 			},
 			{
-				"fingerprint": "a22c9f9af84aaa4a",
-				"reason": "gitleaks generic-api-key false positive: the OWASP API Top 10 page slug for api10 in packages/auditors/src/codebase/api.ts"
+				"fingerprint": "335b7e5bf3fd6a37",
+				"reason": "gitleaks generic-api-key false positive: the OWASP API Top 10 page slug for api10 in packages/auditors/src/codebase/api-shared.ts"
 			},
 			{
 				"fingerprint": "073efb043367d01d",
