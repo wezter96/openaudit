@@ -7,6 +7,13 @@ import { TargetError } from "./errors";
 import type { TargetInfo, TargetKind } from "./model";
 import type { Workspace } from "./services";
 
+/** What the user passed as the target: a URL, `image:…`, `cloud:…` or a path. */
+type TargetInput = string;
+type AbsolutePath = string;
+type FileName = string;
+/** A lowercase file extension with its dot, like `.tf`. */
+type Extension = string;
+
 const MOBILE_ARTIFACTS = new Set([".apk", ".aab", ".ipa"]);
 
 /** Technology markers: file glob → technology tag. */
@@ -40,19 +47,21 @@ const TECH_MARKERS: ReadonlyArray<readonly [RegExp, string]> = [
 	[/(^|\/)app\.json$|(^|\/)app\.config\.[jt]s$/, "expo"],
 ];
 
-const kindsForTech = (tech: ReadonlySet<string>): TargetKind[] => {
-	const kinds: TargetKind[] = ["codebase"];
-	if (tech.has("docker") || tech.has("docker-compose")) kinds.push("container");
-	if (
-		tech.has("terraform") ||
-		tech.has("github-actions") ||
-		tech.has("kubernetes")
-	)
-		kinds.push("iac");
-	if (tech.has("android") || tech.has("ios") || tech.has("flutter"))
-		kinds.push("mobile");
-	return kinds;
-};
+/** Target kinds a directory adds when it contains any of these technologies. */
+const KINDS_BY_TECH: ReadonlyArray<
+	readonly [TargetKind, ReadonlyArray<string>]
+> = [
+	["container", ["docker", "docker-compose"]],
+	["iac", ["terraform", "github-actions", "kubernetes"]],
+	["mobile", ["android", "ios", "flutter"]],
+];
+
+const kindsForTech = (tech: ReadonlySet<string>): TargetKind[] => [
+	"codebase",
+	...KINDS_BY_TECH.filter(([, techs]) => techs.some((t) => tech.has(t))).map(
+		([kind]) => kind,
+	),
+];
 
 /** Detects technologies from a file list. Exported for tests. */
 export const detectTechnologies = (
@@ -101,54 +110,67 @@ export const resolveTarget = (
 	input: string,
 	options: AuditOptions,
 	openWorkspace: (root: string) => Workspace,
-): Effect.Effect<ResolvedTarget, TargetError> =>
+): Effect.Effect<ResolvedTarget, TargetError> => {
+	if (/^https?:\/\//i.test(input)) return urlTarget(input, options);
+	if (input.startsWith("image:")) return imageTarget(input);
+	if (input.startsWith("cloud:")) return cloudTarget(input);
+	return pathTarget(input, openWorkspace);
+};
+
+const urlTarget = (input: TargetInput, options: AuditOptions) =>
 	Effect.gen(function* () {
-		if (/^https?:\/\//i.test(input)) {
-			const url = yield* Effect.try({
-				try: () => new URL(input).toString(),
-				catch: () => new TargetError({ message: `Invalid URL: ${input}` }),
+		const url = yield* Effect.try({
+			try: () => new URL(input).toString(),
+			catch: () => new TargetError({ message: `Invalid URL: ${input}` }),
+		});
+		const kinds: TargetKind[] = options.browser ? ["url", "webapp"] : ["url"];
+		return {
+			root: undefined,
+			info: { input, type: "url", kinds, url, technologies: [] },
+		} satisfies ResolvedTarget;
+	});
+
+const imageTarget = (input: TargetInput) =>
+	Effect.gen(function* () {
+		const image = input.slice("image:".length);
+		if (!image)
+			return yield* new TargetError({ message: "Missing image reference" });
+		return {
+			root: undefined,
+			info: {
+				input,
+				type: "image",
+				kinds: ["container"],
+				image,
+				technologies: ["docker"],
+			},
+		} satisfies ResolvedTarget;
+	});
+
+const cloudTarget = (input: TargetInput) =>
+	Effect.gen(function* () {
+		const cloud = input.slice("cloud:".length).toLowerCase();
+		if (!CLOUD_PROVIDERS.has(cloud))
+			return yield* new TargetError({
+				message: `Unknown cloud provider "${cloud}". Use cloud:aws, cloud:azure, cloud:gcp or cloud:kubernetes.`,
 			});
-			const kinds: TargetKind[] = options.browser ? ["url", "webapp"] : ["url"];
-			return {
-				root: undefined,
-				info: { input, type: "url", kinds, url, technologies: [] },
-			};
-		}
+		return {
+			root: undefined,
+			info: {
+				input,
+				type: "cloud",
+				kinds: ["cloud"],
+				cloud,
+				technologies: [],
+			},
+		} satisfies ResolvedTarget;
+	});
 
-		if (input.startsWith("image:")) {
-			const image = input.slice("image:".length);
-			if (!image)
-				return yield* new TargetError({ message: "Missing image reference" });
-			return {
-				root: undefined,
-				info: {
-					input,
-					type: "image",
-					kinds: ["container"],
-					image,
-					technologies: ["docker"],
-				},
-			};
-		}
-
-		if (input.startsWith("cloud:")) {
-			const cloud = input.slice("cloud:".length).toLowerCase();
-			if (!CLOUD_PROVIDERS.has(cloud))
-				return yield* new TargetError({
-					message: `Unknown cloud provider "${cloud}". Use cloud:aws, cloud:azure, cloud:gcp or cloud:kubernetes.`,
-				});
-			return {
-				root: undefined,
-				info: {
-					input,
-					type: "cloud",
-					kinds: ["cloud"],
-					cloud,
-					technologies: [],
-				},
-			};
-		}
-
+const pathTarget = (
+	input: TargetInput,
+	openWorkspace: (root: string) => Workspace,
+) =>
+	Effect.gen(function* () {
 		const path = resolve(input);
 		const stats = yield* Effect.tryPromise({
 			try: () => stat(path),
@@ -157,48 +179,60 @@ export const resolveTarget = (
 					message: `Target not found: ${input}. Pass a directory, file, URL or image:<ref>.`,
 				}),
 		});
+		if (stats.isDirectory())
+			return yield* directoryTarget(input, path, openWorkspace(path));
+		return fileTarget(input, path);
+	});
 
-		if (stats.isDirectory()) {
-			const ws = openWorkspace(path);
-			const files = yield* ws.files.pipe(Effect.orElseSucceed(() => []));
-			const tech = new Set(detectTechnologies(files));
-			if (!tech.has("kubernetes")) {
-				const k8s = yield* hasKubernetesManifests(ws).pipe(
-					Effect.orElseSucceed(() => false),
-				);
-				if (k8s) tech.add("kubernetes");
-			}
-			return {
-				root: path,
-				info: {
-					input,
-					type: "directory",
-					root: path,
-					kinds: kindsForTech(tech),
-					technologies: [...tech].sort(),
-				},
-			};
+const directoryTarget = (
+	input: TargetInput,
+	path: AbsolutePath,
+	ws: Workspace,
+) =>
+	Effect.gen(function* () {
+		const files = yield* ws.files.pipe(Effect.orElseSucceed(() => []));
+		const tech = new Set(detectTechnologies(files));
+		if (!tech.has("kubernetes")) {
+			const k8s = yield* hasKubernetesManifests(ws).pipe(
+				Effect.orElseSucceed(() => false),
+			);
+			if (k8s) tech.add("kubernetes");
 		}
-
-		const ext = extname(path).toLowerCase();
-		const name = basename(path);
-		const kinds: TargetKind[] = MOBILE_ARTIFACTS.has(ext)
-			? ["mobile"]
-			: detectTechnologies([name]).includes("docker") ||
-					/(docker-)?compose.*\.ya?ml$/.test(name)
-				? ["container"]
-				: [".tf", ".yaml", ".yml"].includes(ext)
-					? ["iac"]
-					: ["codebase"];
 		return {
-			root: dirname(path),
+			root: path,
 			info: {
 				input,
-				type: "file",
-				root: dirname(path),
-				file: name,
-				kinds,
-				technologies: detectTechnologies([name]),
+				type: "directory",
+				root: path,
+				kinds: kindsForTech(tech),
+				technologies: [...tech].sort(),
 			},
-		};
+		} satisfies ResolvedTarget;
 	});
+
+const IAC_EXTENSIONS = new Set([".tf", ".yaml", ".yml"]);
+
+const isContainerFile = (name: FileName): boolean =>
+	detectTechnologies([name]).includes("docker") ||
+	/(docker-)?compose.*\.ya?ml$/.test(name);
+
+const fileKinds = (name: FileName, ext: Extension): TargetKind[] => {
+	if (MOBILE_ARTIFACTS.has(ext)) return ["mobile"];
+	if (isContainerFile(name)) return ["container"];
+	return IAC_EXTENSIONS.has(ext) ? ["iac"] : ["codebase"];
+};
+
+const fileTarget = (input: TargetInput, path: AbsolutePath): ResolvedTarget => {
+	const name = basename(path);
+	return {
+		root: dirname(path),
+		info: {
+			input,
+			type: "file",
+			root: dirname(path),
+			file: name,
+			kinds: fileKinds(name, extname(path).toLowerCase()),
+			technologies: detectTechnologies([name]),
+		},
+	};
+};

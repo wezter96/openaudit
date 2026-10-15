@@ -15,28 +15,36 @@ const isObject = (v: Json): v is { [k: string]: Json } =>
 const simplify = (node: Json): Json => {
 	if (Array.isArray(node)) return node.map(simplify);
 	if (!isObject(node)) return node;
-	const anyOf = node.anyOf;
-	if (Array.isArray(anyOf)) {
-		const kept = anyOf.filter(
-			(s) =>
-				!(
-					isObject(s) &&
-					(s.type === "null" ||
-						(s.type === "string" &&
-							Array.isArray(s.enum) &&
-							s.enum.every((v) =>
-								["NaN", "Infinity", "-Infinity"].includes(String(v)),
-							)))
-				),
-		);
-		if (kept.length === 1 && isObject(kept[0] as Json)) {
-			const { anyOf: _, ...rest } = node;
-			return simplify({ ...rest, ...(kept[0] as { [k: string]: Json }) });
-		}
+	const only = soleVariant(node);
+	if (only) {
+		const { anyOf: _, ...rest } = node;
+		return simplify({ ...rest, ...only });
 	}
 	const out: { [k: string]: Json } = {};
 	for (const [k, v] of Object.entries(node)) out[k] = simplify(v);
 	return out;
+};
+
+const NON_FINITE = ["NaN", "Infinity", "-Infinity"];
+
+/** The `"NaN"`/`"Infinity"` string enum Effect adds to number schemas. */
+const isNonFiniteEnum = (s: { [k: string]: Json }): boolean =>
+	s.type === "string" &&
+	Array.isArray(s.enum) &&
+	s.enum.every((v) => NON_FINITE.includes(String(v)));
+
+const isCodecNoise = (s: Json): boolean =>
+	isObject(s) && (s.type === "null" || isNonFiniteEnum(s));
+
+/** The one object variant of `anyOf` left once the codec noise is dropped. */
+const soleVariant = (node: {
+	[k: string]: Json;
+}): { [k: string]: Json } | undefined => {
+	const anyOf = node.anyOf;
+	if (!Array.isArray(anyOf)) return undefined;
+	const kept = anyOf.filter((s) => !isCodecNoise(s));
+	const only = kept.length === 1 ? (kept[0] as Json) : undefined;
+	return only !== undefined && isObject(only) ? only : undefined;
 };
 
 /** Standalone, simplified JSON Schema (draft 2020-12) for an Effect schema. */

@@ -146,7 +146,10 @@ export const CWE_TO_OWASP_2021: ReadonlyMap<number, OwaspId> = new Map(
 	).flatMap(([id, cwes]) => cwes.map((cwe) => [cwe, id] as const)),
 );
 
-const OWASP_IDS = new Set<string>(OWASP_TOP10_2021.map((c) => c.id));
+/** `owasp-a01` and so on, lowercase, to the category id. */
+const OWASP_BY_TAG = new Map<string, OwaspId>(
+	OWASP_TOP10_2021.map((c) => [`owasp-${c.id.toLowerCase()}`, c.id]),
+);
 const TOP25 = new Set(CWE_TOP25_2024.map((c) => c.cwe));
 
 /** CWE numbers from a finding's `cwe-<n>` tags, without repeats. */
@@ -173,19 +176,29 @@ export interface ComplianceMatch {
 export const owaspMatchesOf = (
 	finding: Finding,
 ): Array<{ readonly id: OwaspId; readonly viaCwe?: number }> => {
+	const tagged = taggedOwaspIds(finding);
+	if (tagged.size) return [...tagged].map((id) => ({ id }));
+	return [...owaspIdsViaCwe(finding)].map(([id, viaCwe]) => ({ id, viaCwe }));
+};
+
+/** The OWASP Top 10:2021 ids named by a finding's `owasp-aNN` tags. */
+const taggedOwaspIds = (finding: Finding): Set<OwaspId> => {
 	const tagged = new Set<OwaspId>();
 	for (const tag of finding.tags ?? []) {
-		const m = /^owasp-(a\d{2})$/i.exec(tag);
-		const id = m?.[1]?.toUpperCase();
-		if (id && OWASP_IDS.has(id)) tagged.add(id as OwaspId);
+		const id = OWASP_BY_TAG.get(tag.toLowerCase());
+		if (id) tagged.add(id);
 	}
-	if (tagged.size) return [...tagged].map((id) => ({ id }));
+	return tagged;
+};
+
+/** OWASP categories a finding's CWEs map to, each with the first such CWE. */
+const owaspIdsViaCwe = (finding: Finding): Map<OwaspId, number> => {
 	const derived = new Map<OwaspId, number>();
 	for (const cwe of cweIdsOf(finding)) {
 		const id = CWE_TO_OWASP_2021.get(cwe);
 		if (id && !derived.has(id)) derived.set(id, cwe);
 	}
-	return [...derived].map(([id, viaCwe]) => ({ id, viaCwe }));
+	return derived;
 };
 
 const counted = (findings: ReadonlyArray<Finding>) =>
