@@ -71,6 +71,19 @@ const listEntries = (bytes: Uint8Array): string[] | undefined => {
 };
 
 /**
+ * True when the compressed size is plausible for the declared size and the
+ * compression method is one fflate inflates (stored or deflate).
+ */
+const plausibleCompression = (info: UnzipFileInfo): boolean => {
+	const declared = info.originalSize;
+	if (info.compression === 0) return info.size === declared;
+	// Deflate never grows data by more than a few bytes per 16 KB block.
+	if (info.compression === 8)
+		return info.size <= declared + declared / 100 + 1024;
+	return false;
+};
+
+/**
  * Wraps an entry filter with zip-bomb checks made on the declared sizes before
  * anything is inflated. fflate inflates into a buffer of exactly the declared
  * size, so the declared size bounds memory; the compressed size bounds CPU.
@@ -85,11 +98,7 @@ export const budgetedFilter = (
 		const declared = info.originalSize;
 		if (declared > limits.maxEntryBytes) return false;
 		if (total + declared > limits.maxTotalBytes) return false;
-		if (info.compression === 0 && info.size !== declared) return false;
-		// Deflate never grows data by more than a few bytes per 16 KB block.
-		if (info.compression === 8 && info.size > declared + declared / 100 + 1024)
-			return false;
-		if (info.compression !== 0 && info.compression !== 8) return false;
+		if (!plausibleCompression(info)) return false;
 		total += declared;
 		return true;
 	};

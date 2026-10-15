@@ -14,11 +14,20 @@ export const MAX_DOCUMENT_BYTES = 32 * 1024 * 1024;
 
 export class DecodeLimitError extends Error {}
 
+const VALUE_TOO_LONG = `Value exceeds ${MAX_VALUE_BYTES} bytes`;
+const TOO_DEEP = `Nesting deeper than ${MAX_DEPTH}`;
+
+const enforce = (value: number, max: number, message: string) => {
+	if (value > max) throw new DecodeLimitError(message);
+};
+
 /** Counts materialised nodes and decoded bytes; throws past the limits. */
 export const makeBudget = (
 	maxNodes = MAX_NODES,
 	maxBytes = MAX_DOCUMENT_BYTES,
 ) => {
+	const tooManyNodes = `Document exceeds ${maxNodes} nodes`;
+	const tooManyBytes = `Document exceeds ${maxBytes} bytes`;
 	let nodes = 0;
 	let bytes = 0;
 	return {
@@ -28,20 +37,14 @@ export const makeBudget = (
 		/** Counts `n` materialised nodes (a shared subtree counts every time). */
 		node: (n = 1) => {
 			nodes += n;
-			if (nodes > maxNodes)
-				throw new DecodeLimitError(`Document exceeds ${maxNodes} nodes`);
+			enforce(nodes, maxNodes, tooManyNodes);
 		},
 		bytes: (n: number) => {
-			if (n > MAX_VALUE_BYTES)
-				throw new DecodeLimitError(`Value exceeds ${MAX_VALUE_BYTES} bytes`);
+			enforce(n, MAX_VALUE_BYTES, VALUE_TOO_LONG);
 			bytes += n;
-			if (bytes > maxBytes)
-				throw new DecodeLimitError(`Document exceeds ${maxBytes} bytes`);
+			enforce(bytes, maxBytes, tooManyBytes);
 		},
-		depth: (d: number) => {
-			if (d > MAX_DEPTH)
-				throw new DecodeLimitError(`Nesting deeper than ${MAX_DEPTH}`);
-		},
+		depth: (d: number) => enforce(d, MAX_DEPTH, TOO_DEEP),
 	};
 };
 

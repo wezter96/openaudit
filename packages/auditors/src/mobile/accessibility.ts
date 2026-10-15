@@ -6,6 +6,7 @@ import {
 	type Workspace,
 } from "@openaudit/core";
 import { Effect } from "effect";
+import type { UnzipFileInfo } from "fflate";
 
 import {
 	type Dimension,
@@ -16,7 +17,12 @@ import {
 	type XmlElement,
 } from "./axml";
 import { asDict, isTrue, type PlistDict, parsePlist } from "./plist";
-import { loadMobileTarget } from "./shared";
+import {
+	loadMobileTarget,
+	type MobileArtifact,
+	type MobileSource,
+	type MobileTarget,
+} from "./shared";
 
 /**
  * Accessibility checks for mobile apps.
@@ -189,57 +195,87 @@ const isClickable = (el: XmlElement) =>
 	el.attrs.onClick !== undefined ||
 	el.name.endsWith("ImageButton");
 
-export const checkLayout = (root: XmlElement): Map<RuleKey, Hit[]> => {
-	const hits = new Map<RuleKey, Hit[]>();
-	const add = (key: RuleKey, element: XmlElement) => {
-		const list = hits.get(key) ?? [];
-		list.push({ element });
-		hits.set(key, list);
-	};
-	// Ids that some view declares as the label of another (android:labelFor).
+const undersized = (el: XmlElement) =>
+	belowMinimum(el.attrs.layout_width, el.attrs.minWidth) ||
+	belowMinimum(el.attrs.layout_height, el.attrs.minHeight);
+
+const hiddenFromA11yByParent = (parents: ReadonlyArray<XmlElement>) =>
+	parents.some((p) => hiddenFromA11y(p.attrs.importantForAccessibility));
+
+const insideHintedInputLayout = (parents: ReadonlyArray<XmlElement>) =>
+	parents.some(
+		(p) => simpleName(p) === "TextInputLayout" && p.attrs.hint !== undefined,
+	);
+
+const labelledById = (el: XmlElement, labelled: ReadonlySet<string>) => {
+	const id = normaliseId(el.attrs.id);
+	return id ? labelled.has(id) : false;
+};
+
+/** Ids that some view declares as the label of another (android:labelFor). */
+const labelTargets = (root: XmlElement): Set<string> => {
 	const labelled = new Set<string>();
 	walk(root, (el) => {
 		const target = normaliseId(el.attrs.labelFor);
 		if (target) labelled.add(target);
 	});
+	return labelled;
+};
+
+type LayoutCheck = (
+	el: XmlElement,
+	parents: ReadonlyArray<XmlElement>,
+	labelled: ReadonlySet<string>,
+) => boolean;
+
+const unlabelledImage: LayoutCheck = (el, parents) =>
+	IMAGE_VIEW.test(el.name) &&
+	el.attrs.contentDescription === undefined &&
+	!hiddenFromA11y(el.attrs.importantForAccessibility) &&
+	!ignores(el, "ContentDescription") &&
+	!hiddenFromA11yByParent(parents);
+
+const smallTouchTarget: LayoutCheck = (el) =>
+	isClickable(el) && undersized(el) && !ignores(el, "TouchTargetSizeCheck");
+
+const textSizeNotSp: LayoutCheck = (el) => {
+	const size = parseDimension(el.attrs.textSize);
+	return size !== undefined && size.unit !== "sp" && !ignores(el, "SpUsage");
+};
+
+const unlabelledInput: LayoutCheck = (el, parents, labelled) =>
+	EDIT_TEXT.test(simpleName(el)) &&
+	el.attrs.hint === undefined &&
+	el.attrs.contentDescription === undefined &&
+	!labelledById(el, labelled) &&
+	!insideHintedInputLayout(parents) &&
+	!ignores(el, "LabelFor") &&
+	!hiddenFromA11y(el.attrs.importantForAccessibility);
+
+/** Checks run on every layout element, in the order their findings appear. */
+const LAYOUT_CHECKS: ReadonlyArray<readonly [RuleKey, LayoutCheck]> = [
+	["imageNoLabel", unlabelledImage],
+	["smallTarget", smallTouchTarget],
+	["textSizeUnit", textSizeNotSp],
+	["editNoLabel", unlabelledInput],
+];
+
+const addHit = (
+	hits: Map<RuleKey, Hit[]>,
+	key: RuleKey,
+	element: XmlElement,
+) => {
+	const list = hits.get(key) ?? [];
+	list.push({ element });
+	hits.set(key, list);
+};
+
+export const checkLayout = (root: XmlElement): Map<RuleKey, Hit[]> => {
+	const hits = new Map<RuleKey, Hit[]>();
+	const labelled = labelTargets(root);
 	walk(root, (el, parents) => {
-		if (
-			IMAGE_VIEW.test(el.name) &&
-			el.attrs.contentDescription === undefined &&
-			!hiddenFromA11y(el.attrs.importantForAccessibility) &&
-			!ignores(el, "ContentDescription") &&
-			!parents.some((p) => hiddenFromA11y(p.attrs.importantForAccessibility))
-		)
-			add("imageNoLabel", el);
-
-		if (
-			isClickable(el) &&
-			(belowMinimum(el.attrs.layout_width, el.attrs.minWidth) ||
-				belowMinimum(el.attrs.layout_height, el.attrs.minHeight)) &&
-			!ignores(el, "TouchTargetSizeCheck")
-		)
-			add("smallTarget", el);
-
-		const size = parseDimension(el.attrs.textSize);
-		if (size && size.unit !== "sp" && !ignores(el, "SpUsage"))
-			add("textSizeUnit", el);
-
-		if (EDIT_TEXT.test(simpleName(el))) {
-			const id = normaliseId(el.attrs.id);
-			const wrapped = parents.some(
-				(p) =>
-					simpleName(p) === "TextInputLayout" && p.attrs.hint !== undefined,
-			);
-			if (
-				el.attrs.hint === undefined &&
-				el.attrs.contentDescription === undefined &&
-				!(id && labelled.has(id)) &&
-				!wrapped &&
-				!ignores(el, "LabelFor") &&
-				!hiddenFromA11y(el.attrs.importantForAccessibility)
-			)
-				add("editNoLabel", el);
-		}
+		for (const [key, check] of LAYOUT_CHECKS)
+			if (check(el, parents, labelled)) addHit(hits, key, el);
 	});
 	return hits;
 };
@@ -279,48 +315,56 @@ const layoutFindings = (doc: LayoutDoc): FindingInput[] => {
 const PORTRAIT = /Portrait/;
 const LANDSCAPE = /Landscape/;
 
+const stringList = (value: unknown): string[] =>
+	Array.isArray(value)
+		? value.filter((v): v is string => typeof v === "string")
+		: [];
+
+/** True when every listed orientation is portrait, or every one landscape. */
+const singleOrientation = (orientations: ReadonlyArray<string>) =>
+	orientations.every((o) => PORTRAIT.test(o)) ||
+	orientations.every((o) => LANDSCAPE.test(o));
+
+const requiresFullScreen = (file: string): FindingInput => ({
+	ruleId: "mobile.accessibility/ios-requires-fullscreen",
+	title: "App opts out of iPad multitasking",
+	severity: "low",
+	category: "accessibility",
+	message:
+		"UIRequiresFullScreen is true, so the app cannot run in Split View, Slide Over or resizable windows. Users who rely on window management, zoom or an external assistive layout lose that flexibility, and Apple has deprecated the key.",
+	location: { file },
+	evidence: "UIRequiresFullScreen = true",
+	remediation:
+		"Remove UIRequiresFullScreen and support adaptive layouts (size classes, Auto Layout) so the UI reflows in any window size.",
+	references: [`${WCAG}/orientation.html`],
+	confidence: "low",
+	tags: ["ios", "wcag-1.3.4"],
+});
+
+const orientationLocked = (
+	file: string,
+	orientations: ReadonlyArray<string>,
+): FindingInput => ({
+	ruleId: "mobile.accessibility/ios-orientation-locked",
+	title: "App is locked to a single orientation",
+	severity: "low",
+	category: "accessibility",
+	message: `UISupportedInterfaceOrientations only lists ${orientations.join(", ")}. Users who mount their device in a fixed orientation (for example on a wheelchair) cannot use the app unless the restriction is essential.`,
+	location: { file },
+	evidence: `UISupportedInterfaceOrientations = ${orientations.join(", ")}`,
+	remediation:
+		"Support both portrait and landscape unless a single orientation is essential to the app's function.",
+	references: [`${WCAG}/orientation.html`],
+	confidence: "low",
+	tags: ["ios", "wcag-1.3.4"],
+});
+
 const checkInfoPlist = (file: string, info: PlistDict): FindingInput[] => {
 	const out: FindingInput[] = [];
-	if (isTrue(info.UIRequiresFullScreen))
-		out.push({
-			ruleId: "mobile.accessibility/ios-requires-fullscreen",
-			title: "App opts out of iPad multitasking",
-			severity: "low",
-			category: "accessibility",
-			message:
-				"UIRequiresFullScreen is true, so the app cannot run in Split View, Slide Over or resizable windows. Users who rely on window management, zoom or an external assistive layout lose that flexibility, and Apple has deprecated the key.",
-			location: { file },
-			evidence: "UIRequiresFullScreen = true",
-			remediation:
-				"Remove UIRequiresFullScreen and support adaptive layouts (size classes, Auto Layout) so the UI reflows in any window size.",
-			references: [`${WCAG}/orientation.html`],
-			confidence: "low",
-			tags: ["ios", "wcag-1.3.4"],
-		});
-	const orientations = Array.isArray(info.UISupportedInterfaceOrientations)
-		? info.UISupportedInterfaceOrientations.filter(
-				(v): v is string => typeof v === "string",
-			)
-		: [];
-	if (
-		orientations.length > 0 &&
-		(orientations.every((o) => PORTRAIT.test(o)) ||
-			orientations.every((o) => LANDSCAPE.test(o)))
-	)
-		out.push({
-			ruleId: "mobile.accessibility/ios-orientation-locked",
-			title: "App is locked to a single orientation",
-			severity: "low",
-			category: "accessibility",
-			message: `UISupportedInterfaceOrientations only lists ${orientations.join(", ")}. Users who mount their device in a fixed orientation (for example on a wheelchair) cannot use the app unless the restriction is essential.`,
-			location: { file },
-			evidence: `UISupportedInterfaceOrientations = ${orientations.join(", ")}`,
-			remediation:
-				"Support both portrait and landscape unless a single orientation is essential to the app's function.",
-			references: [`${WCAG}/orientation.html`],
-			confidence: "low",
-			tags: ["ios", "wcag-1.3.4"],
-		});
+	if (isTrue(info.UIRequiresFullScreen)) out.push(requiresFullScreen(file));
+	const orientations = stringList(info.UISupportedInterfaceOrientations);
+	if (orientations.length > 0 && singleOrientation(orientations))
+		out.push(orientationLocked(file, orientations));
 	return out;
 };
 
@@ -358,6 +402,79 @@ const sourceLayouts = (
 		return docs;
 	});
 
+/** Findings from the decoded files, and how many files could be decoded. */
+interface Scan {
+	readonly findings: FindingInput[];
+	readonly inspected: number;
+}
+
+const IPA_INFO_PLIST = /^Payload\/[^/]+\.app\/Info\.plist$/;
+
+const isIpaInfoPlist = (name: string, info: UnzipFileInfo) =>
+	IPA_INFO_PLIST.test(name) && info.originalSize < MAX_LAYOUT_BYTES;
+
+const isAppLayout = (name: string, info: UnzipFileInfo) => {
+	const m = LAYOUT_PATH_RE.exec(name);
+	return (
+		m !== null &&
+		!LIBRARY_LAYOUT.test(m[1] ?? "") &&
+		info.originalSize < MAX_LAYOUT_BYTES
+	);
+};
+
+const isAppInfoPlist = (file: string) =>
+	/(^|\/)Info\.plist$/.test(file) &&
+	!/(^|\/)(Pods|build|node_modules)\//.test(file);
+
+const ipaScan = (target: MobileArtifact): Scan => {
+	const findings: FindingInput[] = [];
+	let inspected = 0;
+	for (const [name, bytes] of Object.entries(target.extract(isIpaInfoPlist))) {
+		const info = readPlist(bytes);
+		if (!info) continue;
+		inspected++;
+		findings.push(...checkInfoPlist(`${target.file}!/${name}`, info));
+	}
+	return { findings, inspected };
+};
+
+const androidArtifactScan = (target: MobileArtifact): Scan => {
+	const findings: FindingInput[] = [];
+	let inspected = 0;
+	const entries = Object.entries(target.extract(isAppLayout));
+	for (const [name, bytes] of entries.slice(0, MAX_LAYOUTS)) {
+		const root = parseAndroidXml(bytes, { dimensions: true });
+		if (!root) continue;
+		inspected++;
+		findings.push(...layoutFindings({ file: `${target.file}!/${name}`, root }));
+	}
+	return { findings, inspected };
+};
+
+const sourceScan = (target: MobileSource): Effect.Effect<Scan> =>
+	Effect.gen(function* () {
+		const docs = yield* sourceLayouts(target.ws, target.files);
+		const findings = docs.flatMap(layoutFindings);
+		let inspected = docs.length;
+		for (const file of target.files.filter(isAppInfoPlist)) {
+			const bytes = yield* target.ws
+				.readBytes(file)
+				.pipe(Effect.orElseSucceed(() => undefined));
+			const info = bytes && readPlist(bytes);
+			if (!info) continue;
+			inspected++;
+			findings.push(...checkInfoPlist(file, info));
+		}
+		return { findings, inspected };
+	});
+
+const scanTarget = (target: MobileTarget): Effect.Effect<Scan> => {
+	if (target.kind === "source") return sourceScan(target);
+	return Effect.succeed(
+		target.type === "ipa" ? ipaScan(target) : androidArtifactScan(target),
+	);
+};
+
 export const mobileAccessibility = defineAuditor({
 	id: "mobile.accessibility",
 	title: "Mobile accessibility",
@@ -369,62 +486,7 @@ export const mobileAccessibility = defineAuditor({
 	run: (ctx) =>
 		Effect.gen(function* () {
 			const target = yield* loadMobileTarget(ctx);
-			const findings: FindingInput[] = [];
-			let inspected = 0;
-
-			if (target.kind === "artifact") {
-				if (target.type === "ipa") {
-					const entries = target.extract(
-						(name, info) =>
-							/^Payload\/[^/]+\.app\/Info\.plist$/.test(name) &&
-							info.originalSize < MAX_LAYOUT_BYTES,
-					);
-					for (const [name, bytes] of Object.entries(entries)) {
-						const info = readPlist(bytes);
-						if (!info) continue;
-						inspected++;
-						findings.push(...checkInfoPlist(`${target.file}!/${name}`, info));
-					}
-				} else {
-					const entries = target.extract((name, info) => {
-						const m = LAYOUT_PATH_RE.exec(name);
-						return (
-							m !== null &&
-							!LIBRARY_LAYOUT.test(m[1] ?? "") &&
-							info.originalSize < MAX_LAYOUT_BYTES
-						);
-					});
-					for (const [name, bytes] of Object.entries(entries).slice(
-						0,
-						MAX_LAYOUTS,
-					)) {
-						const root = parseAndroidXml(bytes, { dimensions: true });
-						if (!root) continue;
-						inspected++;
-						findings.push(
-							...layoutFindings({ file: `${target.file}!/${name}`, root }),
-						);
-					}
-				}
-			} else {
-				const docs = yield* sourceLayouts(target.ws, target.files);
-				inspected += docs.length;
-				for (const doc of docs) findings.push(...layoutFindings(doc));
-				for (const file of target.files.filter(
-					(f) =>
-						/(^|\/)Info\.plist$/.test(f) &&
-						!/(^|\/)(Pods|build|node_modules)\//.test(f),
-				)) {
-					const bytes = yield* target.ws
-						.readBytes(file)
-						.pipe(Effect.orElseSucceed(() => undefined));
-					const info = bytes && readPlist(bytes);
-					if (!info) continue;
-					inspected++;
-					findings.push(...checkInfoPlist(file, info));
-				}
-			}
-
+			const { findings, inspected } = yield* scanTarget(target);
 			if (inspected === 0)
 				return yield* skip(
 					"No Android layouts (res/layout*/*.xml) or iOS Info.plist found",

@@ -1,5 +1,11 @@
-import { defineAuditor, type FindingInput, skip } from "@openaudit/core";
+import {
+	type AuditContext,
+	defineAuditor,
+	type FindingInput,
+	skip,
+} from "@openaudit/core";
 import { Effect } from "effect";
+import type { UnzipFileInfo } from "fflate";
 
 import {
 	type Dependency,
@@ -8,8 +14,8 @@ import {
 	type VulnWording,
 	vulnFinding,
 } from "../codebase/dependencies";
-import { asDict, parsePlist } from "./plist";
-import { loadMobileTarget, utf8 } from "./shared";
+import { asDict, type PlistDict, parsePlist } from "./plist";
+import { loadMobileTarget, type MobileArtifact, utf8 } from "./shared";
 
 /**
  * Supply-chain inventory and advisory lookup for built mobile artifacts.
@@ -45,6 +51,15 @@ export interface Component {
 	readonly bundleId?: string;
 }
 
+/** Path of an entry inside the artifact, such as `META-INF/foo.version`. */
+type EntryPath = string;
+/** Decoded contents of a version marker. */
+type MarkerText = string;
+/** Workspace path of the artifact. */
+type ArtifactFile = string;
+/** Folder name of an embedded iOS framework, without `.framework`. */
+type FrameworkName = string;
+
 const coordinate = (c: Component) =>
 	c.group ? `${c.group}:${c.name}` : c.name;
 
@@ -52,23 +67,25 @@ const VERSION_RE = /^\d[\w.+-]{0,63}$/;
 
 /** `META-INF/androidx.core_core.version` → androidx.core:core. */
 export const parseVersionFile = (
-	entry: string,
-	text: string,
+	entry: EntryPath,
+	text: MarkerText,
 ): Component | undefined => {
 	const file = entry.split("/").pop() ?? "";
-	const m = /^([A-Za-z][\w.-]*?)_([\w.-]+)\.version$/.exec(file);
-	const version = text.split(/\r?\n/, 1)[0]?.trim() ?? "";
-	if (!m?.[1] || !m[2] || !VERSION_RE.test(version)) return undefined;
+	const [, group, name] =
+		/^([A-Za-z][\w.-]*?)_([\w.-]+)\.version$/.exec(file) ?? [];
+	const version = (text.split(/\r?\n/, 1)[0] ?? "").trim();
+	if (!group || !name) return undefined;
+	if (!VERSION_RE.test(version)) return undefined;
 	return {
-		group: m[1],
-		name: m[2],
+		group,
+		name,
 		version,
 		entry,
 		source: "version-file",
 	};
 };
 
-const parseProperties = (text: string): Record<string, string> => {
+const parseProperties = (text: MarkerText): Record<string, string> => {
 	const out: Record<string, string> = {};
 	for (const raw of text.split(/\r?\n/)) {
 		const line = raw.trim();
@@ -81,17 +98,17 @@ const parseProperties = (text: string): Record<string, string> => {
 
 /** `META-INF/maven/<group>/<artifact>/pom.properties`. */
 export const parsePomProperties = (
-	entry: string,
-	text: string,
+	entry: EntryPath,
+	text: MarkerText,
 ): Component | undefined => {
 	const props = parseProperties(text);
-	const path = /META-INF\/maven\/([^/]+)\/([^/]+)\/pom\.properties$/.exec(
-		entry,
-	);
-	const group = props.groupId ?? path?.[1];
-	const name = props.artifactId ?? path?.[2];
+	const [, pathGroup, pathName] =
+		/META-INF\/maven\/([^/]+)\/([^/]+)\/pom\.properties$/.exec(entry) ?? [];
+	const group = props.groupId ?? pathGroup;
+	const name = props.artifactId ?? pathName;
 	const version = props.version ?? "";
-	if (!group || !name || !VERSION_RE.test(version)) return undefined;
+	if (!group || !name) return undefined;
+	if (!VERSION_RE.test(version)) return undefined;
 	return { group, name, version, entry, source: "pom-properties" };
 };
 
@@ -106,8 +123,8 @@ const GOOGLE_CLIENT_GROUPS: ReadonlyArray<readonly [RegExp, string]> = [
  * `version=20.3.2`.
  */
 export const parseClientProperties = (
-	entry: string,
-	text: string,
+	entry: EntryPath,
+	text: MarkerText,
 ): Component | undefined => {
 	const file = (entry.split("/").pop() ?? "").replace(/\.properties$/, "");
 	const group = GOOGLE_CLIENT_GROUPS.find(([re]) => re.test(file))?.[1];
@@ -124,22 +141,56 @@ const ANDROID_MARKER =
 const IOS_FRAMEWORK =
 	/^Payload\/[^/]+\.app\/Frameworks\/([^/]+)\.framework\/Info\.plist$/;
 
+const parseMarker = (entry: EntryPath, text: MarkerText) =>
+	entry.endsWith(".version")
+		? parseVersionFile(entry, text)
+		: entry.endsWith("pom.properties")
+			? parsePomProperties(entry, text)
+			: parseClientProperties(entry, text);
+
 export const androidComponents = (
 	entries: Record<string, Uint8Array>,
 ): Component[] => {
 	const seen = new Map<string, Component>();
 	for (const entry of Object.keys(entries).sort()) {
-		const text = utf8(entries[entry] ?? new Uint8Array());
-		const component = entry.endsWith(".version")
-			? parseVersionFile(entry, text)
-			: entry.endsWith("pom.properties")
-				? parsePomProperties(entry, text)
-				: parseClientProperties(entry, text);
+		const component = parseMarker(
+			entry,
+			utf8(entries[entry] ?? new Uint8Array()),
+		);
 		if (!component) continue;
 		const key = `${coordinate(component)}@${component.version}`;
 		if (!seen.has(key) && seen.size < MAX_COMPONENTS) seen.set(key, component);
 	}
 	return [...seen.values()];
+};
+
+const plistString = (v: unknown) => (typeof v === "string" ? v : undefined);
+
+const readFrameworkInfo = (bytes: Uint8Array): PlistDict | undefined => {
+	try {
+		return asDict(parsePlist(bytes));
+	} catch {
+		return undefined;
+	}
+};
+
+const frameworkComponent = (
+	entry: EntryPath,
+	folder: FrameworkName,
+	info: PlistDict,
+): Component | undefined => {
+	const version =
+		plistString(info.CFBundleShortVersionString) ??
+		plistString(info.CFBundleVersion);
+	if (!version) return undefined;
+	const bundleId = plistString(info.CFBundleIdentifier);
+	return {
+		name: plistString(info.CFBundleName) ?? folder,
+		version: version.slice(0, 64),
+		entry,
+		source: "framework",
+		...(bundleId ? { bundleId: bundleId.slice(0, 200) } : {}),
+	};
 };
 
 export const iosComponents = (
@@ -149,24 +200,9 @@ export const iosComponents = (
 	for (const entry of Object.keys(entries).sort()) {
 		const folder = IOS_FRAMEWORK.exec(entry)?.[1];
 		if (!folder) continue;
-		let info: ReturnType<typeof asDict>;
-		try {
-			info = asDict(parsePlist(entries[entry] ?? new Uint8Array()));
-		} catch {
-			continue;
-		}
-		const str = (v: unknown) => (typeof v === "string" ? v : undefined);
-		const version =
-			str(info?.CFBundleShortVersionString) ?? str(info?.CFBundleVersion);
-		if (!version) continue;
-		const bundleId = str(info?.CFBundleIdentifier);
-		out.push({
-			name: str(info?.CFBundleName) ?? folder,
-			version: version.slice(0, 64),
-			entry,
-			source: "framework",
-			...(bundleId ? { bundleId: bundleId.slice(0, 200) } : {}),
-		});
+		const info = readFrameworkInfo(entries[entry] ?? new Uint8Array());
+		const component = info && frameworkComponent(entry, folder, info);
+		if (component) out.push(component);
 	}
 	return out.slice(0, MAX_COMPONENTS);
 };
@@ -177,7 +213,7 @@ export const iosComponents = (
 // and the batch/detail helpers only forward the string.
 const MAVEN = "Maven" as unknown as Ecosystem;
 
-const asDependency = (c: Component, file: string): Dependency => ({
+const asDependency = (c: Component, file: ArtifactFile): Dependency => ({
 	name: coordinate(c),
 	version: c.version,
 	ecosystem: MAVEN,
@@ -192,45 +228,103 @@ const MOBILE_VULN: VulnWording = {
 	tags: ["owasp-mobile-m2"],
 };
 
+type Platform = "android" | "ios";
+
+/** Inventory wording per platform. */
+const INVENTORY: Record<
+	Platform,
+	{
+		readonly ruleId: string;
+		readonly title: (count: number) => string;
+		readonly message: (file: ArtifactFile, count: number) => string;
+		readonly confidence: "medium" | "high";
+	}
+> = {
+	android: {
+		ruleId: "mobile.dependencies/sdk-inventory",
+		title: (n) => `${n} bundled libraries identified`,
+		message: (file, n) =>
+			`Version markers in ${file} identify ${n} libraries (androidx, Material, Play Services, Firebase and Maven artifacts that ship META-INF version files). Libraries without markers, such as obfuscated or shaded ones, are not listed.`,
+		confidence: "medium",
+	},
+	ios: {
+		ruleId: "mobile.dependencies/ios-framework-inventory",
+		title: (n) => `${n} embedded frameworks identified`,
+		message: (file, n) =>
+			`${file} embeds ${n} frameworks. They are inventoried only: iOS bundle identifiers do not map reliably to a package registry, so advisories are not looked up.`,
+		confidence: "high",
+	},
+};
+
+const componentLabel = (c: Component) =>
+	c.source === "framework"
+		? `${c.name}@${c.version}${c.bundleId ? ` (${c.bundleId})` : ""}`
+		: `${coordinate(c)}@${c.version}`;
+
 const inventoryFinding = (
-	file: string,
-	platform: "android" | "ios",
+	file: ArtifactFile,
+	platform: Platform,
 	components: ReadonlyArray<Component>,
 ): FindingInput => {
-	const lines = components
-		.slice(0, MAX_LISTED)
-		.map((c) =>
-			c.source === "framework"
-				? `${c.name}@${c.version}${c.bundleId ? ` (${c.bundleId})` : ""}`
-				: `${coordinate(c)}@${c.version}`,
-		);
+	const wording = INVENTORY[platform];
+	const lines = components.slice(0, MAX_LISTED).map(componentLabel);
 	const more =
 		components.length > MAX_LISTED
 			? `\n… and ${components.length - MAX_LISTED} more`
 			: "";
 	return {
-		ruleId:
-			platform === "android"
-				? "mobile.dependencies/sdk-inventory"
-				: "mobile.dependencies/ios-framework-inventory",
-		title:
-			platform === "android"
-				? `${components.length} bundled libraries identified`
-				: `${components.length} embedded frameworks identified`,
+		ruleId: wording.ruleId,
+		title: wording.title(components.length),
 		severity: "info",
 		category: "supply-chain",
-		message:
-			platform === "android"
-				? `Version markers in ${file} identify ${components.length} libraries (androidx, Material, Play Services, Firebase and Maven artifacts that ship META-INF version files). Libraries without markers, such as obfuscated or shaded ones, are not listed.`
-				: `${file} embeds ${components.length} frameworks. They are inventoried only: iOS bundle identifiers do not map reliably to a package registry, so advisories are not looked up.`,
+		message: wording.message(file, components.length),
 		location: { file },
 		evidence: `${lines.join("\n")}${more}`,
 		remediation:
 			"Keep this list as the app's software bill of materials and review it when SDKs are updated.",
-		confidence: platform === "android" ? "medium" : "high",
+		confidence: wording.confidence,
 		tags: ["sbom", platform],
 	};
 };
+
+const isFrameworkInfo = (name: EntryPath, info: UnzipFileInfo) =>
+	IOS_FRAMEWORK.test(name) && info.originalSize < MAX_MARKER_BYTES;
+
+const isAndroidMarker = (name: EntryPath, info: UnzipFileInfo) =>
+	ANDROID_MARKER.test(name) && info.originalSize < MAX_MARKER_BYTES;
+
+const iosInventory = (target: MobileArtifact) =>
+	Effect.gen(function* () {
+		const frameworks = iosComponents(target.extract(isFrameworkInfo));
+		if (frameworks.length === 0)
+			return yield* skip(
+				`${target.file} embeds no frameworks (Payload/*.app/Frameworks/*.framework)`,
+			);
+		return [inventoryFinding(target.file, "ios", frameworks)];
+	});
+
+const androidFindings = (ctx: AuditContext, target: MobileArtifact) =>
+	Effect.gen(function* () {
+		const libraries = androidComponents(target.extract(isAndroidMarker));
+		if (libraries.length === 0)
+			return yield* skip(
+				`${target.file} has no library version markers (META-INF/*.version, pom.properties)`,
+			);
+		const findings: FindingInput[] = [
+			inventoryFinding(target.file, "android", libraries),
+		];
+
+		const deps = libraries.map((c) => asDependency(c, target.file));
+		yield* ctx.log(
+			`mobile.dependencies: querying OSV for ${deps.length} libraries`,
+		);
+		findings.push(
+			...(yield* osvFindings(ctx.http, deps, (d, id, vuln) =>
+				vulnFinding(MOBILE_VULN, d, id, vuln),
+			)),
+		);
+		return findings;
+	});
 
 export const mobileDependencies = defineAuditor({
 	id: "mobile.dependencies",
@@ -248,42 +342,7 @@ export const mobileDependencies = defineAuditor({
 				return yield* skip(
 					"Target is a source tree, not a built APK/AAB/IPA (code.dependencies covers lockfiles)",
 				);
-
-			if (target.type === "ipa") {
-				const entries = target.extract(
-					(name, info) =>
-						IOS_FRAMEWORK.test(name) && info.originalSize < MAX_MARKER_BYTES,
-				);
-				const frameworks = iosComponents(entries);
-				if (frameworks.length === 0)
-					return yield* skip(
-						`${target.file} embeds no frameworks (Payload/*.app/Frameworks/*.framework)`,
-					);
-				return [inventoryFinding(target.file, "ios", frameworks)];
-			}
-
-			const entries = target.extract(
-				(name, info) =>
-					ANDROID_MARKER.test(name) && info.originalSize < MAX_MARKER_BYTES,
-			);
-			const libraries = androidComponents(entries);
-			if (libraries.length === 0)
-				return yield* skip(
-					`${target.file} has no library version markers (META-INF/*.version, pom.properties)`,
-				);
-			const findings: FindingInput[] = [
-				inventoryFinding(target.file, "android", libraries),
-			];
-
-			const deps = libraries.map((c) => asDependency(c, target.file));
-			yield* ctx.log(
-				`mobile.dependencies: querying OSV for ${deps.length} libraries`,
-			);
-			findings.push(
-				...(yield* osvFindings(ctx.http, deps, (d, id, vuln) =>
-					vulnFinding(MOBILE_VULN, d, id, vuln),
-				)),
-			);
-			return findings;
+			if (target.type === "ipa") return yield* iosInventory(target);
+			return yield* androidFindings(ctx, target);
 		}),
 });

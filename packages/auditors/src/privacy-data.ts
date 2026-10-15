@@ -633,9 +633,14 @@ const TWO_LABEL_SUFFIXES = new Set([
 	"com.sg",
 ]);
 
+/** IPv4 and IPv6 literals, which have no registrable domain. */
+const isIpLiteral = (host: string): boolean =>
+	/^[\d.]+$/.test(host) || host.includes(":");
+
 export const registrableDomain = (host: string): string => {
 	const h = host.toLowerCase().replace(/\.$/, "");
-	if (/^[\d.]+$/.test(h) || h.includes(":") || !h.includes(".")) return h;
+	if (isIpLiteral(h)) return h;
+	if (!h.includes(".")) return h;
 	const labels = h.split(".");
 	const last2 = labels.slice(-2).join(".");
 	return TWO_LABEL_SUFFIXES.has(last2) ? labels.slice(-3).join(".") : last2;

@@ -5,6 +5,7 @@ import {
 	type AuditContext,
 	AuditorError,
 	DEFAULT_IGNORES,
+	type ExecOptions,
 	type Severity,
 	type Workspace,
 } from "@openaudit/core";
@@ -137,6 +138,25 @@ export const severityOf = (
 	(typeof label === "string" && LABEL_SEVERITY[label.toUpperCase()]) ||
 	fallback;
 
+const TOOL_TIMEOUT_MS = 15 * 60_000;
+
+/** Runs `cmd` and fails with its output unless the exit code is in `okCodes`. */
+const runChecked = (
+	ctx: AuditContext,
+	cmd: ReadonlyArray<string>,
+	options: ExecOptions,
+	check: { readonly okCodes: ReadonlyArray<number>; readonly name: string },
+) =>
+	Effect.flatMap(ctx.exec.run(cmd, options), (res) =>
+		check.okCodes.includes(res.code)
+			? Effect.succeed(res)
+			: Effect.fail(
+					new AuditorError({
+						message: `${check.name} exited with code ${res.code}: ${truncate(res.stderr || res.stdout, 300)}`,
+					}),
+				),
+	);
+
 /** Runs a tool and fails unless its exit code is one of `okCodes`. */
 export const runTool = (
 	ctx: AuditContext,
@@ -144,14 +164,11 @@ export const runTool = (
 	cwd: string,
 	okCodes: ReadonlyArray<number>,
 ) =>
-	Effect.flatMap(ctx.exec.run(cmd, { cwd, timeoutMs: 15 * 60_000 }), (res) =>
-		okCodes.includes(res.code)
-			? Effect.succeed(res)
-			: Effect.fail(
-					new AuditorError({
-						message: `${cmd[0]} exited with code ${res.code}: ${truncate(res.stderr || res.stdout, 300)}`,
-					}),
-				),
+	runChecked(
+		ctx,
+		cmd,
+		{ cwd, timeoutMs: TOOL_TIMEOUT_MS },
+		{ okCodes, name: `${cmd[0]}` },
 	);
 
 /**
@@ -167,20 +184,11 @@ export const runCommand = (
 		env?: Record<string, string>;
 	},
 ) =>
-	Effect.flatMap(
-		ctx.exec.run(cmd, {
-			cwd: opts.cwd,
-			timeoutMs: 15 * 60_000,
-			env: opts.env,
-		}),
-		(res) =>
-			opts.okCodes.includes(res.code)
-				? Effect.succeed(res)
-				: Effect.fail(
-						new AuditorError({
-							message: `${baseName(cmd[0] ?? "tool")} exited with code ${res.code}: ${truncate(res.stderr || res.stdout, 300)}`,
-						}),
-					),
+	runChecked(
+		ctx,
+		cmd,
+		{ cwd: opts.cwd, timeoutMs: TOOL_TIMEOUT_MS, env: opts.env },
+		{ okCodes: opts.okCodes, name: baseName(cmd[0] ?? "tool") },
 	);
 
 /* -------------------------------------------------------------------------- */
