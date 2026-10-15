@@ -122,6 +122,61 @@ const projectDir = (path: string) =>
 		m.startsWith("/") ? "/" : "",
 	);
 
+/** Packages any MCP or Codex config's project declares in package.json. */
+const localPackagesOf = (
+	ws: Workspace,
+	listed: ReadonlyArray<string>,
+	files: ReadonlyArray<SourceFile>,
+) => {
+	const all = new Set(listed);
+	const manifests = new Set(
+		files
+			.filter((f) => MCP_CONFIG.test(f.path) || CODEX_CONFIG.test(f.path))
+			.flatMap((f) => [`${projectDir(f.path)}package.json`, "package.json"])
+			.filter((p) => all.has(p)),
+	);
+	return Effect.forEach([...manifests], (p) => declaredPackages(ws, p)).pipe(
+		Effect.map((names) => new Set(names.flat())),
+	);
+};
+
+const instructionFindings = (file: AgentFile): FindingInput[] =>
+	"text" in file ? scanInstructionFile(file) : [unscanned(file)];
+
+const unreadConfig = (file: AgentFile): FindingInput[] =>
+	"text" in file
+		? []
+		: [
+				unparsed(
+					file.path,
+					1,
+					file.size === undefined
+						? "could not be read"
+						: `is ${file.size} bytes, over the ${MAX_TEXT_BYTES}-byte read limit`,
+				),
+			];
+
+/** Each config scanner and the files it reads. */
+const CONFIG_SCANS: ReadonlyArray<{
+	readonly applies: RegExp;
+	readonly scan: (
+		file: SourceFile,
+		localPackages: ReadonlySet<string>,
+	) => FindingInput[];
+}> = [
+	{ applies: MCP_CONFIG, scan: scanMcpJson },
+	{ applies: CLAUDE_SETTINGS, scan: (file) => scanClaudeSettings(file) },
+	{ applies: CODEX_CONFIG, scan: scanCodexConfig },
+];
+
+const configFindings = (
+	file: SourceFile,
+	localPackages: ReadonlySet<string>,
+): FindingInput[] =>
+	CONFIG_SCANS.filter((c) => c.applies.test(file.path)).flatMap((c) =>
+		c.scan(file, localPackages),
+	);
+
 export const agentConfig = defineAuditor({
 	id: ID,
 	title: "AI agent configuration",
@@ -151,43 +206,11 @@ export const agentConfig = defineAuditor({
 				);
 
 			// npx runs a declared dependency from node_modules, pinned by the lockfile.
-			const all = new Set(listed);
-			const manifests = new Set(
-				files
-					.filter((f) => MCP_CONFIG.test(f.path) || CODEX_CONFIG.test(f.path))
-					.flatMap((f) => [`${projectDir(f.path)}package.json`, "package.json"])
-					.filter((p) => all.has(p)),
-			);
-			const localPackages = new Set(
-				(yield* Effect.forEach([...manifests], (p) =>
-					declaredPackages(ws, p),
-				)).flat(),
-			);
-
-			const findings: FindingInput[] = [];
-			for (const file of instructions)
-				findings.push(
-					...("text" in file ? scanInstructionFile(file) : [unscanned(file)]),
-				);
-			for (const file of configs)
-				if (!("text" in file))
-					findings.push(
-						unparsed(
-							file.path,
-							1,
-							file.size === undefined
-								? "could not be read"
-								: `is ${file.size} bytes, over the ${MAX_TEXT_BYTES}-byte read limit`,
-						),
-					);
-			for (const file of files) {
-				if (MCP_CONFIG.test(file.path))
-					findings.push(...scanMcpJson(file, localPackages));
-				if (CLAUDE_SETTINGS.test(file.path))
-					findings.push(...scanClaudeSettings(file));
-				if (CODEX_CONFIG.test(file.path))
-					findings.push(...scanCodexConfig(file, localPackages));
-			}
-			return findings;
+			const localPackages = yield* localPackagesOf(ws, listed, files);
+			return [
+				...instructions.flatMap(instructionFindings),
+				...configs.flatMap(unreadConfig),
+				...files.flatMap((file) => configFindings(file, localPackages)),
+			];
 		}),
 });

@@ -9,7 +9,7 @@ import {
 	scrubLine,
 	truncate,
 } from "../util";
-import { DETAILS, hiddenRegions } from "./markdown";
+import { DETAILS, hiddenRegions, type Region } from "./markdown";
 import {
 	CLAUDE_PERMISSIONS,
 	finding,
@@ -73,7 +73,79 @@ const isFlagSequence = (prev: number | undefined, run: ReadonlyArray<number>) =>
 				(cp >= 0xe0030 && cp <= 0xe0039) || (cp >= 0xe0061 && cp <= 0xe007a),
 		);
 
-export const hiddenUnicode = (text: string): UnicodeHit[] => {
+const isZeroWidthOrJoiner = (cp: number) => isZeroWidth(cp) || isJoiner(cp);
+const never = () => false;
+
+/** A run of hidden characters and the code points around it. */
+interface Run {
+	readonly cps: ReadonlyArray<number>;
+	readonly prev: number | undefined;
+	readonly next: number | undefined;
+	readonly index: number;
+}
+
+/** One kind of hidden character: what starts a run, what extends it, and when it is a hit. */
+interface HiddenKind {
+	readonly starts: (cp: number) => boolean;
+	readonly extends: (cp: number) => boolean;
+	readonly hit: (run: Run) => UnicodeHit | undefined;
+}
+
+const isAlnum = (c: number | undefined) =>
+	c !== undefined && /[A-Za-z0-9]/.test(String.fromCharCode(c));
+const insideWord = (run: Run) => isAlnum(run.prev) && isAlnum(run.next);
+/** Several selectors, at least one of them a supplementary one (VS17–256). */
+const encodesBytes = (run: Run) =>
+	run.cps.length >= 2 && run.cps.some((c) => c >= 0xe0100);
+
+const HIDDEN_KINDS: ReadonlyArray<HiddenKind> = [
+	{
+		starts: isTag,
+		extends: isTag,
+		hit: (run) =>
+			isFlagSequence(run.prev, run.cps)
+				? undefined
+				: {
+						kind: "invisible-text",
+						index: run.index,
+						count: run.cps.length,
+						decoded: decodeTags(run.cps),
+					},
+	},
+	{
+		starts: isVariationSelector,
+		extends: isVariationSelector,
+		// One selector after an emoji or ideograph is normal; runs encode bytes.
+		hit: (run) =>
+			encodesBytes(run)
+				? {
+						kind: "invisible-text",
+						index: run.index,
+						count: run.cps.length,
+						decoded: decodeSelectors(run.cps),
+					}
+				: undefined,
+	},
+	{
+		starts: isBidi,
+		extends: never,
+		hit: (run) => ({ kind: "bidi", index: run.index, count: 1 }),
+	},
+	{
+		starts: isZeroWidthOrJoiner,
+		extends: isZeroWidthOrJoiner,
+		// A lone one at a word or line edge (a leading BOM, an emoji ZWJ
+		// sequence, Persian ZWNJ, a docs formatting trick) is ordinary text;
+		// inside an ASCII word or as a run it splits keywords or encodes data.
+		hit: (run) =>
+			run.cps.length >= 2 || insideWord(run)
+				? { kind: "zero-width", index: run.index, count: run.cps.length }
+				: undefined,
+	},
+];
+
+/** Code points of `text` with the UTF-16 offset of each. */
+const codePoints = (text: string) => {
 	const cps: number[] = [];
 	const offsets: number[] = [];
 	let offset = 0;
@@ -82,55 +154,40 @@ export const hiddenUnicode = (text: string): UnicodeHit[] => {
 		offsets.push(offset);
 		offset += ch.length;
 	}
+	return { cps, offsets };
+};
+
+/** End (exclusive) of the run from `k` whose code points satisfy `test`. */
+const runEnd = (
+	cps: ReadonlyArray<number>,
+	k: number,
+	test: (cp: number) => boolean,
+) => {
+	let j = k;
+	while (j < cps.length && test(cps[j] ?? 0)) j++;
+	return j;
+};
+
+export const hiddenUnicode = (text: string): UnicodeHit[] => {
+	const { cps, offsets } = codePoints(text);
 	const hits: UnicodeHit[] = [];
-	/** End (exclusive) of the run starting at `k` whose code points satisfy `test`. */
-	const runEnd = (k: number, test: (cp: number) => boolean) => {
-		let j = k;
-		while (j < cps.length && test(cps[j] ?? 0)) j++;
-		return j;
-	};
 	let k = 0;
 	while (k < cps.length) {
 		const cp = cps[k] ?? 0;
-		const index = offsets[k] ?? 0;
-		if (isTag(cp)) {
-			const end = runEnd(k, isTag);
-			const run = cps.slice(k, end);
-			if (!isFlagSequence(cps[k - 1], run))
-				hits.push({
-					kind: "invisible-text",
-					index,
-					count: run.length,
-					decoded: decodeTags(run),
-				});
-			k = end;
-		} else if (isVariationSelector(cp)) {
-			const end = runEnd(k, isVariationSelector);
-			const run = cps.slice(k, end);
-			// One selector after an emoji or ideograph is normal; runs encode bytes.
-			if (run.length >= 2 && run.some((c) => c >= 0xe0100))
-				hits.push({
-					kind: "invisible-text",
-					index,
-					count: run.length,
-					decoded: decodeSelectors(run),
-				});
-			k = end;
-		} else if (isBidi(cp)) {
-			hits.push({ kind: "bidi", index, count: 1 });
+		const kind = HIDDEN_KINDS.find((h) => h.starts(cp));
+		if (!kind) {
 			k++;
-		} else if (isZeroWidth(cp) || isJoiner(cp)) {
-			const end = runEnd(k, (c) => isZeroWidth(c) || isJoiner(c));
-			const run = cps.slice(k, end);
-			// A lone one at a word or line edge (a leading BOM, an emoji ZWJ
-			// sequence, Persian ZWNJ, a docs formatting trick) is ordinary text;
-			// inside an ASCII word or as a run it splits keywords or encodes data.
-			const isAlnum = (c: number | undefined) =>
-				c !== undefined && /[A-Za-z0-9]/.test(String.fromCharCode(c));
-			if (run.length >= 2 || (isAlnum(cps[k - 1]) && isAlnum(cps[end])))
-				hits.push({ kind: "zero-width", index, count: run.length });
-			k = end;
-		} else k++;
+			continue;
+		}
+		const end = runEnd(cps, k + 1, kind.extends);
+		const hit = kind.hit({
+			cps: cps.slice(k, end),
+			prev: cps[k - 1],
+			next: cps[end],
+			index: offsets[k] ?? 0,
+		});
+		if (hit) hits.push(hit);
+		k = end;
 	}
 	return hits;
 };
@@ -382,36 +439,52 @@ const bypassIn = (
 	return undefined;
 };
 
-const scanInstructions = (file: SourceFile): FindingInput[] => {
-	const { path, text } = file;
-	const lineOf = lineLocator(text);
-	const findings: FindingInput[] = [];
-	const hidden = hiddenRegions(text);
+/** A file being scanned and how to turn offsets into lines. */
+interface Scan {
+	readonly file: SourceFile;
+	readonly lineOf: (offset: number) => number;
+}
 
-	const reportedLines = new Set<number>();
-	for (const region of hidden) {
-		const raw = text.slice(region.start, region.end);
-		const body = normalize(raw);
-		const details = region.kind === DETAILS;
-		const matches = HIDDEN_INSTRUCTIONS.flatMap((p) => {
-			if (details && !p.inDetails) return [];
-			const i = p.test(body.text);
-			return i === undefined
-				? []
-				: [{ label: p.label, index: region.start + (body.source[i] ?? 0) }];
+interface Match {
+	readonly label: string;
+	readonly index: number;
+}
+
+/** What a hidden region tells the agent to do, at raw offsets. */
+const regionMatches = (text: string, region: Region): Match[] => {
+	const raw = text.slice(region.start, region.end);
+	const body = normalize(raw);
+	const details = region.kind === DETAILS;
+	const matches = HIDDEN_INSTRUCTIONS.flatMap((p) => {
+		if (details && !p.inDetails) return [];
+		const i = p.test(body.text);
+		return i === undefined
+			? []
+			: [{ label: p.label, index: region.start + (body.source[i] ?? 0) }];
+	});
+	const bypass = bypassIn(raw, region.start, true);
+	if (bypass !== undefined)
+		matches.push({
+			label: "disables the agent's approval prompts or sandbox",
+			index: bypass,
 		});
-		const bypass = bypassIn(raw, region.start, true);
-		if (bypass !== undefined)
-			matches.push({
-				label: "disables the agent's approval prompts or sandbox",
-				index: bypass,
-			});
-		if (matches.length === 0) continue;
+	return matches;
+};
+
+const hiddenInstructions = (
+	{ file, lineOf }: Scan,
+	hidden: ReadonlyArray<Region>,
+): FindingInput[] => {
+	const { path, text } = file;
+	const reportedLines = new Set<number>();
+	return hidden.flatMap((region) => {
+		const matches = regionMatches(text, region);
+		if (matches.length === 0) return [];
 		const index = Math.min(...matches.map((m) => m.index));
 		// Overlapping regions (a comment inside a hidden element) report once.
-		if (reportedLines.has(lineOf(index))) continue;
+		if (reportedLines.has(lineOf(index))) return [];
 		reportedLines.add(lineOf(index));
-		findings.push(
+		return [
 			finding("hidden-instruction", path, lineOf(index), {
 				title: "Hidden instruction in an agent instruction file",
 				severity: "high",
@@ -424,10 +497,12 @@ const scanInstructions = (file: SourceFile): FindingInput[] => {
 				confidence: "low",
 				tags: PROMPT_INJECTION_TAGS,
 			}),
-		);
-	}
+		];
+	});
+};
 
-	// Blank hidden regions (keeping line breaks) so only visible text is read.
+/** `text` with hidden regions blanked (keeping line breaks), so only visible text is read. */
+const visibleText = (text: string, hidden: ReadonlyArray<Region>): string => {
 	const parts: string[] = [];
 	let last = 0;
 	for (const r of [...hidden].sort((a, b) => a.start - b.start)) {
@@ -440,13 +515,20 @@ const scanInstructions = (file: SourceFile): FindingInput[] => {
 		last = r.end;
 	}
 	parts.push(text.slice(last));
-	const visible = parts.join("");
+	return parts.join("");
+};
+
+const safetyBypasses = (
+	{ file, lineOf }: Scan,
+	visible: string,
+): FindingInput[] => {
+	const { path, text } = file;
 	const flagged = new Set<number>();
-	for (const [start, end] of sentences(visible)) {
+	return sentences(visible).flatMap(([start, end]) => {
 		const index = bypassIn(visible.slice(start, end), start, false);
-		if (index === undefined || flagged.has(lineOf(index))) continue;
+		if (index === undefined || flagged.has(lineOf(index))) return [];
 		flagged.add(lineOf(index));
-		findings.push(
+		return [
 			finding("instruction-disables-safety", path, lineOf(index), {
 				title: "Agent told to bypass its safety controls",
 				severity: "medium",
@@ -459,9 +541,17 @@ const scanInstructions = (file: SourceFile): FindingInput[] => {
 				confidence: "low",
 				tags: ["owasp-llm06"],
 			}),
-		);
-	}
-	return findings;
+		];
+	});
+};
+
+const scanInstructions = (file: SourceFile): FindingInput[] => {
+	const scan: Scan = { file, lineOf: lineLocator(file.text) };
+	const hidden = hiddenRegions(file.text);
+	return [
+		...hiddenInstructions(scan, hidden),
+		...safetyBypasses(scan, visibleText(file.text, hidden)),
+	];
 };
 
 /** Hidden Unicode plus hidden or safety-disabling instructions. Exported for tests. */

@@ -31,13 +31,18 @@ export interface JsonEntry {
 	readonly value: JsonNode;
 }
 
+/** JSONC source text, an offset into it, and a nesting depth. */
+type JsonText = string;
+type Offset = number;
+type Depth = number;
+
 const MAX_DEPTH = 64;
 const SCALAR = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null/y;
 
 class Bad extends Error {
 	constructor(
 		readonly reason: string,
-		readonly offset: number,
+		readonly offset: Offset,
 	) {
 		super(reason);
 	}
@@ -48,100 +53,143 @@ export type JsonParse =
 	| { readonly ok: false; readonly reason: string; readonly offset: number };
 
 /** Parses JSONC into a tree, or undefined when it is not JSONC. */
-export const parseJsoncTree = (text: string): JsonNode | undefined => {
+export const parseJsoncTree = (text: JsonText): JsonNode | undefined => {
 	const parsed = parseJsoncDetailed(text);
 	return parsed.ok ? parsed.root : undefined;
 };
 
-/** Parses JSONC into a tree, or says why and where it is not JSONC. */
-export const parseJsoncDetailed = (text: string): JsonParse => {
-	let i = text.charCodeAt(0) === 0xfeff ? 1 : 0;
-	const n = text.length;
+const WHITESPACE = new Set([" ", "\t", "\n", "\r"]);
 
-	const skip = () => {
-		while (i < n) {
-			const c = text[i];
-			if (c === " " || c === "\t" || c === "\n" || c === "\r") i++;
-			else if (c === "/" && text[i + 1] === "/") {
-				const e = text.indexOf("\n", i);
-				i = e === -1 ? n : e + 1;
-			} else if (c === "/" && text[i + 1] === "*") {
-				const e = text.indexOf("*/", i + 2);
-				if (e === -1) throw new Bad("unterminated block comment", i);
-				i = e + 2;
-			} else return;
+/** A cursor over JSONC text that throws `Bad` where the text stops being JSONC. */
+class Reader {
+	i: number;
+	readonly n: number;
+
+	constructor(readonly text: JsonText) {
+		this.i = text.charCodeAt(0) === 0xfeff ? 1 : 0;
+		this.n = text.length;
+	}
+
+	/** Skips whitespace and comments. */
+	skip() {
+		while (this.i < this.n) {
+			if (WHITESPACE.has(this.text.charAt(this.i))) this.i++;
+			else if (!this.comment()) return;
 		}
-	};
+	}
 
-	const string = (): string => {
-		const start = i;
-		i++;
-		while (i < n && text[i] !== '"') i += text[i] === "\\" ? 2 : 1;
-		if (i >= n) throw new Bad("unterminated string", start);
-		i++;
+	/** Skips the comment at the cursor, or says there is none. */
+	private comment(): boolean {
+		if (this.text[this.i] !== "/") return false;
+		const next = this.text[this.i + 1];
+		if (next === "/") {
+			const e = this.text.indexOf("\n", this.i);
+			this.i = e === -1 ? this.n : e + 1;
+			return true;
+		}
+		if (next !== "*") return false;
+		const e = this.text.indexOf("*/", this.i + 2);
+		if (e === -1) throw new Bad("unterminated block comment", this.i);
+		this.i = e + 2;
+		return true;
+	}
+
+	private string(): string {
+		const start = this.i;
+		this.i++;
+		while (this.i < this.n && this.text[this.i] !== '"')
+			this.i += this.text[this.i] === "\\" ? 2 : 1;
+		if (this.i >= this.n) throw new Bad("unterminated string", start);
+		this.i++;
 		try {
-			return JSON.parse(text.slice(start, i)) as string;
+			return JSON.parse(this.text.slice(start, this.i)) as string;
 		} catch {
 			throw new Bad("invalid escape or control character in a string", start);
 		}
-	};
+	}
 
-	const value = (depth: number): JsonNode => {
-		skip();
+	value(depth: Depth): JsonNode {
+		this.skip();
 		if (depth > MAX_DEPTH)
-			throw new Bad(`nesting deeper than ${MAX_DEPTH} levels`, i);
-		const offset = i;
-		const c = text[i];
-		if (c === "{") {
-			i++;
-			const entries: JsonEntry[] = [];
-			for (;;) {
-				skip();
-				if (text[i] === "}") {
-					i++;
-					return { kind: "object", offset, entries };
-				}
-				if (text[i] !== '"') throw new Bad("expected a double-quoted key", i);
-				const keyOffset = i;
-				const key = string();
-				skip();
-				if (text[i] !== ":") throw new Bad("expected ':'", i);
-				i++;
-				entries.push({ key, keyOffset, value: value(depth + 1) });
-				skip();
-				if (text[i] === ",") i++;
-				else if (text[i] !== "}") throw new Bad("expected ',' or '}'", i);
-			}
-		}
-		if (c === "[") {
-			i++;
-			const items: JsonNode[] = [];
-			for (;;) {
-				skip();
-				if (text[i] === "]") {
-					i++;
-					return { kind: "array", offset, items };
-				}
-				items.push(value(depth + 1));
-				skip();
-				if (text[i] === ",") i++;
-				else if (text[i] !== "]") throw new Bad("expected ',' or ']'", i);
-			}
-		}
-		if (c === '"') return { kind: "string", offset, value: string() };
-		SCALAR.lastIndex = i;
-		const m = SCALAR.exec(text);
-		if (!m) throw new Bad("unexpected value", i);
-		i += m[0].length;
-		return { kind: "scalar", offset, value: JSON.parse(m[0]) };
-	};
+			throw new Bad(`nesting deeper than ${MAX_DEPTH} levels`, this.i);
+		const offset = this.i;
+		const c = this.text[this.i];
+		if (c === "{") return this.object(depth);
+		if (c === "[") return this.array(depth);
+		if (c === '"') return { kind: "string", offset, value: this.string() };
+		return this.scalar();
+	}
 
+	private object(depth: Depth): JsonNode {
+		const offset = this.i++;
+		const entries: JsonEntry[] = [];
+		for (;;) {
+			this.skip();
+			if (this.text[this.i] === "}") {
+				this.i++;
+				return { kind: "object", offset, entries };
+			}
+			entries.push(this.entry(depth));
+			this.separator("}");
+		}
+	}
+
+	private entry(depth: Depth): JsonEntry {
+		if (this.text[this.i] !== '"')
+			throw new Bad("expected a double-quoted key", this.i);
+		const keyOffset = this.i;
+		const key = this.string();
+		this.skip();
+		if (this.text[this.i] !== ":") throw new Bad("expected ':'", this.i);
+		this.i++;
+		return { key, keyOffset, value: this.value(depth + 1) };
+	}
+
+	private array(depth: Depth): JsonNode {
+		const offset = this.i++;
+		const items: JsonNode[] = [];
+		for (;;) {
+			this.skip();
+			if (this.text[this.i] === "]") {
+				this.i++;
+				return { kind: "array", offset, items };
+			}
+			items.push(this.value(depth + 1));
+			this.separator("]");
+		}
+	}
+
+	/** After a member: steps over a comma, or checks the container closes. */
+	private separator(close: "}" | "]") {
+		this.skip();
+		if (this.text[this.i] === ",") this.i++;
+		else if (this.text[this.i] !== close)
+			throw new Bad(`expected ',' or '${close}'`, this.i);
+	}
+
+	private scalar(): JsonNode {
+		const offset = this.i;
+		SCALAR.lastIndex = this.i;
+		const m = SCALAR.exec(this.text);
+		if (!m) throw new Bad("unexpected value", this.i);
+		this.i += m[0].length;
+		return { kind: "scalar", offset, value: JSON.parse(m[0]) };
+	}
+}
+
+/** Parses JSONC into a tree, or says why and where it is not JSONC. */
+export const parseJsoncDetailed = (text: JsonText): JsonParse => {
+	const reader = new Reader(text);
 	try {
-		const root = value(0);
-		skip();
-		return i === n
+		const root = reader.value(0);
+		reader.skip();
+		return reader.i === reader.n
 			? { ok: true, root }
-			: { ok: false, reason: "unexpected content after the value", offset: i };
+			: {
+					ok: false,
+					reason: "unexpected content after the value",
+					offset: reader.i,
+				};
 	} catch (e) {
 		if (e instanceof Bad)
 			return { ok: false, reason: e.reason, offset: e.offset };
@@ -175,7 +223,7 @@ export const treeOf = (
 ): JsonNode => {
 	const offset = (v: unknown) =>
 		typeof v === "string" ? locate(v) : locate(String(v));
-	const build = (v: unknown, depth: number): JsonNode => {
+	const build = (v: unknown, depth: Depth): JsonNode => {
 		if (depth > MAX_DEPTH) return { kind: "scalar", offset: 0, value: null };
 		if (Array.isArray(v))
 			return {

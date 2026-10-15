@@ -100,19 +100,20 @@ const CONFUSABLES = new Map<number, string>(
 );
 
 const FORMAT = /^\p{Cf}$/u;
+const FILLERS = new Set([
+	0x034f, 0x115f, 0x1160, 0x17b4, 0x17b5, 0x3164, 0xffa0,
+]);
+const VARIATION_SELECTORS: ReadonlyArray<readonly [number, number]> = [
+	[0xfe00, 0xfe0f],
+	[0xe0100, 0xe01ef],
+];
+
+const isVariationSelector = (cp: number) =>
+	VARIATION_SELECTORS.some(([lo, hi]) => cp >= lo && cp <= hi);
 
 /** Format characters, variation selectors and fillers that render as nothing. */
 const isInvisible = (cp: number, c: string) =>
-	FORMAT.test(c) ||
-	(cp >= 0xfe00 && cp <= 0xfe0f) ||
-	(cp >= 0xe0100 && cp <= 0xe01ef) ||
-	cp === 0x034f ||
-	cp === 0x115f ||
-	cp === 0x1160 ||
-	cp === 0x17b4 ||
-	cp === 0x17b5 ||
-	cp === 0x3164 ||
-	cp === 0xffa0;
+	FORMAT.test(c) || isVariationSelector(cp) || FILLERS.has(cp);
 
 const isAlnum = (c: string | undefined) =>
 	c !== undefined && /[A-Za-z0-9]/.test(c);
@@ -124,61 +125,133 @@ export interface Normalized {
 	readonly source: ReadonlyArray<number>;
 }
 
+/** Folded characters before emphasis and whitespace handling, with their raw offsets. */
+interface Folded {
+	readonly chars: string[];
+	readonly from: number[];
+}
+
+/** A decoded piece of raw input and how many raw UTF-16 units it took. */
+interface Token {
+	readonly text: string;
+	readonly length: number;
+}
+
+const EMPHASIS = new Set(["*", "~", "`"]);
+
+const foldChar = (out: Folded, c: string, at: number) => {
+	const cp = c.codePointAt(0) ?? 0;
+	if (isInvisible(cp, c)) return;
+	for (const folded of CONFUSABLES.get(cp) ?? c.normalize("NFKC")) {
+		if (EMPHASIS.has(folded)) continue;
+		out.chars.push(folded);
+		out.from.push(at);
+	}
+};
+
+const entityAt = (raw: string, i: number): Token | undefined => {
+	if (raw[i] !== "&") return undefined;
+	ENTITY.lastIndex = i;
+	const m = ENTITY.exec(raw);
+	const decoded = m ? decodeEntity(m) : undefined;
+	return m && decoded !== undefined
+		? { text: decoded, length: m[0].length }
+		: undefined;
+};
+
+const codePointAt = (raw: string, i: number): Token => {
+	const c = String.fromCodePoint(raw.codePointAt(i) ?? 0);
+	return { text: c, length: c.length };
+};
+
+const fold = (raw: string): Folded => {
+	const out: Folded = { chars: [], from: [] };
+	let i = 0;
+	while (i < raw.length) {
+		const token = entityAt(raw, i) ?? codePointAt(raw, i);
+		for (const c of token.text) foldChar(out, c, i);
+		i += token.length;
+	}
+	return out;
+};
+
+/** `_word_` emphasis, but keep snake_case such as id_rsa. */
+const isEmphasisUnderscore = (chars: ReadonlyArray<string>, k: number) =>
+	chars[k] === "_" && !(isAlnum(chars[k - 1]) && isAlnum(chars[k + 1]));
+
+/** What the k-th folded character adds to `text` once whitespace collapses. */
+const appended = (text: string, chars: ReadonlyArray<string>, k: number) => {
+	const c = chars[k] ?? "";
+	if (isEmphasisUnderscore(chars, k)) return "";
+	if (!isSpace(c)) return c;
+	return text.length === 0 || text.endsWith(" ") ? "" : " ";
+};
+
+const collapse = ({ chars, from }: Folded): Normalized => {
+	let text = "";
+	const source: number[] = [];
+	for (let k = 0; k < chars.length; k++) {
+		text += appended(text, chars, k);
+		while (source.length < text.length) source.push(from[k] ?? 0);
+	}
+	return { text, source };
+};
+
 /**
  * Decodes HTML entities, applies NFKC (full-width and compatibility forms),
  * drops invisible characters, folds look-alike letters and dashes to ASCII,
  * removes Markdown emphasis (`*`, `~`, backticks, and `_` at word edges) and
  * collapses whitespace to single spaces.
  */
-export const normalize = (raw: string): Normalized => {
-	const chars: string[] = [];
-	const from: number[] = [];
-	const emit = (s: string, at: number) => {
-		for (const c of s) {
-			const cp = c.codePointAt(0) ?? 0;
-			if (isInvisible(cp, c)) continue;
-			for (const out of CONFUSABLES.get(cp) ?? c.normalize("NFKC")) {
-				if (out === "*" || out === "~" || out === "`") continue;
-				chars.push(out);
-				from.push(at);
-			}
-		}
-	};
-	let i = 0;
-	while (i < raw.length) {
-		if (raw[i] === "&") {
-			ENTITY.lastIndex = i;
-			const m = ENTITY.exec(raw);
-			const decoded = m ? decodeEntity(m) : undefined;
-			if (m && decoded !== undefined) {
-				emit(decoded, i);
-				i += m[0].length;
-				continue;
-			}
-		}
-		const c = String.fromCodePoint(raw.codePointAt(i) ?? 0);
-		emit(c, i);
-		i += c.length;
-	}
-
-	let text = "";
-	const source: number[] = [];
-	for (let k = 0; k < chars.length; k++) {
-		const c = chars[k] ?? "";
-		// `_word_` emphasis, but keep snake_case such as id_rsa.
-		if (c === "_" && !(isAlnum(chars[k - 1]) && isAlnum(chars[k + 1])))
-			continue;
-		if (isSpace(c)) {
-			if (text.length === 0 || text.endsWith(" ")) continue;
-			text += " ";
-		} else text += c;
-		while (source.length < text.length) source.push(from[k] ?? 0);
-	}
-	return { text, source };
-};
+export const normalize = (raw: string): Normalized => collapse(fold(raw));
 
 const BLOCK_START = /^ {0,3}(?:[-*+>]\s|\d{1,9}[.)]\s|#|\||<)/;
 const FENCE = /^ {0,3}(?:`{3,}|~{3,})/;
+const SENTENCE_END = new Set([".", ";", "!", "?"]);
+
+type Span = [number, number];
+
+/** Sentence splitting state: the open paragraph and whether a fence is open. */
+interface Splitter {
+	readonly text: string;
+	readonly out: Span[];
+	para: Span | undefined;
+	inFence: boolean;
+}
+
+const endsSentence = (text: string, k: number) =>
+	SENTENCE_END.has(text.charAt(k)) && isSpace(text[k + 1]);
+
+const split = (text: string, [start, end]: Span, out: Span[]) => {
+	let from = start;
+	for (let k = start; k < end - 1; k++) {
+		if (!endsSentence(text, k)) continue;
+		out.push([from, k + 1]);
+		from = k + 1;
+	}
+	if (from < end) out.push([from, end]);
+};
+
+const flush = (s: Splitter) => {
+	if (s.para) split(s.text, s.para, s.out);
+	s.para = undefined;
+};
+
+const paragraphLine = (s: Splitter, line: string, [start, end]: Span) => {
+	if (BLOCK_START.test(line)) flush(s);
+	s.para = s.para ? [s.para[0], end] : [start, end];
+};
+
+const addLine = (s: Splitter, line: string, start: number) => {
+	const span: Span = [start, start + line.length];
+	if (FENCE.test(line)) {
+		flush(s);
+		s.inFence = !s.inFence;
+		s.out.push(span);
+	} else if (s.inFence) s.out.push(span);
+	else if (line.trim() === "") flush(s);
+	else paragraphLine(s, line, span);
+};
 
 /**
  * Sentences as raw [start, end) offsets. Soft-wrapped lines of a paragraph
@@ -187,43 +260,12 @@ const FENCE = /^ {0,3}(?:`{3,}|~{3,})/;
  * whitespace.
  */
 export const sentences = (text: string): Array<[number, number]> => {
-	const out: Array<[number, number]> = [];
-	const split = (start: number, end: number) => {
-		let from = start;
-		for (let k = start; k < end - 1; k++) {
-			const c = text[k];
-			if (
-				(c === "." || c === ";" || c === "!" || c === "?") &&
-				isSpace(text[k + 1])
-			) {
-				out.push([from, k + 1]);
-				from = k + 1;
-			}
-		}
-		if (from < end) out.push([from, end]);
-	};
-	let para: [number, number] | undefined;
-	const flush = () => {
-		if (para) split(para[0], para[1]);
-		para = undefined;
-	};
-	let inFence = false;
+	const s: Splitter = { text, out: [], para: undefined, inFence: false };
 	let pos = 0;
 	for (const line of text.split("\n")) {
-		const start = pos;
-		const end = pos + line.length;
-		pos = end + 1;
-		if (FENCE.test(line)) {
-			flush();
-			inFence = !inFence;
-			out.push([start, end]);
-		} else if (inFence) out.push([start, end]);
-		else if (line.trim() === "") flush();
-		else {
-			if (BLOCK_START.test(line)) flush();
-			para = para ? [para[0], end] : [start, end];
-		}
+		addLine(s, line, pos);
+		pos += line.length + 1;
 	}
-	flush();
-	return out;
+	flush(s);
+	return s.out;
 };
