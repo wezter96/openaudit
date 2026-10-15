@@ -200,14 +200,14 @@ describe("sarif", () => {
 			byRule["web.headers/csp-missing"].locations[0].physicalLocation
 				.artifactLocation.uri,
 		).toBe("https://example.com/");
-		expect(byRule["web.headers/server-banner"].level).toBe("note");
-		expect(byRule["web.headers/server-banner"].locations).toBeUndefined();
+		// An info finding with no location is left out: code scanning rejects it.
+		expect(byRule["web.headers/server-banner"]).toBeUndefined();
 	});
 
 	test("reports skipped auditors as notifications", () => {
 		const notes = run.invocations[0].toolExecutionNotifications;
 		expect(notes[0].message.text).toContain("semgrep not found");
-		expect(toSarifLog(report).runs[0]?.results).toHaveLength(4);
+		expect(toSarifLog(report).runs[0]?.results).toHaveLength(3);
 	});
 });
 

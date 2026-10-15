@@ -123,6 +123,8 @@ describe("browser origin guard", async () => {
 
 			expect(elsewhereHits).toEqual([]);
 		},
+		// Chromium starts slowly on shared CI runners.
+		30_000,
 	);
 
 	test.skipIf(!browser)(

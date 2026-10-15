@@ -83,6 +83,14 @@ const location = (finding: Finding, report: Report) => {
 	};
 };
 
+/**
+ * GitHub code scanning rejects a result without a location. An info finding
+ * with nowhere to point (a summary, the truck factor) has nothing to show
+ * there, so SARIF leaves it out; the other formats keep it.
+ */
+const hasPlace = (f: Finding, report: Report): boolean =>
+	f.severity !== "info" || location(f, report) !== undefined;
+
 const markdownHelp = (f: Finding): string => {
 	const parts = [`**${f.title}**`, "", f.message];
 	if (f.remediation) parts.push("", `**Remediation:** ${f.remediation}`);
@@ -201,7 +209,9 @@ export const toSarifLog = (report: Report) => {
 						toolExecutionNotifications: notificationsOf(report),
 					},
 				],
-				results: findings.map((f) => sarifResult(f, report, ruleIndex)),
+				results: findings
+					.filter((f) => hasPlace(f, report))
+					.map((f) => sarifResult(f, report, ruleIndex)),
 				properties: {
 					target: report.target.input,
 					score: report.summary.score,
