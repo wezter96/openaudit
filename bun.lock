@@ -31,7 +31,7 @@
     },
     "apps/cli": {
       "name": "@openaudit/cli",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "bin": {
         "openaudit": "bin/openaudit.js",
       },
