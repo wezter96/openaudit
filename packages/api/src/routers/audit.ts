@@ -22,6 +22,83 @@ const globalLimiter = createRateLimiter({ limit: 120, windowMs: 60_000 });
 const MAX_CONCURRENT_AUDITS = 4;
 let inFlight = 0;
 
+/** Refuses the request when the client's or the server's budget is spent. */
+const checkRateLimits = (clientIp: string | undefined): void => {
+	// Per-client first: requests a client is already refused must not drain
+	// the shared budget, or one noisy client could lock everyone out.
+	const own = limiter.hit(clientKey(clientIp));
+	const rate = own.ok ? globalLimiter.hit("*") : own;
+	if (!rate.ok)
+		throw new ORPCError("TOO_MANY_REQUESTS", {
+			message: `Rate limit reached. Try again in ${Math.ceil(rate.retryAfterMs / 1000)}s.`,
+			data: { retryAfterMs: rate.retryAfterMs },
+		});
+};
+
+type Guard = { readonly allowPrivate: boolean };
+
+/** The validated target, with SSRF refusals as bad requests. */
+const resolveTarget = async (
+	url: string,
+	guard: Guard,
+): Promise<ResolvedUrl> => {
+	try {
+		return await resolvePublicUrl(url, guard);
+	} catch (e) {
+		if (e instanceof SsrfError)
+			throw new ORPCError("BAD_REQUEST", {
+				message: e.message,
+				data: { reason: e.reason },
+			});
+		throw e;
+	}
+};
+
+/** The engine's TargetError: the target could not be audited. */
+const isTargetError = (
+	e: unknown,
+): e is { readonly _tag: "TargetError"; readonly message?: unknown } =>
+	typeof e === "object" &&
+	e !== null &&
+	"_tag" in e &&
+	e._tag === "TargetError";
+
+const auditError = (e: unknown) => {
+	if (e instanceof AuditTimeout)
+		return new ORPCError("GATEWAY_TIMEOUT", { message: e.message });
+	const message = isTargetError(e)
+		? String(e.message)
+		: "The audit failed unexpectedly";
+	return new ORPCError("UNPROCESSABLE_CONTENT", { message });
+};
+
+/** Runs one audit within the server-wide concurrency cap. */
+const auditWithinCap = async (
+	target: ResolvedUrl,
+	maxPages: number | undefined,
+	guard: Guard,
+): Promise<z.infer<typeof ReportSchema>> => {
+	if (inFlight >= MAX_CONCURRENT_AUDITS)
+		throw new ORPCError("SERVICE_UNAVAILABLE", {
+			message: "The server is busy running other audits. Try again shortly.",
+		});
+	inFlight++;
+	try {
+		const report = await runUrlAudit({
+			url: target.url.toString(),
+			address: target.address,
+			maxPages,
+			guard,
+		});
+		// Mirrors the engine's own report shape; copy to drop readonly.
+		return structuredClone(report) as z.infer<typeof ReportSchema>;
+	} catch (e) {
+		throw auditError(e);
+	} finally {
+		inFlight--;
+	}
+};
+
 export const auditRouter = {
 	url: publicProcedure
 		.route({
@@ -50,54 +127,9 @@ export const auditRouter = {
 		)
 		.output(ReportSchema)
 		.handler(async ({ input, context }) => {
-			// Per-client first: requests a client is already refused must not drain
-			// the shared budget, or one noisy client could lock everyone out.
-			const own = limiter.hit(clientKey(context.clientIp));
-			const rate = own.ok ? globalLimiter.hit("*") : own;
-			if (!rate.ok)
-				throw new ORPCError("TOO_MANY_REQUESTS", {
-					message: `Rate limit reached. Try again in ${Math.ceil(rate.retryAfterMs / 1000)}s.`,
-					data: { retryAfterMs: rate.retryAfterMs },
-				});
-
+			checkRateLimits(context.clientIp);
 			const guard = { allowPrivate: context.allowPrivateTargets === true };
-			let target: ResolvedUrl;
-			try {
-				target = await resolvePublicUrl(input.url, guard);
-			} catch (e) {
-				if (e instanceof SsrfError)
-					throw new ORPCError("BAD_REQUEST", {
-						message: e.message,
-						data: { reason: e.reason },
-					});
-				throw e;
-			}
-
-			if (inFlight >= MAX_CONCURRENT_AUDITS)
-				throw new ORPCError("SERVICE_UNAVAILABLE", {
-					message:
-						"The server is busy running other audits. Try again shortly.",
-				});
-			inFlight++;
-			try {
-				const report = await runUrlAudit({
-					url: target.url.toString(),
-					address: target.address,
-					maxPages: input.maxPages,
-					guard,
-				});
-				// Mirrors the engine's own report shape; copy to drop readonly.
-				return structuredClone(report) as z.infer<typeof ReportSchema>;
-			} catch (e) {
-				if (e instanceof AuditTimeout)
-					throw new ORPCError("GATEWAY_TIMEOUT", { message: e.message });
-				const message =
-					e && typeof e === "object" && "_tag" in e && e._tag === "TargetError"
-						? String((e as { message?: unknown }).message)
-						: "The audit failed unexpectedly";
-				throw new ORPCError("UNPROCESSABLE_CONTENT", { message });
-			} finally {
-				inFlight--;
-			}
+			const target = await resolveTarget(input.url, guard);
+			return auditWithinCap(target, input.maxPages, guard);
 		}),
 };
