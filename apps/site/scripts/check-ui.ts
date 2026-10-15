@@ -16,6 +16,7 @@ import {
 	type Browser,
 	type BrowserType,
 	chromium,
+	type Locator,
 	type Page,
 	webkit,
 } from "playwright";
@@ -90,104 +91,129 @@ const open = async (page: Page, path: string) => {
 	await page.waitForTimeout(400);
 };
 
+const isVisible = (locator: Locator) => locator.isVisible().catch(() => false);
+
+/*
+ * The functions below run inside the page (page.evaluate), so each must be
+ * self-contained.
+ */
+
+/** How the page scrolls sideways, or "" when it does not. */
+const sidewaysScroll = () => {
+	const doc = document.documentElement;
+	return doc.scrollWidth > doc.clientWidth + 1
+		? `${doc.scrollWidth}px wide in a ${doc.clientWidth}px viewport`
+		: "";
+};
+
+/** Where an open menu panel sticks out of the viewport, or "". */
+const panelOffScreen = (sel: string) => {
+	const el = document.querySelector(sel);
+	if (!el) return "";
+	const r = el.getBoundingClientRect();
+	if (r.width === 0) return "";
+	return r.left < -1 || r.right > window.innerWidth + 1
+		? `${Math.round(r.left)} to ${Math.round(r.right)} in a ${window.innerWidth}px viewport`
+		: "";
+};
+
+const currentTheme = () =>
+	document.documentElement.dataset.theme ??
+	(matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+
+const scrollToBottom = () => {
+	document.documentElement.style.scrollBehavior = "auto";
+	window.scrollTo(0, document.documentElement.scrollHeight);
+};
+
+/** Whether a visible, unobscured link to the home page is on screen. */
+const homeLinkOnScreen = () => {
+	const vh = window.innerHeight;
+	const reachable = (a: HTMLAnchorElement) => {
+		const r = a.getBoundingClientRect();
+		const offScreen = r.width === 0 || r.bottom <= 0 || r.top >= vh;
+		if (offScreen) return false;
+		const hit = document.elementFromPoint(
+			r.left + r.width / 2,
+			r.top + r.height / 2,
+		);
+		return !!hit && (a === hit || a.contains(hit));
+	};
+	return [...document.querySelectorAll<HTMLAnchorElement>("a[href]")]
+		.filter((a) => new URL(a.href).pathname === "/")
+		.some(reachable);
+};
+
+/** How far the footer runs below the screen, or "" when it fits. */
+const footerBelowScreen = () => {
+	const vh = window.innerHeight;
+	const foot = document.querySelector("footer:last-of-type");
+	if (!foot) return "";
+	let lowest = foot.getBoundingClientRect().bottom;
+	for (const el of foot.querySelectorAll("*")) {
+		const r = el.getBoundingClientRect();
+		if (r.height > 0) lowest = Math.max(lowest, r.bottom);
+	}
+	return lowest > vh + 1
+		? `footer ends ${Math.round(lowest - vh)}px below the screen at the bottom`
+		: "";
+};
+
+/* ------------------------------------------------------------- checks */
+
+const checkMenu = async (
+	page: Page,
+	where: string,
+	[selector, panel]: [string, string],
+) => {
+	const trigger = page.locator(selector).first();
+	if (!(await isVisible(trigger))) return;
+	await trigger.scrollIntoViewIfNeeded();
+	await page.waitForTimeout(150);
+	const before = await layout(page);
+	await trigger.click();
+	await page.waitForTimeout(500);
+	const after = await layout(page);
+	if (before !== after) fail(where, `opening ${selector} moved the page`);
+	const off = await page.evaluate(panelOffScreen, panel);
+	if (off) fail(where, `${panel} opens off screen (${off})`);
+	await page.keyboard.press("Escape");
+	// Escape doesn't close the others; click again so the next check starts
+	// from the same page
+	if (selector !== "#dl-button" && (await isVisible(trigger)))
+		await trigger.click();
+	await page.waitForTimeout(200);
+};
+
+const checkTheme = async (page: Page, where: string, selector: string) => {
+	const button = page.locator(selector).first();
+	if (!(await isVisible(button))) return;
+	const theme = () => page.evaluate(currentTheme);
+	const first = await theme();
+	await button.click();
+	const second = await theme();
+	await button.click();
+	if (first === second) fail(where, `${selector} doesn't switch the theme`);
+	else if ((await theme()) !== first)
+		fail(where, `${selector} doesn't switch the theme back`);
+};
+
+const checkBottom = async (page: Page, where: string) => {
+	await page.evaluate(scrollToBottom);
+	await page.waitForTimeout(500);
+	if (!(await page.evaluate(homeLinkOnScreen)))
+		fail(where, "no link home on screen at the bottom of the page");
+	const footer = await page.evaluate(footerBelowScreen);
+	if (footer) fail(where, footer);
+};
+
 const checkPage = async (page: Page, where: string, path: string) => {
 	await open(page, path);
-
-	const wide = await page.evaluate(() => {
-		const doc = document.documentElement;
-		return doc.scrollWidth > doc.clientWidth + 1
-			? `${doc.scrollWidth}px wide in a ${doc.clientWidth}px viewport`
-			: "";
-	});
+	const wide = await page.evaluate(sidewaysScroll);
 	if (wide) fail(where, `scrolls sideways (${wide})`);
-
-	for (const [selector, panel] of Object.entries(MENUS)) {
-		const trigger = page.locator(selector).first();
-		if (!(await trigger.isVisible().catch(() => false))) continue;
-		await trigger.scrollIntoViewIfNeeded();
-		await page.waitForTimeout(150);
-		const before = await layout(page);
-		await trigger.click();
-		await page.waitForTimeout(500);
-		const after = await layout(page);
-		if (before !== after) fail(where, `opening ${selector} moved the page`);
-		const off = await page.evaluate((sel) => {
-			const el = document.querySelector(sel);
-			if (!el) return "";
-			const r = el.getBoundingClientRect();
-			if (r.width === 0) return "";
-			return r.left < -1 || r.right > window.innerWidth + 1
-				? `${Math.round(r.left)} to ${Math.round(r.right)} in a ${window.innerWidth}px viewport`
-				: "";
-		}, panel);
-		if (off) fail(where, `${panel} opens off screen (${off})`);
-		await page.keyboard.press("Escape");
-		if (selector !== "#dl-button") {
-			// Escape doesn't close these; click again so the next check starts
-			// from the same page
-			if (await trigger.isVisible().catch(() => false)) await trigger.click();
-		}
-		await page.waitForTimeout(200);
-	}
-
-	for (const selector of THEMES) {
-		const button = page.locator(selector).first();
-		if (!(await button.isVisible().catch(() => false))) continue;
-		const theme = () =>
-			page.evaluate(() => {
-				const d = document.documentElement;
-				return (
-					d.dataset.theme ??
-					(matchMedia("(prefers-color-scheme: dark)").matches
-						? "dark"
-						: "light")
-				);
-			});
-		const first = await theme();
-		await button.click();
-		const second = await theme();
-		await button.click();
-		if (first === second) fail(where, `${selector} doesn't switch the theme`);
-		else if ((await theme()) !== first)
-			fail(where, `${selector} doesn't switch the theme back`);
-	}
-
-	await page.evaluate(() => {
-		document.documentElement.style.scrollBehavior = "auto";
-		window.scrollTo(0, document.documentElement.scrollHeight);
-	});
-	await page.waitForTimeout(500);
-	const bottom = await page.evaluate(() => {
-		const out: string[] = [];
-		const vh = window.innerHeight;
-		const home = [...document.querySelectorAll<HTMLAnchorElement>("a[href]")]
-			.filter((a) => new URL(a.href).pathname === "/")
-			.some((a) => {
-				const r = a.getBoundingClientRect();
-				if (r.width === 0 || r.bottom <= 0 || r.top >= vh) return false;
-				const hit = document.elementFromPoint(
-					r.left + r.width / 2,
-					r.top + r.height / 2,
-				);
-				return !!hit && (a === hit || a.contains(hit));
-			});
-		if (!home) out.push("no link home on screen at the bottom of the page");
-		const foot = document.querySelector("footer:last-of-type");
-		if (foot) {
-			let lowest = foot.getBoundingClientRect().bottom;
-			for (const el of foot.querySelectorAll("*")) {
-				const r = el.getBoundingClientRect();
-				if (r.height > 0) lowest = Math.max(lowest, r.bottom);
-			}
-			if (lowest > vh + 1) {
-				out.push(
-					`footer ends ${Math.round(lowest - vh)}px below the screen at the bottom`,
-				);
-			}
-		}
-		return out;
-	});
-	for (const b of bottom) fail(where, b);
+	for (const menu of Object.entries(MENUS)) await checkMenu(page, where, menu);
+	for (const selector of THEMES) await checkTheme(page, where, selector);
+	await checkBottom(page, where);
 };
 
 const run = async (name: string, type: BrowserType) => {

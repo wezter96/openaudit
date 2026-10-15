@@ -42,40 +42,56 @@ const frontMatter = (md: string): Record<string, string> => {
 	);
 };
 
-export const writeAgentFiles = async (options: {
+/** Where the files go and how they link back to the site. */
+interface Site {
 	readonly dist: string;
 	readonly repo: string;
 	/** Origin plus base path, without a trailing slash. */
 	readonly root: string;
 	/** The base path, "" at the root. */
 	readonly base: string;
-}): Promise<string[]> => {
-	const { dist, repo, root, base } = options;
-	const at = (path: string) => `${root}${path}`;
-	const write = async (path: string, body: string) => {
-		const file = join(dist, path);
+}
+
+interface Out extends Site {
+	/** The absolute URL of a site path. */
+	readonly at: (path: string) => string;
+	/** Writes a file at a site path under dist/. */
+	readonly write: (path: string, body: string) => Promise<void>;
+	readonly mcpUrl: string;
+}
+
+const outOf = (site: Site): Out => ({
+	...site,
+	at: (path) => `${site.root}${path}`,
+	write: async (path, body) => {
+		const file = join(site.dist, path);
 		await mkdir(dirname(file), { recursive: true });
 		await Bun.write(file, body);
-	};
-	const json = (v: unknown) => `${JSON.stringify(v, null, "\t")}\n`;
-	const mcpUrl = at("/mcp");
-	const cliVersion = SERVER_INFO.version;
-	const localServer = {
-		description:
-			"The full openaudit MCP server runs on your machine and runs audits: run_audit, get_report, get_finding, compare_reports and the playbook tools. Over stdio it needs no credentials.",
-		transport: "stdio",
-		command: "bunx @openaudit/cli mcp",
-		package: {
-			registryType: "npm",
-			identifier: "@openaudit/cli",
-			version: cliVersion,
-		},
-		documentation: at("/docs/agents/"),
-	};
+	},
+	mcpUrl: `${site.root}/mcp`,
+});
 
-	/* ---------------------------------------------------------- MCP card */
+const json = (v: unknown) => `${JSON.stringify(v, null, "\t")}\n`;
+const cliVersion = SERVER_INFO.version;
 
-	const card = {
+const localServer = ({ at }: Out) => ({
+	description:
+		"The full openaudit MCP server runs on your machine and runs audits: run_audit, get_report, get_finding, compare_reports and the playbook tools. Over stdio it needs no credentials.",
+	transport: "stdio",
+	command: "bunx @openaudit/cli mcp",
+	package: {
+		registryType: "npm",
+		identifier: "@openaudit/cli",
+		version: cliVersion,
+	},
+	documentation: at("/docs/agents/"),
+});
+
+/* ------------------------------------------------------------- MCP card */
+
+const mcpCard = (out: Out) => {
+	const { at, mcpUrl } = out;
+	return {
 		$schema:
 			"https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json",
 		name: "se.openaudit/catalogue",
@@ -105,8 +121,14 @@ export const writeAgentFiles = async (options: {
 		instructions: INSTRUCTIONS,
 		authentication: { required: false },
 		tools: TOOLS,
-		_meta: { "se.openaudit/local-server": localServer },
+		_meta: { "se.openaudit/local-server": localServer(out) },
 	};
+};
+
+type Card = ReturnType<typeof mcpCard>;
+
+const writeMcpFiles = async (out: Out, card: Card) => {
+	const { at, write, mcpUrl } = out;
 	await write("/.well-known/mcp/server-card.json", json(card));
 	await write("/.well-known/mcp/server-cards.json", json(card));
 	await write(
@@ -131,19 +153,23 @@ export const writeAgentFiles = async (options: {
 				security_policy: at("/.well-known/security.txt"),
 			},
 			documentation: at("/docs/agents/"),
-			local_server: localServer,
+			local_server: localServer(out),
 		}),
 	);
+};
 
-	/* ------------------------------------------------------------- skills */
+/* --------------------------------------------------------------- skills */
 
-	const skills: {
-		name: string;
-		type: "skill-md";
-		description: string;
-		url: string;
-		digest: string;
-	}[] = [];
+interface Skill {
+	readonly name: string;
+	readonly type: "skill-md";
+	readonly description: string;
+	readonly url: string;
+	readonly digest: string;
+}
+
+const writeSkills = async ({ repo, base, write }: Out): Promise<Skill[]> => {
+	const skills: Skill[] = [];
 	for (const name of SKILLS) {
 		const text = await Bun.file(join(repo, "skills", name, "SKILL.md")).text();
 		const meta = frontMatter(text);
@@ -168,9 +194,12 @@ export const writeAgentFiles = async (options: {
 			skills,
 		}),
 	);
+	return skills;
+};
 
-	/* -------------------------------------------------------- API catalog */
+/* ---------------------------------------------------------- API catalog */
 
+const writeApiCatalog = async ({ dist, at, write, mcpUrl }: Out) => {
 	const openapi = (await Bun.file(join(dist, "openapi.json")).json()) as {
 		servers: { url: string }[];
 	};
@@ -200,9 +229,15 @@ export const writeAgentFiles = async (options: {
 			],
 		}),
 	);
+};
 
-	/* --------------------------------------------------------- AI catalog */
+/* ----------------------------------------------------------- AI catalog */
 
+const writeAiCatalog = async (
+	{ base, at, write }: Out,
+	card: Card,
+	skills: ReadonlyArray<Skill>,
+) => {
 	const skillEntries = skills.map((s) => ({
 		identifier: `urn:air:openaudit.se:skill:${s.name}`,
 		displayName: `${s.name} agent skill`,
@@ -254,9 +289,11 @@ export const writeAgentFiles = async (options: {
 			],
 		}),
 	);
+};
 
-	/* ------------------------------------------------------------ auth.md */
+/* -------------------------------------------------------------- auth.md */
 
+const writeAuthMd = async ({ at, write, mcpUrl }: Out) => {
 	await write(
 		"/auth.md",
 		`# openaudit auth.md
@@ -290,6 +327,17 @@ None is accepted or stored. The site keeps no state between requests.
 - **Agentic auditors** (\`--agentic\`) use your own \`ANTHROPIC_API_KEY\` or Claude Code login, on your machine.
 `,
 	);
+};
+
+export const writeAgentFiles = async (options: Site): Promise<string[]> => {
+	const out = outOf(options);
+	const card = mcpCard(out);
+	await writeMcpFiles(out, card);
+	const skills = await writeSkills(out);
+	await writeApiCatalog(out);
+	await writeAiCatalog(out, card, skills);
+	await writeAuthMd(out);
+	const { base } = options;
 
 	// Paths these files link to on this site; /mcp is the Worker's own.
 	return [

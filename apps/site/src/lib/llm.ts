@@ -138,186 +138,206 @@ const subline = (
 	/\*\*One scored audit[^*]*\*\*\s*(.+)/.exec(readRepo("README.md"))?.[1] ?? ""
 ).trim();
 
+/** A docs page as a bullet linking to its HTML version. */
+const docBullet = (d: (typeof DOCS)[number]) =>
+	`- [${d.title}](${pageUrl(docPath(d.slug))}): ${d.description}`;
+
+function docsIndex(): string {
+	return join(
+		subline,
+		links(
+			introParagraphsIn("README.md").find((p) =>
+				p.startsWith("openaudit runs"),
+			) ?? "",
+			"README.md",
+		),
+		md("README.md", "Quick start"),
+		"## Install",
+		links(introParagraphsIn(CLI)[1] ?? "", CLI),
+		md("README.md", "How it works"),
+		"## Next",
+		[
+			...DOCS.slice(1).map(docBullet),
+			`- [Auditor catalogue](${pageUrl("/auditors/")})`,
+		].join("\n"),
+	);
+}
+
+const helpSection = ([name, text]: [string, string]) =>
+	`### \`${name === "openaudit" ? "openaudit --help" : `openaudit ${name} --help`}\`\n\n${fence(text)}`;
+
+function cliDocs(): string {
+	return join(
+		(introParagraphsIn(CLI)[1] ?? "").split(/(?<=\.)\s+/)[0],
+		links(
+			withoutSection(section(readRepo(CLI), "Usage"), "Configuration"),
+			CLI,
+		),
+		md(CLI, "Agent mode (`--json`)"),
+		"## Help output",
+		"Printed by the CLI itself, so it always matches the version the site was built with.",
+		...Object.entries(help as Record<string, string>).map(helpSection),
+	);
+}
+
+function configurationDocs(): string {
+	const [lede = "", trust = ""] = paragraphsIn("README.md", "Configuration");
+	const code = agentSettings.code;
+	return join(
+		links(lede, "README.md"),
+		links(trust, "README.md"),
+		"## The config file",
+		md(CLI, "Configuration", { body: true }),
+		"## Reference",
+		"Generated from `openaudit schema config`. Keys marked *trusted only* are ignored with a warning when the config is found inside the audited target; pass the file with `--config <path>` to use them.",
+		table(
+			["Key", "Type", "Default", "Notes"],
+			configRows.map((r) => [
+				`\`${r.key}\``,
+				`\`${r.type}\``,
+				r.def ? `\`${r.def}\`` : "none",
+				`${r.trusted ? "**Trusted only.** " : ""}${r.note}`,
+			]),
+		),
+		"## Per-auditor settings",
+		'Settings for the agentic auditors go in `options.settings`, under `"agent"` for all of them or under one auditor\'s id.',
+		code && fence(code.text, code.lang ?? ""),
+		links(agentSettings.text, agentSettings.file),
+		"## JSON Schema",
+		`Published at \`${configSchemaUrl}\` ([this site's copy](${pageUrl("/schema/config.json")})). \`openaudit init\` sets it as \`$schema\`, so editors complete keys, show these notes on hover and flag mistakes. Offline, \`openaudit schema config\` prints the same schema.`,
+	);
+}
+
+function ciDocs(): string {
+	return join(
+		links(paragraphsIn(INT, "Integrations")[0] ?? "", INT),
+		"## GitHub Action",
+		md("README.md", "In CI", { body: true }),
+		"### Inputs",
+		table(
+			["Input", "Default", "Description"],
+			action.inputs.map((i) => [
+				`\`${i.name}\``,
+				i.default ? `\`${i.default}\`` : "empty",
+				i.description,
+			]),
+		),
+		"### Outputs",
+		table(
+			["Output", "Description"],
+			action.outputs.map((o) => [`\`${o.name}\``, o.description]),
+		),
+		"## SARIF and code scanning",
+		md(CLI, "CI: GitHub code scanning", { body: true }),
+		md(INT, "Docker"),
+		md(INT, "GitLab CI"),
+		md(INT, "pre-commit"),
+	);
+}
+
+function agentsDocs(): string {
+	const lede = paragraphsIn("README.md", "With AI agents")[0] ?? "";
+	return join(
+		links(lede, "README.md"),
+		md("README.md", "With AI agents", { body: true }).replace(lede, ""),
+		md(CLI, "MCP server"),
+		md(AGENT, "Playbooks"),
+		md(AGENT, "Two ways to run agentic audits"),
+		md(AGENT, "Model, auth and cost"),
+		`What the agents send to the model, and the limits they run under, are on the [Safety](${pageUrl("/docs/safety/")}) page.`,
+	);
+}
+
+function apiDocs(): string {
+	return join(
+		apiInfo.description,
+		"## Run it",
+		API_RUN,
+		"## Endpoints",
+		`Paths are relative to \`${apiServer.url}\`. Generated from the router's OpenAPI document when the site is built.`,
+		table(
+			["Endpoint", "Description"],
+			apiOperations.map((o) => [
+				`\`${o.method} ${o.path}\``,
+				`${o.summary ? `**${o.summary}.** ` : ""}${o.description}`,
+			]),
+		),
+		"## OpenAPI",
+		`The OpenAPI 3.1 document is published at [/openapi.json](${pageUrl("/openapi.json")}) for discovery. A running server serves the same document at \`/api-reference/spec.json\` and an interactive reference at \`/api-reference\`.`,
+	);
+}
+
+/** A grade and its score range; the first band runs up to 100. */
+const gradeBullet = (b: (typeof scoring.bands)[number], i: number) => {
+	const upper = i === 0 ? 100 : (scoring.bands[i - 1]?.min ?? 100) - 1;
+	return `- **${b.grade}**: ${b.min === upper ? b.min : `${b.min}–${upper}`}`;
+};
+
+const severityBullet = (s: (typeof severities)[number]) =>
+	`- **${label(s.id)}**: ${s.text.charAt(0).toUpperCase()}${s.text.slice(1)}.`;
+
+function reportDocs(): string {
+	const lede = paragraphsIn("README.md", "The report")[0] ?? "";
+	return join(
+		links(lede, "README.md"),
+		md("README.md", "The report", { body: true }).replace(lede, ""),
+		`See one: [openaudit's audit of its own repository](${pageUrl("/report/")}), rebuilt on every push.`,
+		"## Scoring",
+		SCORING_INTRO,
+		table(
+			["Findings in one area", "Score", "Grade"],
+			scoring.examples.map((e) => [
+				plural(e.n, label(e.severity)),
+				String(e.score),
+				e.grade,
+			]),
+		),
+		"### Grades",
+		scoring.bands.map(gradeBullet).join("\n"),
+		"## Severity",
+		"Severity reflects real impact. Each level has its own colour and glyph in the report, so colour is never the only signal.",
+		severities.map(severityBullet).join("\n"),
+		md("README.md", "What it audits"),
+	);
+}
+
+function safetyDocs(): string {
+	return join(
+		links(paragraphsIn("README.md", "Safety")[0] ?? "", "README.md"),
+		md("README.md", "Safety", { body: true }).replace(
+			/^openaudit treats every target as hostile:\n/,
+			"",
+		),
+		md(AGENT, "What is sent to the model"),
+		md(AGENT, "Responsible use"),
+		"## Reporting a vulnerability",
+		links(
+			readRepo("SECURITY.md")
+				.replace(/^#[^\n]*\n/, "")
+				.trim(),
+			"SECURITY.md",
+		),
+	);
+}
+
+function contributingDocs(): string {
+	const source = readRepo("CONTRIBUTING.md");
+	return join(
+		links(introParagraphsIn("CONTRIBUTING.md").join("\n\n"), "CONTRIBUTING.md"),
+		links(source.slice(source.indexOf("\n## ")), "CONTRIBUTING.md"),
+	);
+}
+
 const docsBody: Record<string, () => string> = {
-	"": () =>
-		join(
-			subline,
-			links(
-				introParagraphsIn("README.md").find((p) =>
-					p.startsWith("openaudit runs"),
-				) ?? "",
-				"README.md",
-			),
-			md("README.md", "Quick start"),
-			"## Install",
-			links(introParagraphsIn(CLI)[1] ?? "", CLI),
-			md("README.md", "How it works"),
-			"## Next",
-			[
-				...DOCS.slice(1).map(
-					(d) =>
-						`- [${d.title}](${pageUrl(docPath(d.slug))}): ${d.description}`,
-				),
-				`- [Auditor catalogue](${pageUrl("/auditors/")})`,
-			].join("\n"),
-		),
-	cli: () =>
-		join(
-			(introParagraphsIn(CLI)[1] ?? "").split(/(?<=\.)\s+/)[0],
-			links(
-				withoutSection(section(readRepo(CLI), "Usage"), "Configuration"),
-				CLI,
-			),
-			md(CLI, "Agent mode (`--json`)"),
-			"## Help output",
-			"Printed by the CLI itself, so it always matches the version the site was built with.",
-			...Object.entries(help as Record<string, string>).map(
-				([name, text]) =>
-					`### \`${name === "openaudit" ? "openaudit --help" : `openaudit ${name} --help`}\`\n\n${fence(text)}`,
-			),
-		),
-	configuration: () => {
-		const [lede = "", trust = ""] = paragraphsIn("README.md", "Configuration");
-		const code = agentSettings.code;
-		return join(
-			links(lede, "README.md"),
-			links(trust, "README.md"),
-			"## The config file",
-			md(CLI, "Configuration", { body: true }),
-			"## Reference",
-			"Generated from `openaudit schema config`. Keys marked *trusted only* are ignored with a warning when the config is found inside the audited target; pass the file with `--config <path>` to use them.",
-			table(
-				["Key", "Type", "Default", "Notes"],
-				configRows.map((r) => [
-					`\`${r.key}\``,
-					`\`${r.type}\``,
-					r.def ? `\`${r.def}\`` : "none",
-					`${r.trusted ? "**Trusted only.** " : ""}${r.note}`,
-				]),
-			),
-			"## Per-auditor settings",
-			'Settings for the agentic auditors go in `options.settings`, under `"agent"` for all of them or under one auditor\'s id.',
-			code && fence(code.text, code.lang ?? ""),
-			links(agentSettings.text, agentSettings.file),
-			"## JSON Schema",
-			`Published at \`${configSchemaUrl}\` ([this site's copy](${pageUrl("/schema/config.json")})). \`openaudit init\` sets it as \`$schema\`, so editors complete keys, show these notes on hover and flag mistakes. Offline, \`openaudit schema config\` prints the same schema.`,
-		);
-	},
-	ci: () =>
-		join(
-			links(paragraphsIn(INT, "Integrations")[0] ?? "", INT),
-			"## GitHub Action",
-			md("README.md", "In CI", { body: true }),
-			"### Inputs",
-			table(
-				["Input", "Default", "Description"],
-				action.inputs.map((i) => [
-					`\`${i.name}\``,
-					i.default ? `\`${i.default}\`` : "empty",
-					i.description,
-				]),
-			),
-			"### Outputs",
-			table(
-				["Output", "Description"],
-				action.outputs.map((o) => [`\`${o.name}\``, o.description]),
-			),
-			"## SARIF and code scanning",
-			md(CLI, "CI: GitHub code scanning", { body: true }),
-			md(INT, "Docker"),
-			md(INT, "GitLab CI"),
-			md(INT, "pre-commit"),
-		),
-	agents: () => {
-		const lede = paragraphsIn("README.md", "With AI agents")[0] ?? "";
-		return join(
-			links(lede, "README.md"),
-			md("README.md", "With AI agents", { body: true }).replace(lede, ""),
-			md(CLI, "MCP server"),
-			md(AGENT, "Playbooks"),
-			md(AGENT, "Two ways to run agentic audits"),
-			md(AGENT, "Model, auth and cost"),
-			`What the agents send to the model, and the limits they run under, are on the [Safety](${pageUrl("/docs/safety/")}) page.`,
-		);
-	},
-	api: () =>
-		join(
-			apiInfo.description,
-			"## Run it",
-			API_RUN,
-			"## Endpoints",
-			`Paths are relative to \`${apiServer.url}\`. Generated from the router's OpenAPI document when the site is built.`,
-			table(
-				["Endpoint", "Description"],
-				apiOperations.map((o) => [
-					`\`${o.method} ${o.path}\``,
-					`${o.summary ? `**${o.summary}.** ` : ""}${o.description}`,
-				]),
-			),
-			"## OpenAPI",
-			`The OpenAPI 3.1 document is published at [/openapi.json](${pageUrl("/openapi.json")}) for discovery. A running server serves the same document at \`/api-reference/spec.json\` and an interactive reference at \`/api-reference\`.`,
-		),
-	report: () => {
-		const lede = paragraphsIn("README.md", "The report")[0] ?? "";
-		return join(
-			links(lede, "README.md"),
-			md("README.md", "The report", { body: true }).replace(lede, ""),
-			`See one: [openaudit's audit of its own repository](${pageUrl("/report/")}), rebuilt on every push.`,
-			"## Scoring",
-			SCORING_INTRO,
-			table(
-				["Findings in one area", "Score", "Grade"],
-				scoring.examples.map((e) => [
-					plural(e.n, label(e.severity)),
-					String(e.score),
-					e.grade,
-				]),
-			),
-			"### Grades",
-			scoring.bands
-				.map((b, i) => {
-					const upper = i === 0 ? 100 : (scoring.bands[i - 1]?.min ?? 100) - 1;
-					return `- **${b.grade}**: ${b.min === upper ? b.min : `${b.min}–${upper}`}`;
-				})
-				.join("\n"),
-			"## Severity",
-			"Severity reflects real impact. Each level has its own colour and glyph in the report, so colour is never the only signal.",
-			severities
-				.map(
-					(s) =>
-						`- **${label(s.id)}**: ${s.text.charAt(0).toUpperCase()}${s.text.slice(1)}.`,
-				)
-				.join("\n"),
-			md("README.md", "What it audits"),
-		);
-	},
-	safety: () =>
-		join(
-			links(paragraphsIn("README.md", "Safety")[0] ?? "", "README.md"),
-			md("README.md", "Safety", { body: true }).replace(
-				/^openaudit treats every target as hostile:\n/,
-				"",
-			),
-			md(AGENT, "What is sent to the model"),
-			md(AGENT, "Responsible use"),
-			"## Reporting a vulnerability",
-			links(
-				readRepo("SECURITY.md")
-					.replace(/^#[^\n]*\n/, "")
-					.trim(),
-				"SECURITY.md",
-			),
-		),
-	contributing: () => {
-		const source = readRepo("CONTRIBUTING.md");
-		return join(
-			links(
-				introParagraphsIn("CONTRIBUTING.md").join("\n\n"),
-				"CONTRIBUTING.md",
-			),
-			links(source.slice(source.indexOf("\n## ")), "CONTRIBUTING.md"),
-		);
-	},
+	"": docsIndex,
+	cli: cliDocs,
+	configuration: configurationDocs,
+	ci: ciDocs,
+	agents: agentsDocs,
+	api: apiDocs,
+	report: reportDocs,
+	safety: safetyDocs,
+	contributing: contributingDocs,
 };
 
 const docsPages = (): MarkdownPage[] =>
@@ -328,44 +348,44 @@ const docsPages = (): MarkdownPage[] =>
 		body: `# ${d.title}\n\n${docsBody[d.slug]?.() ?? ""}`,
 	}));
 
-const homePage = (): MarkdownPage => ({
-	path: "/",
-	title: `openaudit: ${PITCH}`,
-	description: readmeIntro.replace(/\*\*/g, ""),
-	body: join(
-		"# openaudit",
-		`**${PITCH}** ${subline}`,
-		links(readmeIntro, "README.md"),
-		introListIn("README.md")
-			.map((item) => `- ${links(item, "README.md")}`)
-			.join("\n"),
-		md("README.md", "Quick start"),
-		self.available &&
+function homePage(): MarkdownPage {
+	return {
+		path: "/",
+		title: `openaudit: ${PITCH}`,
+		description: readmeIntro.replace(/\*\*/g, ""),
+		body: join(
+			"# openaudit",
+			`**${PITCH}** ${subline}`,
+			links(readmeIntro, "README.md"),
+			introListIn("README.md")
+				.map((item) => `- ${links(item, "README.md")}`)
+				.join("\n"),
+			md("README.md", "Quick start"),
+			self.available &&
+				[
+					"## openaudit audits itself",
+					`Every push audits this repository. The latest audit scored **${self.score}/100, grade ${self.grade}**. Read the [live report](${pageUrl("/report/")}) or its [Markdown version](${pageUrl(markdownPath("/report/"))}).`,
+					table(
+						["Area", "Score", "Grade"],
+						(self.categories ?? []).map((c) => [
+							CATEGORY_LABEL[c.category] ?? c.category,
+							String(c.score),
+							c.grade,
+						]),
+					),
+				].join("\n\n"),
+			md("README.md", "What it audits"),
+			md("README.md", "What it checks, by target"),
+			md("README.md", "With AI agents"),
+			"## Documentation",
 			[
-				"## openaudit audits itself",
-				`Every push audits this repository. The latest audit scored **${self.score}/100, grade ${self.grade}**. Read the [live report](${pageUrl("/report/")}) or its [Markdown version](${pageUrl(markdownPath("/report/"))}).`,
-				table(
-					["Area", "Score", "Grade"],
-					(self.categories ?? []).map((c) => [
-						CATEGORY_LABEL[c.category] ?? c.category,
-						String(c.score),
-						c.grade,
-					]),
-				),
-			].join("\n\n"),
-		md("README.md", "What it audits"),
-		md("README.md", "What it checks, by target"),
-		md("README.md", "With AI agents"),
-		"## Documentation",
-		[
-			...DOCS.map(
-				(d) => `- [${d.title}](${pageUrl(docPath(d.slug))}): ${d.description}`,
-			),
-			`- [Auditor catalogue](${pageUrl("/auditors/")}): all ${counts.all} auditors.`,
-			`- [Source on GitHub](${REPO})`,
-		].join("\n"),
-	),
-});
+				...DOCS.map(docBullet),
+				`- [Auditor catalogue](${pageUrl("/auditors/")}): all ${counts.all} auditors.`,
+				`- [Source on GitHub](${REPO})`,
+			].join("\n"),
+		),
+	};
+}
 
 const developersPage = (): MarkdownPage => ({
 	path: "/developers/",
@@ -477,8 +497,8 @@ export const markdownPages = (): MarkdownPage[] => [
 
 const mdUrl = (path: string) => pageUrl(markdownPath(path));
 
-export const llmsTxt = (): string =>
-	join(
+export function llmsTxt(): string {
+	return join(
 		"# openaudit",
 		`> ${PITCH} ${subline}`,
 		links(readmeIntro, "README.md"),
@@ -528,6 +548,7 @@ export const llmsTxt = (): string =>
 			`- [Source on GitHub](${REPO})`,
 		].join("\n"),
 	);
+}
 
 /** The home page (the README pitch), every docs page and the catalogue. */
 export const llmsFullTxt = (): string => {
@@ -569,62 +590,68 @@ export const catalogueData = () => ({
 	})),
 });
 
-/** The docs split at their headings, for search: /data/docs.json. */
-export const docsData = () => {
-	const sections: {
-		page: string;
-		heading: string;
-		url: string;
-		text: string;
-	}[] = [];
-	for (const page of [...docsPages(), homePage()]) {
-		let heading = page.title;
-		let anchor = "";
-		let lines: string[] = [];
-		let fenced = false;
-		const flush = () => {
-			const text = lines.join("\n").trim();
-			if (text)
-				sections.push({
-					page: page.title,
-					heading,
-					url: `${pageUrl(page.path)}${anchor ? `#${anchor}` : ""}`,
-					text,
-				});
-			lines = [];
-		};
-		for (const line of page.body.split("\n")) {
-			if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
-			const m = fenced ? null : /^(#{1,3})\s+(.*)$/.exec(line);
-			if (m) {
-				flush();
-				heading = (m[2] ?? "").replace(/`/g, "");
-				// The home page's sections have ids of their own; link the page.
-				anchor =
-					(m[1] ?? "").length === 1 || page.path === "/"
-						? ""
-						: slugify(m[2] ?? "");
-				continue;
-			}
-			lines.push(line);
-		}
-		flush();
+/** A run of page lines under one heading (or the page title before any). */
+interface Chunk {
+	readonly heading: string;
+	readonly anchor: string;
+	readonly lines: string[];
+}
+
+const headingChunk = (page: MarkdownPage, m: RegExpExecArray): Chunk => ({
+	heading: (m[2] ?? "").replace(/`/g, ""),
+	// The home page's sections have ids of their own; link the page.
+	anchor:
+		(m[1] ?? "").length === 1 || page.path === "/" ? "" : slugify(m[2] ?? ""),
+	lines: [],
+});
+
+/** A page split at its headings down to ###, ignoring code fences. */
+const chunksOf = (page: MarkdownPage): Chunk[] => {
+	let current: Chunk = { heading: page.title, anchor: "", lines: [] };
+	const chunks = [current];
+	let fenced = false;
+	for (const line of page.body.split("\n")) {
+		if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+		const m = fenced ? null : /^(#{1,3})\s+(.*)$/.exec(line);
+		if (m) {
+			current = headingChunk(page, m);
+			chunks.push(current);
+		} else current.lines.push(line);
 	}
-	const install: Record<string, string> = {
-		cli: join(
-			md("README.md", "Quick start"),
-			links(introParagraphsIn(CLI)[1] ?? "", CLI),
-		),
-		mcp: links(
-			withoutSection(section(readRepo(CLI), "MCP server"), "MCP over HTTP"),
-			CLI,
-		),
-		"mcp-http": md(CLI, "MCP over HTTP"),
-		"github-action": md("README.md", "In CI"),
-		docker: md(INT, "Docker"),
-		"gitlab-ci": md(INT, "GitLab CI"),
-		"pre-commit": md(INT, "pre-commit"),
-		skill: `The openaudit agent skill teaches an agent the audit loop (baseline, triage, playbooks, fix, verify): ${pageUrl("/.well-known/agent-skills/openaudit/SKILL.md")}`,
-	};
-	return { version: version.cli, sections, install };
+	return chunks;
 };
+
+const pageSections = (page: MarkdownPage) =>
+	chunksOf(page)
+		.map((c) => ({
+			page: page.title,
+			heading: c.heading,
+			url: `${pageUrl(page.path)}${c.anchor ? `#${c.anchor}` : ""}`,
+			text: c.lines.join("\n").trim(),
+		}))
+		.filter((s) => s.text);
+
+/** Install instructions by method, for get_install_instructions. */
+const installData = (): Record<string, string> => ({
+	cli: join(
+		md("README.md", "Quick start"),
+		links(introParagraphsIn(CLI)[1] ?? "", CLI),
+	),
+	mcp: links(
+		withoutSection(section(readRepo(CLI), "MCP server"), "MCP over HTTP"),
+		CLI,
+	),
+	"mcp-http": md(CLI, "MCP over HTTP"),
+	"github-action": md("README.md", "In CI"),
+	docker: md(INT, "Docker"),
+	"gitlab-ci": md(INT, "GitLab CI"),
+	"pre-commit": md(INT, "pre-commit"),
+	skill: `The openaudit agent skill teaches an agent the audit loop (baseline, triage, playbooks, fix, verify): ${pageUrl("/.well-known/agent-skills/openaudit/SKILL.md")}`,
+});
+
+/** The docs split at their headings, for search: /data/docs.json. */
+export const docsData = () => ({
+	version: version.cli,
+	sections: [...docsPages(), homePage()].flatMap(pageSections),
+	install: installData(),
+});

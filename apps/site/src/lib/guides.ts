@@ -30,27 +30,18 @@ export interface Guide {
 const FILE_PREFIX = "apps/site/src/guides";
 const DIR = join(ROOT, FILE_PREFIX);
 
-const load = (name: string): Guide => {
-	const slug = name.replace(/\.md$/, "");
-	const text = readFileSync(join(DIR, name), "utf8");
-	const m = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(text);
-	if (!m) throw new Error(`guides/${name}: no front matter`);
-	const meta = parse(m[1] ?? "") as Partial<Record<string, unknown>>;
-	const field = (key: string) => {
-		const value = meta[key];
-		if (typeof value !== "string" || !value.trim())
-			throw new Error(`guides/${name}: missing ${key}`);
-		return value.trim();
-	};
-	const guide: Guide = {
-		slug,
-		title: field("title"),
-		heading: field("heading"),
-		description: field("description"),
-		order: typeof meta.order === "number" ? meta.order : 99,
-		body: (m[2] ?? "").trim(),
-		file: `${FILE_PREFIX}/${name}`,
-	};
+type FrontMatter = Partial<Record<string, unknown>>;
+
+/** A required front matter field, trimmed; `name` is the guide's file name. */
+const field = (meta: FrontMatter, key: string, name: string) => {
+	const value = meta[key];
+	if (typeof value !== "string" || !value.trim())
+		throw new Error(`guides/${name}: missing ${key}`);
+	return value.trim();
+};
+
+/** Throws on the first house rule the guide in file `name` breaks. */
+const checkGuide = (guide: Guide, text: string, name: string) => {
 	if (guide.title.length > 60)
 		throw new Error(`guides/${name}: title is over 60 characters`);
 	if (guide.description.length > 155)
@@ -61,6 +52,23 @@ const load = (name: string): Guide => {
 		throw new Error(
 			`guides/${name}: the H1 comes from "heading"; use ## in the body`,
 		);
+};
+
+const load = (name: string): Guide => {
+	const text = readFileSync(join(DIR, name), "utf8");
+	const m = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(text);
+	if (!m) throw new Error(`guides/${name}: no front matter`);
+	const meta = parse(m[1] ?? "") as FrontMatter;
+	const guide: Guide = {
+		slug: name.replace(/\.md$/, ""),
+		title: field(meta, "title", name),
+		heading: field(meta, "heading", name),
+		description: field(meta, "description", name),
+		order: typeof meta.order === "number" ? meta.order : 99,
+		body: (m[2] ?? "").trim(),
+		file: `${FILE_PREFIX}/${name}`,
+	};
+	checkGuide(guide, text, name);
 	return guide;
 };
 

@@ -147,29 +147,31 @@ const dial = (): string => {
 <text x="120" y="170" text-anchor="middle" font-family="JetBrains Mono" font-weight="500" font-size="11" fill="${C.ink}">${clamp(score)}<tspan fill="${C.graphite}" font-size="8.5">/100</tspan></text>`;
 };
 
+/** Greedy line filling: as many words a line as fit in `max` characters. */
+const fillLines = (words: ReadonlyArray<string>, max: number): string[] => {
+	const lines: string[] = [];
+	let line = "";
+	for (const word of words) {
+		const next = line ? `${line} ${word}` : word;
+		if (next.length > max && line) {
+			lines.push(line);
+			line = word;
+		} else line = next;
+	}
+	if (line) lines.push(line);
+	return lines;
+};
+
 /**
  * Wrap by an estimated advance width (Inter ExtraBold ≈ 0.55em), then
  * balance: the narrowest measure that needs no more lines than greedy did.
  */
 const wrap = (text: string, size: number, width: number): string[] => {
 	const words = text.split(/\s+/);
-	const fill = (max: number) => {
-		const lines: string[] = [];
-		let line = "";
-		for (const word of words) {
-			const next = line ? `${line} ${word}` : word;
-			if (next.length > max && line) {
-				lines.push(line);
-				line = word;
-			} else line = next;
-		}
-		if (line) lines.push(line);
-		return lines;
-	};
 	const max = Math.floor(width / (size * 0.55));
-	const greedy = fill(max);
+	const greedy = fillLines(words, max);
 	for (let m = Math.max(...words.map((w) => w.length)); m < max; m++) {
-		const lines = fill(m);
+		const lines = fillLines(words, m);
 		if (lines.length <= greedy.length) return lines;
 	}
 	return greedy;
