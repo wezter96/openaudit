@@ -91,10 +91,20 @@ const BLOCKED_HOST_SUFFIXES = [
 	".arpa",
 ];
 
+/** An IP address as written, possibly in brackets or with a zone id. */
+type AddressText = string;
+type Hostname = string;
+type UrlText = string;
+/** A CIDR range such as `10.0.0.0/8`. */
+type Cidr = string;
+/** An IPv4 address as an unsigned 32-bit integer. */
+type IPv4Int = number;
+type ByteCount = number;
+
 /* ---------------------------------- IPv4 ---------------------------------- */
 
 /** Strict dotted-quad parser. Returns the address as an unsigned 32-bit int. */
-export const parseIPv4 = (input: string): number | undefined => {
+export const parseIPv4 = (input: AddressText): IPv4Int | undefined => {
 	const parts = input.split(".");
 	if (parts.length !== 4) return undefined;
 	let n = 0;
@@ -107,7 +117,7 @@ export const parseIPv4 = (input: string): number | undefined => {
 	return n;
 };
 
-const v4 = (cidr: string): readonly [number, number] => {
+const v4 = (cidr: Cidr): readonly [IPv4Int, number] => {
 	const [base = "", bits = "32"] = cidr.split("/");
 	return [parseIPv4(base) ?? 0, Number(bits)];
 };
@@ -134,44 +144,53 @@ const PRIVATE_V4 = [
 	"240.0.0.0/4", // reserved + broadcast
 ].map(v4);
 
-const inV4 = (ip: number, [base, bits]: readonly [number, number]): boolean => {
+const inV4 = (
+	ip: IPv4Int,
+	[base, bits]: readonly [IPv4Int, number],
+): boolean => {
 	if (bits === 0) return true;
 	const size = 2 ** (32 - bits);
 	return Math.floor(ip / size) === Math.floor(base / size);
 };
 
-export const isPrivateIPv4 = (ip: number): boolean =>
+export const isPrivateIPv4 = (ip: IPv4Int): boolean =>
 	PRIVATE_V4.some((range) => inV4(ip, range));
 
 /* ---------------------------------- IPv6 ---------------------------------- */
 
-/** Parses any textual IPv6 form (incl. `::`, embedded IPv4, zone ids) to a 128-bit bigint. */
-export const parseIPv6 = (input: string): bigint | undefined => {
+/** Lowercased, without brackets or a zone id; undefined unless it has a colon. */
+const bareV6 = (input: AddressText): AddressText | undefined => {
 	let s = input.trim().toLowerCase();
 	if (s.startsWith("[") && s.endsWith("]")) s = s.slice(1, -1);
 	const zone = s.indexOf("%");
 	if (zone !== -1) s = s.slice(0, zone);
-	if (!s.includes(":")) return undefined;
+	return s.includes(":") ? s : undefined;
+};
 
-	// Embedded IPv4 in the last 32 bits, e.g. ::ffff:127.0.0.1
+/** Rewrites an embedded IPv4 tail, e.g. ::ffff:127.0.0.1, as two hex groups. */
+const withHexTail = (s: AddressText): AddressText | undefined => {
 	const lastColon = s.lastIndexOf(":");
 	const tail = s.slice(lastColon + 1);
-	if (tail.includes(".")) {
-		const ip4 = parseIPv4(tail);
-		if (ip4 === undefined) return undefined;
-		const hi = ((ip4 >>> 16) & 0xffff).toString(16);
-		const lo = (ip4 & 0xffff).toString(16);
-		s = `${s.slice(0, lastColon + 1)}${hi}:${lo}`;
-	}
+	if (!tail.includes(".")) return s;
+	const ip4 = parseIPv4(tail);
+	if (ip4 === undefined) return undefined;
+	const hi = ((ip4 >>> 16) & 0xffff).toString(16);
+	const lo = (ip4 & 0xffff).toString(16);
+	return `${s.slice(0, lastColon + 1)}${hi}:${lo}`;
+};
 
+/** The eight groups with `::` expanded, or undefined when there are not eight. */
+const v6Groups = (s: AddressText): string[] | undefined => {
 	const halves = s.split("::");
 	if (halves.length > 2) return undefined;
 	const head = halves[0] ? halves[0].split(":") : [];
-	const rest = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+	const rest = halves[1] ? halves[1].split(":") : [];
 	const missing = 8 - head.length - rest.length;
 	if (halves.length === 1 ? missing !== 0 : missing < 1) return undefined;
-	const groups = [...head, ...Array<string>(missing).fill("0"), ...rest];
+	return [...head, ...Array<string>(missing).fill("0"), ...rest];
+};
 
+const groupsToBigint = (groups: ReadonlyArray<string>): bigint | undefined => {
 	let n = 0n;
 	for (const g of groups) {
 		if (!/^[0-9a-f]{1,4}$/.test(g)) return undefined;
@@ -180,7 +199,17 @@ export const parseIPv6 = (input: string): bigint | undefined => {
 	return n;
 };
 
-const v6 = (cidr: string): readonly [bigint, number] => {
+/** Parses any textual IPv6 form (incl. `::`, embedded IPv4, zone ids) to a 128-bit bigint. */
+export const parseIPv6 = (input: AddressText): bigint | undefined => {
+	const bare = bareV6(input);
+	if (bare === undefined) return undefined;
+	const s = withHexTail(bare);
+	if (s === undefined) return undefined;
+	const groups = v6Groups(s);
+	return groups ? groupsToBigint(groups) : undefined;
+};
+
+const v6 = (cidr: Cidr): readonly [bigint, number] => {
 	const [base = "", bits = "128"] = cidr.split("/");
 	return [parseIPv6(base) ?? 0n, Number(bits)];
 };
@@ -221,7 +250,7 @@ export const isPrivateIPv6 = (ip: bigint): boolean => {
 };
 
 /** True for any address we must not connect to. Unparseable input counts as private. */
-export const isPrivateAddress = (address: string): boolean => {
+export const isPrivateAddress = (address: AddressText): boolean => {
 	const family = isIP(address.replace(/^\[|\]$/g, "").split("%")[0] ?? "");
 	if (family === 4) {
 		const ip = parseIPv4(address);
@@ -236,68 +265,79 @@ export const isPrivateAddress = (address: string): boolean => {
 
 /* --------------------------------- URLs ----------------------------------- */
 
-const defaultLookup = async (hostname: string) =>
+const defaultLookup = async (hostname: Hostname) =>
 	(await dnsLookup(hostname, { all: true, verbatim: true })).map(
 		(r) => r.address,
 	);
 
 /** Hostname without IPv6 brackets or a trailing dot, lowercased. */
-const normalizeHost = (hostname: string) =>
+const normalizeHost = (hostname: Hostname) =>
 	hostname
 		.toLowerCase()
 		.replace(/^\[|\]$/g, "")
 		.replace(/\.$/, "");
 
-/**
- * Syntactic checks only (no DNS): protocol, credentials, port, hostname shape.
- * Returns the parsed URL.
- */
-export const parsePublicUrl = (
-	input: string,
-	options: GuardOptions = {},
-): URL => {
-	let url: URL;
+const parseUrl = (input: UrlText): URL => {
 	try {
-		url = new URL(input);
+		return new URL(input);
 	} catch {
 		throw new SsrfError(
 			"invalid-url",
 			"Enter a full URL such as https://example.com",
 		);
 	}
-	if (url.protocol !== "http:" && url.protocol !== "https:")
+};
+
+const WEB_PROTOCOLS = new Set(["http:", "https:"]);
+
+const checkScheme = (url: URL): void => {
+	if (!WEB_PROTOCOLS.has(url.protocol))
 		throw new SsrfError("protocol", "Only http and https URLs can be audited");
 	if (url.username || url.password)
 		throw new SsrfError(
 			"credentials",
 			"URLs with embedded credentials are not accepted",
 		);
-	if (options.allowPrivate) return url;
+};
 
-	if (!ALLOWED_PORTS.has(url.port))
-		throw new SsrfError(
-			"port",
-			`Port ${url.port} is not allowed; use 80, 443, 8080 or 8443`,
-		);
+const isInternalHostname = (host: Hostname): boolean =>
+	host === "localhost" ||
+	!host.includes(".") ||
+	BLOCKED_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix));
 
-	const host = normalizeHost(url.hostname);
+const checkHost = (host: Hostname): void => {
 	if (isIP(host)) {
 		if (isPrivateAddress(host))
 			throw new SsrfError(
 				"private-address",
 				"Refusing to audit a private, loopback, link-local or reserved address",
 			);
-		return url;
+		return;
 	}
-	if (
-		host === "localhost" ||
-		!host.includes(".") ||
-		BLOCKED_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))
-	)
+	if (isInternalHostname(host))
 		throw new SsrfError(
 			"hostname",
 			`Refusing to audit internal hostname "${host}"`,
 		);
+};
+
+/**
+ * Syntactic checks only (no DNS): protocol, credentials, port, hostname shape.
+ * Returns the parsed URL.
+ */
+export const parsePublicUrl = (
+	input: UrlText,
+	options: GuardOptions = {},
+): URL => {
+	const url = parseUrl(input);
+	checkScheme(url);
+	if (options.allowPrivate) return url;
+	if (!ALLOWED_PORTS.has(url.port))
+		throw new SsrfError(
+			"port",
+			`Port ${url.port} is not allowed; use 80, 443, 8080 or 8443`,
+		);
+	checkHost(normalizeHost(url.hostname));
 	return url;
 };
 
@@ -311,7 +351,7 @@ const pickAddress = (addresses: ReadonlyArray<string>): string =>
  * the address to connect to is returned so the caller can pin it.
  */
 export const resolvePublicUrl = async (
-	input: string,
+	input: UrlText,
 	options: GuardOptions = {},
 ): Promise<ResolvedUrl> => {
 	const url = parsePublicUrl(input, options);
@@ -339,7 +379,7 @@ export const resolvePublicUrl = async (
 
 /** `resolvePublicUrl` for callers that only need the verdict. */
 export const assertPublicUrl = async (
-	input: string,
+	input: UrlText,
 	options: GuardOptions = {},
 ): Promise<URL> => (await resolvePublicUrl(input, options)).url;
 
@@ -358,9 +398,25 @@ export const DEFAULT_GUARDED_LIMITS: GuardedFetchLimits = {
 	maxResponseBytes: 5 * 1024 * 1024,
 };
 
+/** The first `size` bytes of `chunks`, joined. */
+const joinCapped = (
+	chunks: ReadonlyArray<Uint8Array>,
+	size: ByteCount,
+): Uint8Array => {
+	const buf = new Uint8Array(size);
+	let offset = 0;
+	for (const chunk of chunks) {
+		const part = chunk.subarray(0, buf.byteLength - offset);
+		buf.set(part, offset);
+		offset += part.byteLength;
+		if (offset >= buf.byteLength) break;
+	}
+	return buf;
+};
+
 const readLimited = async (
 	res: Response,
-	maxBytes: number,
+	maxBytes: ByteCount,
 ): Promise<{ body: string; bytes: number }> => {
 	if (!res.body) return { body: "", bytes: 0 };
 	const reader = res.body.getReader();
@@ -373,21 +429,14 @@ const readLimited = async (
 		bytes += value.byteLength;
 	}
 	await reader.cancel().catch(() => {});
-	const buf = new Uint8Array(Math.min(bytes, maxBytes));
-	let offset = 0;
-	for (const chunk of chunks) {
-		const part = chunk.subarray(0, buf.byteLength - offset);
-		buf.set(part, offset);
-		offset += part.byteLength;
-		if (offset >= buf.byteLength) break;
-	}
+	const buf = joinCapped(chunks, Math.min(bytes, maxBytes));
 	return { body: new TextDecoder().decode(buf), bytes };
 };
 
 const SENSITIVE_HEADERS = ["authorization", "cookie", "proxy-authorization"];
 
 /** The URL to dial: the validated literal IP in place of the hostname. */
-const pinnedUrl = (url: URL, address: string): string => {
+const pinnedUrl = (url: URL, address: AddressText): UrlText => {
 	const pinned = new URL(url);
 	pinned.hostname = address.includes(":") ? `[${address}]` : address;
 	return pinned.toString();
@@ -418,6 +467,112 @@ const pinnedInit = (
 	};
 };
 
+/** Guard options plus an injectable `fetch`. */
+type FetchGuard = GuardOptions & {
+	/** Injectable for tests. */
+	readonly fetch?: (url: string, init: RequestInit) => Promise<Response>;
+};
+
+/** What every hop of one guarded request shares. */
+interface GuardedRequest {
+	readonly guard: FetchGuard;
+	readonly doFetch: (url: string, init: RequestInit) => Promise<Response>;
+	readonly signal: AbortSignal;
+	readonly maxRedirects: number;
+}
+
+/** Request state that changes as redirects are followed. */
+interface GuardedHop {
+	readonly current: UrlText;
+	readonly method: string;
+	readonly body: string | undefined;
+	readonly headers: Record<string, string>;
+}
+
+/** Resolves, validates and pins one hop, then sends it. */
+const sendHop = async (hop: GuardedHop, req: GuardedRequest) => {
+	const { url, address } = await resolvePublicUrl(hop.current, req.guard);
+	const current = url.toString();
+	const res = await req.doFetch(
+		address === undefined ? current : pinnedUrl(url, address),
+		{
+			method: hop.method,
+			body: hop.body,
+			redirect: "manual",
+			signal: req.signal,
+			...(address === undefined
+				? { headers: hop.headers }
+				: pinnedInit(url, hop.headers)),
+		},
+	);
+	return { url, res };
+};
+
+/** Where a 3xx response points, unless the caller handles redirects. */
+const redirectTarget = (
+	res: Response,
+	init: HttpRequest,
+): string | undefined => {
+	const location = res.headers.get("location");
+	if (!location || init.redirect === "manual") return undefined;
+	return res.status >= 300 && res.status < 400 ? location : undefined;
+};
+
+/** Per the fetch spec, 301/302 after POST and every 303 become GET. */
+const becomesGet = (res: Response, hop: GuardedHop): boolean =>
+	res.status === 303 ||
+	(hop.method === "POST" && (res.status === 301 || res.status === 302));
+
+const withoutSensitive = (
+	headers: Record<string, string>,
+): Record<string, string> =>
+	Object.fromEntries(
+		Object.entries(headers).filter(
+			([k]) => !SENSITIVE_HEADERS.includes(k.toLowerCase()),
+		),
+	);
+
+/** The next hop, from `url`, which answered with a redirect to `location`. */
+const followHop = (
+	hop: GuardedHop,
+	res: Response,
+	location: string,
+	url: URL,
+): GuardedHop => {
+	const next = new URL(location, url.toString());
+	const get = becomesGet(res, hop);
+	return {
+		current: next.toString(),
+		headers:
+			next.origin === url.origin ? hop.headers : withoutSensitive(hop.headers),
+		method: get ? "GET" : hop.method,
+		body: get ? undefined : hop.body,
+	};
+};
+
+const followGuarded = async (
+	input: UrlText,
+	init: HttpRequest,
+	req: GuardedRequest,
+): Promise<{ res: Response; url: UrlText; redirected: boolean }> => {
+	let hop: GuardedHop = {
+		current: input,
+		method: init.method ?? "GET",
+		body: init.body,
+		headers: { "user-agent": USER_AGENT, ...init.headers },
+	};
+	for (let n = 0; ; n++) {
+		const { url, res } = await sendHop(hop, req);
+		const location = redirectTarget(res, init);
+		if (!location) return { res, url: url.toString(), redirected: n > 0 };
+		await res.body?.cancel().catch(() => {});
+		if (n >= req.maxRedirects)
+			throw new Error(`Too many redirects (>${req.maxRedirects})`);
+		// Resolved, validated and pinned at the top of the next iteration.
+		hop = followHop(hop, res, location, url);
+	}
+};
+
 /**
  * `fetch` that only ever connects to addresses the SSRF guard validated.
  * Each hop (the initial URL and every redirect) is resolved once, every
@@ -426,16 +581,12 @@ const pinnedInit = (
  * no effect. Redirects are followed manually for that reason.
  */
 export const guardedFetch = async (
-	input: string,
+	input: UrlText,
 	init: HttpRequest,
-	guard: GuardOptions & {
-		/** Injectable for tests. */
-		readonly fetch?: (url: string, init: RequestInit) => Promise<Response>;
-	},
+	guard: FetchGuard,
 	limits: GuardedFetchLimits,
 	signal?: AbortSignal,
 ): Promise<HttpResponse> => {
-	const doFetch = guard.fetch ?? fetch;
 	const controller = new AbortController();
 	signal?.addEventListener("abort", () => controller.abort());
 	const timer = setTimeout(
@@ -451,67 +602,26 @@ export const guardedFetch = async (
 	);
 	const started = performance.now();
 	try {
-		let current = input;
-		let method = init.method ?? "GET";
-		let body = init.body;
-		let headers: Record<string, string> = {
-			"user-agent": USER_AGENT,
-			...init.headers,
+		const final = await followGuarded(input, init, {
+			guard,
+			doFetch: guard.fetch ?? fetch,
+			signal: controller.signal,
+			maxRedirects: limits.maxRedirects,
+		});
+		const { res } = final;
+		const ttfbMs = performance.now() - started;
+		const read = await readLimited(res, maxBytes);
+		return {
+			url: final.url,
+			status: res.status,
+			headers: res.headers,
+			cookies: res.headers.getSetCookie(),
+			body: read.body,
+			bytes: read.bytes,
+			redirected: final.redirected,
+			ttfbMs,
+			totalMs: performance.now() - started,
 		};
-
-		for (let hop = 0; ; hop++) {
-			const { url, address } = await resolvePublicUrl(current, guard);
-			current = url.toString();
-			const res = await doFetch(
-				address === undefined ? current : pinnedUrl(url, address),
-				{
-					method,
-					body,
-					redirect: "manual",
-					signal: controller.signal,
-					...(address === undefined ? { headers } : pinnedInit(url, headers)),
-				},
-			);
-			const location = res.headers.get("location");
-			const isRedirect = res.status >= 300 && res.status < 400 && location;
-			if (isRedirect && init.redirect !== "manual") {
-				await res.body?.cancel().catch(() => {});
-				if (hop >= limits.maxRedirects)
-					throw new Error(`Too many redirects (>${limits.maxRedirects})`);
-				// Resolved, validated and pinned at the top of the next iteration.
-				const next = new URL(location, current);
-				if (next.origin !== url.origin) {
-					headers = Object.fromEntries(
-						Object.entries(headers).filter(
-							([k]) => !SENSITIVE_HEADERS.includes(k.toLowerCase()),
-						),
-					);
-				}
-				if (
-					res.status === 303 ||
-					((res.status === 301 || res.status === 302) && method === "POST")
-				) {
-					method = "GET";
-					body = undefined;
-				}
-				current = next.toString();
-				continue;
-			}
-
-			const ttfbMs = performance.now() - started;
-			const read = await readLimited(res, maxBytes);
-			return {
-				url: current,
-				status: res.status,
-				headers: res.headers,
-				cookies: res.headers.getSetCookie(),
-				body: read.body,
-				bytes: read.bytes,
-				redirected: hop > 0,
-				ttfbMs,
-				totalMs: performance.now() - started,
-			};
-		}
 	} finally {
 		clearTimeout(timer);
 	}
