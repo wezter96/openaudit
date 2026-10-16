@@ -126,6 +126,8 @@ const ROUTES = new Map<string, (visit: Visit) => Promise<Response>>([
 	["/mcp/server-card", serverCard],
 	["/.well-known/mcp", mcpManifest],
 	["/.well-known/mcp/", mcpManifest],
+	// Where some clients and scanners look for the same manifest.
+	["/.well-known/mcp.json", mcpManifest],
 ]);
 
 type AgentFile = ReturnType<typeof agentFile>;

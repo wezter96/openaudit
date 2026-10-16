@@ -27,9 +27,6 @@ export interface Guide {
 	readonly file: string;
 }
 
-const FILE_PREFIX = "apps/site/src/guides";
-const DIR = join(ROOT, FILE_PREFIX);
-
 type FrontMatter = Partial<Record<string, unknown>>;
 /** A guide's file name in src/guides/, such as `mcp-security.md`. */
 type FileName = string;
@@ -40,11 +37,16 @@ type FileText = string;
 /** The last part of a guide's URL. */
 type Slug = string;
 
-/** A required front matter field, trimmed; `name` is the guide's file name. */
-const field = (meta: FrontMatter, key: FieldName, name: FileName) => {
+/** A repository folder of Markdown pages, such as `apps/site/src/guides`. */
+type Folder = string;
+/** A page's repository path, such as `apps/site/src/guides/mcp-security.md`. */
+type FilePath = string;
+
+/** A required front matter field, trimmed. */
+const field = (meta: FrontMatter, key: FieldName, file: FilePath) => {
 	const value = meta[key];
 	if (typeof value !== "string" || !value.trim())
-		throw new Error(`guides/${name}: missing ${key}`);
+		throw new Error(`${file}: missing ${key}`);
 	return value.trim();
 };
 
@@ -73,33 +75,42 @@ const HOUSE_RULES: ReadonlyArray<HouseRule> = [
 	},
 ];
 
-/** Throws on the first house rule the guide in file `name` breaks. */
-const checkGuide = (guide: Guide, text: FileText, name: FileName) => {
+/** Throws on the first house rule the guide breaks. */
+const checkGuide = (guide: Guide, text: FileText) => {
 	const broken = HOUSE_RULES.find((rule) => rule.breaks(guide, text));
-	if (broken) throw new Error(`guides/${name}: ${broken.message}`);
+	if (broken) throw new Error(`${guide.file}: ${broken.message}`);
 };
 
-const load = (name: FileName): Guide => {
-	const text = readFileSync(join(DIR, name), "utf8");
+const load = (folder: Folder, name: FileName): Guide => {
+	const file = `${folder}/${name}`;
+	const text = readFileSync(join(ROOT, file), "utf8");
 	const m = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(text);
-	if (!m) throw new Error(`guides/${name}: no front matter`);
+	if (!m) throw new Error(`${file}: no front matter`);
 	const meta = parse(m[1] ?? "") as FrontMatter;
 	const guide: Guide = {
 		slug: name.replace(/\.md$/, ""),
-		title: field(meta, "title", name),
-		heading: field(meta, "heading", name),
-		description: field(meta, "description", name),
+		title: field(meta, "title", file),
+		heading: field(meta, "heading", file),
+		description: field(meta, "description", file),
 		order: typeof meta.order === "number" ? meta.order : 99,
 		body: (m[2] ?? "").trim(),
-		file: `${FILE_PREFIX}/${name}`,
+		file,
 	};
-	checkGuide(guide, text, name);
+	checkGuide(guide, text);
 	return guide;
 };
 
-export const guides: ReadonlyArray<Guide> = readdirSync(DIR)
-	.filter((f) => f.endsWith(".md"))
-	.map(load)
-	.sort((a, b) => a.order - b.order || a.slug.localeCompare(b.slug));
+/**
+ * Every Markdown page in a repository folder, checked against the house
+ * rules and sorted by `order`. The policy pages (src/lib/policies.ts) are
+ * written the same way.
+ */
+export const loadPages = (folder: Folder): ReadonlyArray<Guide> =>
+	readdirSync(join(ROOT, folder))
+		.filter((f) => f.endsWith(".md"))
+		.map((name) => load(folder, name))
+		.sort((a, b) => a.order - b.order || a.slug.localeCompare(b.slug));
+
+export const guides = loadPages("apps/site/src/guides");
 
 export const guidePath = (slug: Slug) => `/guides/${slug}/`;

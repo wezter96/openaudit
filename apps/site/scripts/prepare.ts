@@ -199,7 +199,7 @@ const openapi = await openApiDocument({
 		{
 			url: "http://localhost:3000/api-reference",
 			description:
-				"Self-hosted: your own apps/server (`bun run dev:server`, port 3000 unless PORT is set)",
+				"Self-hosted: your own apps/server, which is also your sandbox (`bun run dev:server`, port 3000 unless PORT is set; see https://openaudit.se/docs/sandbox/)",
 		},
 	],
 });

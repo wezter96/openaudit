@@ -32,6 +32,7 @@ const PAGES = [
 	"/docs/ci/",
 	"/docs/agents/",
 	"/docs/api/",
+	"/docs/sandbox/",
 	"/docs/report/",
 	"/docs/safety/",
 	"/docs/contributing/",
@@ -39,6 +40,7 @@ const PAGES = [
 	"/auditors/code.lockfiles/",
 	"/report/",
 	"/guides/mcp-security/",
+	"/privacy/",
 ];
 const WIDTHS = [
 	{ width: 375, height: 667 },

@@ -7,9 +7,10 @@ Nothing on the site is hand-copied from the rest of the repository. At build tim
 | Page | Built from |
 | --- | --- |
 | `/` | `README.md` (pitch, languages, targets), `integrations/README.md` and `apps/cli/README.md` (snippets), the auditor registry, `packages/core/src/scoring.ts`, and the self-audit's scores (hero dial and proof strip). The short landing copy lives in the components; `postbuild` fails above 1,700 words |
-| `/docs/*` | Sections of `README.md`, `apps/cli/README.md`, `packages/agent/README.md`, `integrations/README.md`, `CONTRIBUTING.md` and `SECURITY.md`; `action.yml` (Action inputs and outputs); `openaudit --help` and `openaudit schema config`; `scoring.ts` (scoring examples); the HTTP API's OpenAPI document (`/docs/api/`). Titles and descriptions are in `DOCS` (`src/lib/site.ts`) |
+| `/docs/*` | Sections of `README.md`, `apps/cli/README.md`, `packages/agent/README.md`, `integrations/README.md`, `CONTRIBUTING.md` and `SECURITY.md`; `action.yml` (Action inputs and outputs); `openaudit --help` and `openaudit schema config`; `scoring.ts` (scoring examples); the HTTP API's OpenAPI document (`/docs/api/`); `src/docs/sandbox.md` (`/docs/sandbox/`). Titles and descriptions are in `DOCS` (`src/lib/site.ts`) |
 | `/auditors/`, `/auditors/<id>/` | `allAuditors()` from `apps/cli/src/audit.ts` and the playbooks in `packages/agent` |
 | `/guides/<slug>/` | `src/guides/*.md`: short pages that each answer one search (MCP security, AI-generated code, OWASP LLM Top 10, open-source scanner). Front matter holds the title, H1 and description; `src/lib/guides.ts` fails the build on an over-long title or description, or a dash used as punctuation. Listed in the footer and `llms.txt` |
+| `/privacy/`, `/cookies/`, `/ai/` | `src/policies/*.md`: the privacy policy, cookie policy and AI transparency notice, with the guides' front matter and checks (`src/lib/policies.ts`). Listed in the footer's bottom row and `llms.txt`. Keep them true to what the Worker and badge service store |
 | `/report/` | The CLI's self-audit, re-rendered from its `openaudit-report.json` by core's `toHostedHtml`: a small `index.html` that loads its stylesheet and script as files and links the downloads (JSON, SARIF, Markdown, CSV and the self-contained `openaudit-report.html`) and the AI prompt next to it, so the page stays under the large HTML check |
 | `/architecture/`, `/architecture.html` | Retired; the Worker redirects them to `/auditors/` |
 | `/schema/config.json`, `/schema/report-v1.json` | `openaudit schema config` and `openaudit schema report`. `openaudit init` writes `https://openaudit.se/schema/config.json` into configs, so keep these paths |
@@ -17,7 +18,7 @@ Nothing on the site is hand-copied from the rest of the repository. At build tim
 | `/llms.txt`, `/llms-full.txt` | `src/lib/llm.ts`: the llmstxt.org index, and the README pitch, docs and auditor catalogue in one file |
 | `/data/catalogue.json`, `/data/docs.json` | The registry with playbooks, and the docs split at their headings with install snippets, for the remote MCP server and the WebMCP tools |
 | `/openapi.json` | The self-hosted HTTP API (`apps/server`), generated from its router by `packages/api/src/openapi.ts`. openaudit.se does not serve that API |
-| `/.well-known/*`, `/auth.md` | `scripts/agents.ts`: MCP server card (also `server-cards.json`) and the `/.well-known/mcp` manifest, the agent skills index with `skills/openaudit/SKILL.md`, the RFC 9727 API catalog, the AI catalog, and `auth.md` (no credentials needed anywhere) |
+| `/.well-known/*`, `/auth.md` | `scripts/agents.ts`: MCP server card (also `server-cards.json`) and the `/.well-known/mcp` manifest (also served at `/.well-known/mcp.json`), the agent skills index with `skills/openaudit/SKILL.md`, the RFC 9727 API catalog, the AI catalog, and `auth.md` (no credentials needed anywhere) |
 
 The example findings on the landing page use real rule ids, titles and severities from `packages/auditors`; their file locations are illustrative.
 

@@ -4,6 +4,7 @@ import Icon from "../components/Icon.astro";
 import Logo from "../components/Logo.astro";
 import { clamp } from "../lib/dial";
 import { guidePath, guides } from "../lib/guides";
+import { policies, policyPath } from "../lib/policies";
 import { AUTHOR, BLOB, markdownPath, NAV, OPENSVERIGE, ogName, pageUrl, REPO, self, u, unbase } from "../lib/site";
 
 interface Props {
@@ -128,6 +129,7 @@ const grade = self.grade ?? "";
 							<li><a href={u("/docs/cli/")}>CLI reference</a></li>
 							<li><a href={u("/docs/ci/")}>CI and integrations</a></li>
 							<li><a href={u("/docs/agents/")}>MCP and agents</a></li>
+							<li><a href={u("/docs/sandbox/")}>Sandbox</a></li>
 							<li><a href={u("/auditors/")}>Auditor catalogue</a></li>
 						</ul>
 					</div>
@@ -166,6 +168,17 @@ const grade = self.grade ?? "";
 						</ul>
 					</div>
 				</div>
+				<nav class="policies" aria-label="Policies">
+					<ul>
+						{
+							policies.map((p) => (
+								<li>
+									<a href={u(policyPath(p.slug))}>{p.heading}</a>
+								</li>
+							))
+						}
+					</ul>
+				</nav>
 			</div>
 		</footer>
 		<script>

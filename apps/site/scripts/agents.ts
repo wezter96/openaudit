@@ -153,6 +153,7 @@ const writeMcpFiles = async (out: Out, card: Card) => {
 				security_policy: at("/.well-known/security.txt"),
 			},
 			documentation: at("/docs/agents/"),
+			sandbox: at("/docs/sandbox/"),
 			local_server: localServer(out),
 		}),
 	);

@@ -1526,6 +1526,20 @@ pre .s {
 	font-size: 0.75rem;
 }
 
+.site-foot .policies ul {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.4rem 1.5rem;
+	margin-top: 2rem;
+	padding-top: 1rem;
+	border-top: 1px solid var(--hair);
+	font-size: 0.8125rem;
+}
+
+.site-foot .policies li + li {
+	margin-top: 0;
+}
+
 @media (max-width: 52rem) {
 	.site-foot .frame > div {
 		grid-template-columns: repeat(2, minmax(0, 1fr));

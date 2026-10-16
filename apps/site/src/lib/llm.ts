@@ -21,7 +21,9 @@ import {
 	configSchemaUrl,
 	label,
 	plural,
+	SANDBOX_FILE,
 	SCORING_INTRO,
+	sandbox,
 	severities,
 } from "./docs";
 import { guidePath, guides } from "./guides";
@@ -36,6 +38,7 @@ import {
 	slugify,
 	withoutSection,
 } from "./markdown";
+import { policies, policyPath } from "./policies";
 import {
 	type Auditor,
 	auditors,
@@ -119,6 +122,14 @@ const guidePages = (): MarkdownPage[] =>
 		title: g.title,
 		description: g.description,
 		body: join(`# ${g.heading}`, g.body),
+	}));
+
+const policyPages = (): MarkdownPage[] =>
+	policies.map((p) => ({
+		path: policyPath(p.slug),
+		title: p.title,
+		description: p.description,
+		body: join(`# ${p.heading}`, p.body),
 	}));
 
 export interface MarkdownPage {
@@ -267,6 +278,9 @@ function apiDocs(): string {
 	);
 }
 
+const sandboxDocs = (): string =>
+	join(links(sandbox.lede, SANDBOX_FILE), links(sandbox.body, SANDBOX_FILE));
+
 /** A grade and its score range; the first band runs up to 100. */
 const gradeBullet = (b: (typeof scoring.bands)[number], i: number) => {
 	const upper = i === 0 ? 100 : (scoring.bands[i - 1]?.min ?? 100) - 1;
@@ -335,6 +349,7 @@ const docsBody: Record<string, () => string> = {
 	ci: ciDocs,
 	agents: agentsDocs,
 	api: apiDocs,
+	sandbox: sandboxDocs,
 	report: reportDocs,
 	safety: safetyDocs,
 	contributing: contributingDocs,
@@ -491,6 +506,7 @@ export const markdownPages = (): MarkdownPage[] => [
 	cataloguePage(),
 	...auditors.map(auditorPage),
 	...guidePages(),
+	...policyPages(),
 ];
 
 /* ------------------------------------------------------------- llms.txt */
@@ -534,12 +550,20 @@ export function llmsTxt(): string {
 		"## For agents",
 		[
 			`- [MCP server card](${pageUrl("/.well-known/mcp/server-card.json")}): a read-only MCP server at ${pageUrl("/mcp")} with the auditor catalogue and docs. To run audits, use the local server: \`bunx @openaudit/cli mcp\`.`,
+			`- [Sandbox](${mdUrl("/docs/sandbox/")}): where to try the MCP endpoint, a local MCP server and the HTTP API without touching real data.`,
 			`- [Agent skill: openaudit](${pageUrl("/.well-known/agent-skills/openaudit/SKILL.md")}): how an agent installs and runs openaudit and fixes what it finds.`,
 			`- [Agent skills index](${pageUrl("/.well-known/agent-skills/index.json")})`,
 			`- [AI catalog](${pageUrl("/.well-known/ai-catalog.json")})`,
 			`- [API catalog](${pageUrl("/.well-known/api-catalog")})`,
 			`- [auth.md](${pageUrl("/auth.md")}): no credentials are needed for anything on this site.`,
 		].join("\n"),
+		"## Policies",
+		policies
+			.map(
+				(p) =>
+					`- [${p.heading}](${mdUrl(policyPath(p.slug))}): ${p.description}`,
+			)
+			.join("\n"),
 		"## Optional",
 		[
 			`- [llms-full.txt](${pageUrl("/llms-full.txt")}): the docs, the auditor catalogue and the README pitch, concatenated.`,
@@ -570,6 +594,7 @@ export const catalogueData = () => ({
 		{ path: "/auditors/", title: "Auditor catalogue" },
 		{ path: "/report/", title: "Live report" },
 		...guides.map((g) => ({ path: guidePath(g.slug), title: g.heading })),
+		...policies.map((p) => ({ path: policyPath(p.slug), title: p.heading })),
 	],
 	auditors: auditors.map((a) => ({
 		id: a.id,

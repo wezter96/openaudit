@@ -69,6 +69,12 @@ export const DOCS = [
 			"The self-hosted HTTP API in apps/server: URL audits and the auditor and playbook catalogue over REST, with its OpenAPI document.",
 	},
 	{
+		slug: "sandbox",
+		title: "Sandbox",
+		description:
+			"Where to try openaudit without touching real data: the public read-only MCP endpoint, your own local MCP server and HTTP API, and safe audit targets.",
+	},
+	{
 		slug: "report",
 		title: "Report and scoring",
 		description:

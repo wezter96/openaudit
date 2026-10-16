@@ -139,3 +139,12 @@ CORS_ORIGIN=http://localhost:3001 bun run dev:server   # http://localhost:3000
 \`CORS_ORIGIN\` is required: the browser origin allowed to call the API. \`PORT\` changes the port. Behind a reverse proxy, set \`TRUST_PROXY=true\` so rate limits see the client address. \`ALLOW_PRIVATE_TARGETS=true\` lets URL audits reach private and loopback addresses; enable it only to audit your own internal services.
 
 The API has no authentication. Anyone who can reach the server can use it, so keep it behind your own network controls if it should not be public. openaudit.se does not run this API.`;
+
+/* ---------------------------------------------------------------- sandbox */
+
+/** The sandbox page's source; its first paragraph is the lede. */
+export const SANDBOX_FILE = "apps/site/src/docs/sandbox.md";
+const [sandboxLede = "", ...sandboxRest] = readRepo(SANDBOX_FILE)
+	.trim()
+	.split("\n\n");
+export const sandbox = { lede: sandboxLede, body: sandboxRest.join("\n\n") };

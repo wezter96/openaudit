@@ -1,0 +1,9 @@
+---
+import Docs from "../../layouts/Docs.astro";
+import { SANDBOX_FILE, sandbox } from "../../lib/docs";
+import { inline, render } from "../../lib/markdown";
+---
+
+<Docs slug="sandbox" lede={inline(sandbox.lede)} sources={[SANDBOX_FILE]}>
+	<Fragment set:html={render(sandbox.body, SANDBOX_FILE)} />
+</Docs>

@@ -156,6 +156,9 @@ describe("agent files", () => {
 		const manifest = await get("/.well-known/mcp");
 		expect(await manifest.json()).toEqual({ mcp_version: "x" });
 		expect(manifest.headers.get("access-control-allow-origin")).toBe("*");
+		const alias = await get("/.well-known/mcp.json");
+		expect(alias.headers.get("content-type")).toBe("application/json");
+		expect(await alias.json()).toEqual({ mcp_version: "x" });
 		const card = await get("/mcp/server-card");
 		expect(card.headers.get("content-type")).toBe(
 			"application/mcp-server-card+json",
