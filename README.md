@@ -19,7 +19,7 @@
 
 </div>
 
-openaudit runs 37 built-in auditors and wraps 52 established open-source scanners, linters and type checkers when they're installed. Ten agent **playbooks** cover the judgment-heavy work no rule can do, such as authorisation review, keyboard and screen-reader journeys, and privacy data flows. Everything lands in one report with a 0–100 score and an A–F grade per area.
+openaudit runs 39 built-in auditors and wraps 53 established open-source scanners, linters and type checkers when they're installed. Ten agent **playbooks** cover the judgment-heavy work no rule can do, such as authorisation review, keyboard and screen-reader journeys, and privacy data flows. Everything lands in one report with a 0–100 score and an A–F grade per area.
 
 - **One issue, one finding.** When gitleaks, TruffleHog and the built-in secret scan all find the same key, you get one finding that says who confirmed it, scored once.
 - **A report people actually read.** A self-contained interactive HTML page with an overview, a tab per area and an OWASP Top 10 / CWE Top 25 view. It also comes as JSON, SARIF, Markdown and CSV.
@@ -85,15 +85,143 @@ Every language also gets secret scanning (built-in, gitleaks, TruffleHog), dupli
 
 ## What it checks, by target
 
-| Target | Built-in auditors | Wrapped tools (used when installed) |
-|---|---|---|
-| Codebase | secrets, static security (SAST), vulnerable dependencies (OSV.dev), lockfile integrity and install scripts, API specs (OpenAPI, GraphQL), privacy (tracking SDKs, PII in logs), accessibility, performance, quality, Code Health (a 1 to 10 maintainability score per file using CodeScene's rules: complex, long and nested functions, complex conditionals, duplication, with hotspots from git history), change coupling and knowledge risk from git history, language strictness, repo hygiene, dependency licence policy, AI-agent config (hidden instructions in AGENTS.md and Cursor/Copilot rules, unpinned or plaintext MCP servers, over-broad agent permissions) | **Secrets:** gitleaks, TruffleHog, git history\*. **SAST:** Semgrep, Bandit, gosec, Brakeman, mobsfscan. **Types and lint:** tsc, oxlint, Biome, ruff, staticcheck, PHPStan, PMD, ShellCheck, ESLint\*, clippy\*, mypy\*, golangci-lint\*. **APIs:** Spectral, oasdiff (breaking changes, in diff mode). **Dependencies:** osv-scanner, Trivy, npm/pnpm/bun audit, pip-audit, cargo-audit, govulncheck\*, Grype\*. **Supply chain:** OpenSSF Scorecard, GuardDog (malicious packages)\*, Syft licences\*. **Quality and licences:** jscpd, knip\*, ScanCode\*. **AI review:** deepsec\* |
-| URL | security headers, TLS, DNS and email (SPF, DMARC, CAA, MTA-STS, subdomain takeover), exposed APIs (OpenAPI, GraphQL introspection), SEO, accessibility, performance, reliability, exposed files, privacy and trackers | Lighthouse, pa11y, OWASP ZAP baseline\*, ZAP active scan\* (allow-listed hosts only), sslyze, testssl.sh\* |
-| Running web app (`--browser`) | axe-core in Chromium, console errors, failed and mixed-content requests, Core Web Vitals, trackers and cookies set before consent | |
-| Containers | Dockerfile, Compose, image (root user, age, size, secrets) | Trivy, hadolint, Dockle\* |
-| Infrastructure as code | GitHub Actions, Kubernetes, Terraform | zizmor, actionlint, kube-linter, kubeconform, TFLint, Checkov, KICS\*, Kubescape\* |
-| Mobile | Android manifest (incl. binary AXML in APKs), iOS Info.plist (incl. binary plists in IPAs), embedded secrets, bundled SDK versions checked against OSV, layout accessibility, size and performance | |
-| Cloud (`cloud:aws`, `azure`, `gcp`, `kubernetes`) | | Prowler\* |
+Wrapped tools run when they're installed.
+
+### Codebase
+
+- **Built in:**
+  accessibility,
+  AI-agent config (hidden instructions in AGENTS.md and Cursor/Copilot rules, unpinned or plaintext MCP servers, over-broad agent permissions),
+  API specs (OpenAPI, GraphQL),
+  change coupling and knowledge risk from git history,
+  Code Health (a 1 to 10 maintainability score per file using CodeScene's rules: complex, long and nested functions, complex conditionals, duplication, with hotspots from git history),
+  dependency licence policy,
+  language strictness,
+  lockfile integrity and install scripts,
+  performance,
+  privacy (tracking SDKs, PII in logs),
+  quality,
+  repo hygiene,
+  secrets,
+  static security (SAST),
+  vulnerable dependencies (OSV.dev)
+- **Wrapped tools:**
+  - **Secrets:**
+    git history\*,
+    gitleaks,
+    TruffleHog
+  - **SAST:**
+    Bandit,
+    Brakeman,
+    gosec,
+    mobsfscan,
+    Semgrep
+  - **Types and lint:**
+    Biome,
+    clippy\*,
+    ESLint\*,
+    golangci-lint\*,
+    mypy\*,
+    oxlint,
+    PHPStan,
+    PMD,
+    ruff,
+    ShellCheck,
+    staticcheck,
+    tsc
+  - **APIs:**
+    oasdiff (breaking changes, in diff mode),
+    Spectral
+  - **Dependencies:**
+    cargo-audit,
+    govulncheck\*,
+    Grype\*,
+    npm/pnpm/bun audit,
+    osv-scanner,
+    pip-audit,
+    Trivy
+  - **Supply chain:**
+    GuardDog (malicious packages)\*,
+    OpenSSF Scorecard,
+    Syft licences\*
+  - **Quality and licences:**
+    jscpd,
+    knip\*,
+    ScanCode\*
+  - **AI review:**
+    deepsec\*
+
+### URL
+
+- **Built in:**
+  accessibility,
+  DNS and email (SPF, DMARC, CAA, MTA-STS, subdomain takeover),
+  exposed APIs (OpenAPI, GraphQL introspection),
+  exposed files,
+  performance,
+  privacy and trackers,
+  reliability,
+  security headers,
+  SEO,
+  TLS
+- **Wrapped tools:**
+  Lighthouse,
+  OWASP ZAP baseline\*,
+  pa11y,
+  sslyze,
+  testssl.sh\*,
+  ZAP active scan\* (allow-listed hosts only)
+
+### Running web app (`--browser`)
+
+- **Built in:**
+  axe-core in Chromium,
+  console errors,
+  Core Web Vitals,
+  failed and mixed-content requests,
+  trackers and cookies set before consent
+
+### Containers
+
+- **Built in:**
+  Compose,
+  Dockerfile,
+  image (root user, age, size, secrets)
+- **Wrapped tools:**
+  Dockle\*,
+  hadolint,
+  Trivy
+
+### Infrastructure as code
+
+- **Built in:**
+  GitHub Actions,
+  Kubernetes,
+  Terraform
+- **Wrapped tools:**
+  actionlint,
+  Checkov,
+  KICS\*,
+  kube-linter,
+  kubeconform,
+  Kubescape\*,
+  TFLint,
+  zizmor
+
+### Mobile
+
+- **Built in:**
+  Android manifest (incl. binary AXML in APKs),
+  bundled SDK versions checked against OSV,
+  embedded secrets,
+  iOS Info.plist (incl. binary plists in IPAs),
+  layout accessibility,
+  size and performance
+
+### Cloud (`cloud:aws`, `azure`, `gcp`, `kubernetes`)
+
+- **Wrapped tools:**
+  Prowler\*
 
 \* Opt-in, because it's slow, noisy, sends more traffic to the target, spends tokens, or runs project code. Select it with `--only <id>`, e.g. `--only code.clippy` or `--only agent.deepsec`.
 
