@@ -18,7 +18,8 @@ Bun + TypeScript + **Effect 4** monorepo (Better-T-Stack). Scripts live in `pack
 - Wrapped tools must not run target code: no installs or builds, and run from a temp dir when a tool loads config or hooks from its cwd (pnpm's `.pnpmfile.cjs`, pa11y config, deepsec config). Pass hardening as CLI flags, because project config overrides env vars. Git calls on a target use `GIT_HARDENING_ENV` from core and compare commits, never the working tree. Anything slow, costly, traffic-heavy or code-executing is `defaultEnabled: false` (opt-in via `--only`). Shared helpers live in `packages/auditors/src/tool.ts`.
 - Targets are untrusted input: read files through `Workspace`, which confines reads to the root and skips symlinks. Send HTTP through `ctx.http`, which scopes user headers to the target origin and strips credentials on cross-origin redirects. URL auditors send only low-volume GET/HEAD requests.
 
-## Parallel branches
+## Commits and parallel branches
+- Commit subjects are the release notes (`apps/cli/scripts/release-notes.ts`, see RELEASING.md). Write `type(scope): what changed` for someone reading the release page, and put the why in the body. A breaking change gets `!` or a `BREAKING CHANGE:` footer. Preview the next release's notes with `bun apps/cli/scripts/release-notes.ts HEAD`.
 - Many branches run at once, and most conflicts are two of them adding a line at the same spot. In README.md's "What it checks, by target", keep one item per line, in alphabetical order, so two new tools land on different lines.
 - A new auditor or wrapped tool updates the counts in the README intro. `apps/cli/test/readme.test.ts` checks them against the registry, and checks that every wrapped tool is named and the lists stay sorted. Don't hard-code a total that features grow anywhere else; compare against the registry.
 
