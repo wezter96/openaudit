@@ -55,6 +55,9 @@ const isBelow = (dir: string, parent: string) =>
 	parent === "" || dir.startsWith(`${parent}/`);
 
 /** Directories of the given manifest files, outermost only. */
+const depth = (dir: string) =>
+	dir === "" || dir === "." ? 0 : dir.split("/").length;
+
 export const manifestDirs = (
 	files: ReadonlyArray<string>,
 	name: string,
@@ -63,7 +66,8 @@ export const manifestDirs = (
 	const dirs = files
 		.filter((f) => isManifest(f, name))
 		.map(dirOf)
-		.sort((a, b) => a.split("/").length - b.split("/").length);
+		// Root first, then by depth and name: the file walk's order is not stable across platforms.
+		.sort((a, b) => depth(a) - depth(b) || a.localeCompare(b));
 	const picked: string[] = [];
 	for (const d of dirs) {
 		// A Cargo workspace is linted from its root (`--workspace`); member crates

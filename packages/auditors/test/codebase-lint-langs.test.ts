@@ -609,3 +609,10 @@ describe("lint-langs auditors", () => {
 		);
 	});
 });
+
+test("manifestDirs lists the root module first, whatever the walk order", async () => {
+	const { manifestDirs } = await import("../src/codebase/lint-langs/shared");
+	expect(
+		manifestDirs(["svc/go.mod", "go.mod", "a/go.mod"], "go.mod", true),
+	).toEqual(["", "a", "svc"]);
+});
