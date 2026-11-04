@@ -10,7 +10,7 @@
 		"test": "bun test"
 	},
 	"dependencies": {
-		"effect": "4.0.3"
+		"effect": "4.1.2"
 	},
 	"devDependencies": {
 		"@openaudit/config": "workspace:*",
