@@ -154,7 +154,7 @@ jobs:
     # job is skipped and this runs right after the preview upload.
     needs: [deploy, report]
     if: always() && needs.deploy.outputs.url != '' && needs.report.result != 'failure'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # Playwright has no WebKit for ubuntu 26.04 yet
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
