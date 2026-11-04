@@ -40,6 +40,7 @@ const CliEnvironment = Layer.mergeAll(
 		Terminal.make({
 			columns: Effect.sync(() => process.stdout.columns ?? 100),
 			rows: Effect.sync(() => process.stdout.rows ?? 30),
+			size: Effect.die("terminal size events are not supported"),
 			readInput: Effect.die("interactive input is not supported"),
 			readLine: Effect.die("interactive input is not supported"),
 			display: (text) => Effect.sync(() => void process.stdout.write(text)),
