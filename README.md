@@ -246,7 +246,7 @@ Some audits need judgment rather than patterns. openaudit is built so agents can
 
 - **MCP server.** `claude mcp add openaudit -- bunx @openaudit/cli mcp` (or the equivalent `mcp.json` in Cursor or VS Code) gives an agent `run_audit`, `get_finding`, `compare_reports` and more, plus the playbook tools `list_playbooks`, `get_playbook` and `submit_findings`. Your agent does the review with its own tools, and its findings merge into the same scored report. No extra API key is needed.
 - **Headless agentic auditors.** `openaudit . --agentic` runs the playbooks through the Claude Agent SDK. The agent gets read-only tools, confined to the project and the target origin. It uses `ANTHROPIC_API_KEY` or an existing Claude Code login.
-- **AI triage.** `--ai` turns the findings into a prioritised fix plan. Only finding metadata is sent, never file contents.
+- **AI triage.** `--ai` turns the findings into a prioritised fix plan. Only finding metadata is sent, never file contents. It uses `ANTHROPIC_API_KEY`, else your Claude Code login, so a Claude subscription is enough.
 - **Agent mode CLI.** `--json` prints a single JSON report to stdout, and `openaudit schema` gives its JSON Schema.
 - **Skill.** [`skills/openaudit/SKILL.md`](skills/openaudit/SKILL.md) teaches an agent the loop: baseline, triage, playbooks, fix, then verify with `compare_reports`.
 - **Read-only reference over MCP.** `https://openaudit.se/mcp` answers questions about the auditors, playbooks, docs and config schema without installing anything. It cannot run audits; the local server above does.

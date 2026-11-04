@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type {
 	BetaMessage,
 	MessageCreateParamsNonStreaming,
@@ -11,8 +12,13 @@ import {
 	summarize,
 } from "@openaudit/core";
 import { Effect } from "effect";
-
-import { aiInsights, compactReport, type InsightsClient } from "../src";
+import {
+	aiInsights,
+	type ClaudeRunInput,
+	type ClaudeRunner,
+	compactReport,
+	type InsightsClient,
+} from "../src";
 
 const finding = (i: number, overrides: Partial<Finding> = {}): Finding => ({
 	ruleId: "code.secrets/aws-key",
@@ -197,11 +203,59 @@ describe("aiInsights", () => {
 				process.env.ANTHROPIC_AUTH_TOKEN = saved.token;
 		});
 
-		test("fails with a clear message", async () => {
-			const out = await outcome(aiInsights(reportOf([finding(0)])));
+		const runnerOf =
+			(...messages: unknown[]): ClaudeRunner =>
+			(input) => {
+				runs.push(input);
+				return (async function* () {
+					yield* messages as SDKMessage[];
+				})();
+			};
+		let runs: ClaudeRunInput[] = [];
+		beforeEach(() => {
+			runs = [];
+		});
+
+		test("falls back to the Claude Code login with no tools", async () => {
+			const runner = runnerOf({
+				type: "result",
+				subtype: "success",
+				structured_output: {
+					summary: "One leaked key.",
+					priorities: [
+						{
+							title: "Rotate",
+							why: "Leaked",
+							fix: "Rotate it",
+							fingerprints: ["fp0", "nope"],
+						},
+					],
+				},
+			});
+			const out = await outcome(aiInsights(reportOf([finding(0)]), { runner }));
+			expect(out.ok && out.value.summary).toBe("One leaked key.");
+			expect(out.ok && out.value.priorities[0]?.fingerprints).toEqual(["fp0"]);
+			expect(runs[0]?.options.tools).toEqual([]);
+			expect(runs[0]?.options.settingSources).toEqual([]);
+			expect(runs[0]?.options.strictMcpConfig).toBe(true);
+			const ask = runs[0]?.options.canUseTool;
+			const opts = {} as Parameters<NonNullable<typeof ask>>[2];
+			expect(await ask?.("Bash", {}, opts)).toMatchObject({ behavior: "deny" });
+			expect(await ask?.("StructuredOutput", {}, opts)).toMatchObject({
+				behavior: "allow",
+			});
+			expect(runs[0]?.prompt).not.toContain("AKIAREALSECRETVALUE1");
+		});
+
+		test("explains a missing login", async () => {
+			const runner = runnerOf(
+				{ type: "assistant", error: "authentication_failed" },
+				{ type: "result", subtype: "error_during_execution" },
+			);
+			const out = await outcome(aiInsights(reportOf([finding(0)]), { runner }));
 			expect(out).toMatchObject({ ok: false });
 			expect((out as { message: string }).message).toContain(
-				"ANTHROPIC_API_KEY",
+				"ANTHROPIC_API_KEY or log in with Claude Code",
 			);
 		});
 	});

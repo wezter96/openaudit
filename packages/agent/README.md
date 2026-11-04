@@ -6,7 +6,7 @@ It provides:
 
 - **Playbooks** (`playbooks`, `getPlaybook`, `renderPlaybook`): judgment-heavy audit procedures written as markdown for any capable coding agent.
 - **Agentic auditors** (`agenticAuditors`): one opt-in auditor per playbook that runs the playbook headlessly with the Claude Agent SDK.
-- **AI insights** (`aiInsights`): a summary and a prioritised fix list for a finished report, from the Claude Messages API.
+- **AI insights** (`aiInsights`): a summary and a prioritised fix list for a finished report, from the Claude Messages API, or without an API key from your Claude Code login.
 
 ## Playbooks
 
@@ -77,7 +77,7 @@ The openaudit MCP server serves these playbooks to the agent you already use (Cl
 
 - **Model.** The default is `claude-opus-5-5`. Override it with `options.model` (the CLI's model option) or `OPENAUDIT_MODEL`.
 - **Auth for agentic auditors.** These use `ANTHROPIC_API_KEY`, or an existing Claude Code login, through the Agent SDK. If the SDK cannot start or authenticate, the auditor is **skipped** with a hint; it does not fail the audit.
-- **Auth for AI insights.** These need `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`). Without one they fail with a clear error.
+- **Auth for AI insights.** In this order: `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`) uses the Messages API. Without one, they use your Claude Code login (a Pro or Max subscription) through the Agent SDK, with no tools and none of your settings, hooks or CLAUDE.md. Without either, they fail with a clear error. Codex is not used: `codex exec` always has a shell tool that can read any file, and finding text comes from the scanned target.
 - **Cost.** Agentic runs are real multi-turn agent sessions, and their cost grows with the size of the target and the turn limit. Use `maxTurns`, `maxBudgetUsd`, a smaller model, or select fewer auditors to bound spend. The log line for each run shows its turns and estimated cost.
 - **Fallback.** For models that support it, AI insights opt into server-side refusal fallback (`fallbacks: "default"`).
 

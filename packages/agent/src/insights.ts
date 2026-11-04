@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import type {
@@ -14,7 +15,13 @@ import {
 import { Effect } from "effect";
 import { z } from "zod";
 
-import { resolveModel, scrubSecrets } from "./auditors";
+import {
+	type ClaudeRunner,
+	defaultRunner,
+	resolveModel,
+	scrubSecrets,
+} from "./auditors";
+import { AUTH_HINT } from "./auditors/runner";
 
 /** Findings described individually; the rest are summarised per rule. */
 const MAX_DETAILED = 250;
@@ -54,6 +61,8 @@ export interface InsightsClient {
 export interface AiInsightsOptions {
 	readonly model?: string;
 	readonly client?: InsightsClient;
+	/** Used when no API key is set: the Agent SDK, with the Claude Code login. */
+	readonly runner?: ClaudeRunner;
 }
 
 const SYSTEM = `You are a principal application-security and quality engineer triaging the output of openaudit, an automated audit tool that combines deterministic scanners and AI reviewers across security, accessibility, performance, SEO, privacy, best practices and supply chain.
@@ -180,6 +189,83 @@ const hasApiAccess = (options: AiInsightsOptions): boolean =>
 			process.env.ANTHROPIC_AUTH_TOKEN,
 	);
 
+const userPrompt = (input: ReturnType<typeof compactReport>) =>
+	`Triage this openaudit report.\n\n<report>\n${JSON.stringify(input)}\n</report>`;
+
+/**
+ * No API key: one tool-less Agent SDK run, which uses the Claude Code login
+ * (subscription). Same prompt and schema as the Messages API path.
+ */
+const viaClaudeCode = (
+	runner: ClaudeRunner,
+	model: string,
+	input: ReturnType<typeof compactReport>,
+) =>
+	Effect.tryPromise({
+		try: async (signal) => {
+			const abortController = new AbortController();
+			signal.addEventListener("abort", () => abortController.abort());
+			let output: unknown;
+			let why: string | undefined;
+			const messages = runner({
+				prompt: userPrompt(input),
+				options: {
+					model,
+					systemPrompt: SYSTEM,
+					cwd: tmpdir(),
+					tools: [],
+					mcpServers: {},
+					strictMcpConfig: true,
+					// Finding text comes from the target: only the structured answer may run.
+					canUseTool: async (name) =>
+						name === "StructuredOutput"
+							? { behavior: "allow" }
+							: { behavior: "deny", message: "No tools here." },
+					// Isolation: ignore the user's CLAUDE.md, hooks, plugins and permission rules.
+					settingSources: [],
+					persistSession: false,
+					// The SDK answers through a StructuredOutput tool call, so allow a retry turn.
+					maxTurns: 3,
+					effort: "medium",
+					outputFormat: {
+						type: "json_schema",
+						schema: insightsSchema(),
+					},
+					abortController,
+				},
+				tools: {},
+			});
+			for await (const m of messages) {
+				if ((m.type === "assistant" || m.type === "auth_status") && m.error)
+					why = `Claude authentication failed (${m.error}). ${AUTH_HINT}`;
+				else if (m.type === "result") {
+					if (m.subtype === "success") output = m.structured_output;
+					else why ??= m.subtype;
+				}
+			}
+			if (output === undefined) throw new Error(why ?? "no result");
+			return output;
+		},
+		catch: (cause) =>
+			new AuditorError({
+				message: `AI insights via Claude Code failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+				cause,
+			}),
+	}).pipe(Effect.flatMap(parseInsights));
+
+const parseInsights = (output: unknown) =>
+	Effect.try({
+		try: () => InsightsOutput.parse(output),
+		catch: (cause) =>
+			new AuditorError({
+				message: "AI insights returned output that does not match the schema",
+				cause,
+			}),
+	});
+
+const insightsSchema = () =>
+	z.toJSONSchema(InsightsOutput, { target: "draft-7" });
+
 const requestParams = (
 	model: string,
 	input: ReturnType<typeof compactReport>,
@@ -190,7 +276,7 @@ const requestParams = (
 	messages: [
 		{
 			role: "user",
-			content: `Triage this openaudit report.\n\n<report>\n${JSON.stringify(input)}\n</report>`,
+			content: userPrompt(input),
 		},
 	],
 	output_config: {
@@ -246,7 +332,7 @@ const knownPriorities = (
 
 /**
  * Summarises and prioritises a report with Claude (Messages API, structured
- * output). Sends finding metadata only — never evidence or file contents.
+ * output). Without an API key it uses the Claude Code login (Agent SDK, no tools). Sends finding metadata only — never evidence or file contents.
  */
 export const aiInsights = (
 	report: Report,
@@ -263,11 +349,18 @@ export const aiInsights = (
 				priorities: [],
 			};
 
-		if (!hasApiAccess(options))
-			return yield* new AuditorError({
-				message:
-					"AI insights need an Anthropic API key. Set ANTHROPIC_API_KEY (https://platform.claude.com/settings/keys).",
-			});
+		if (!hasApiAccess(options)) {
+			const parsed = yield* viaClaudeCode(
+				options.runner ?? defaultRunner,
+				model,
+				input,
+			);
+			return {
+				model,
+				summary: parsed.summary,
+				priorities: knownPriorities(report, parsed.priorities),
+			};
+		}
 
 		const client = options.client ?? defaultClient();
 		const params = requestParams(model, input);

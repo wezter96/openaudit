@@ -31,7 +31,7 @@ openaudit [target] [flags]          # same as: openaudit audit [target]
 | `--browser`, `--max-pages <n>` | Drive a real Chromium through Playwright for URL targets (needs `playwright-core` and a Chromium). |
 | `-H, --header "Name: value"` | Extra header for the target origin only, e.g. an auth cookie for staging. Repeatable. |
 | `--agentic`, `--model <id>` | Run the LLM-driven auditors. Needs `ANTHROPIC_API_KEY` or Claude Code auth. |
-| `--ai` | Attach an AI-prioritised summary to the report. If this fails, openaudit prints a warning and continues. |
+| `--ai` | Attach an AI-prioritised summary to the report. Uses `ANTHROPIC_API_KEY`, else your Claude Code login. If both fail, openaudit prints a warning and continues. |
 | `--config <path>`, `--no-config` | Use a trusted config file, or ignore the target's `openaudit.config.json(c)`. |
 | `--concurrency <n>`, `-q/--quiet`, `--verbose` | |
 

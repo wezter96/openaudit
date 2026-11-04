@@ -9,12 +9,17 @@ import { parseConfig } from "../src/config";
 
 const BIN = join(import.meta.dir, "..", "src", "bin.ts");
 
+// --ai without an API key falls back to the Claude Code login; keep it out of tests.
+const NO_AI_LOGIN = {
+	CLAUDE_CONFIG_DIR: join(tmpdir(), "openaudit-test-no-claude"),
+};
+
 const cli = async (args: string[], cwd: string) => {
 	const proc = Bun.spawn(["bun", BIN, ...args], {
 		cwd,
 		stdout: "pipe",
 		stderr: "pipe",
-		env: { ...process.env, NO_COLOR: "1" },
+		env: { ...process.env, ...NO_AI_LOGIN, NO_COLOR: "1" },
 	});
 	const [stdout, stderr, code] = await Promise.all([
 		new Response(proc.stdout).text(),
