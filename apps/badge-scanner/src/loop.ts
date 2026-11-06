@@ -31,13 +31,17 @@ const quickTick = async (deps: LoopDeps): Promise<boolean> => {
 	return true;
 };
 
-/**
- * Claims one job, runs it and reports it: a quick audit first, since someone
- * is waiting for it, else a badge scan. Returns whether there was a job, so
- * the loop knows to ask again right away.
- */
-export const tick = async (deps: LoopDeps): Promise<boolean> => {
-	if (await quickTick(deps)) return true;
+/** Quick audits in a row before a due badge scan goes first. */
+export const QUICK_STREAK = 3;
+
+/** What the loop carries between ticks. */
+export interface LoopState {
+	/** Quick audits run since the last badge scan or idle tick. */
+	quickStreak: number;
+}
+
+/** Runs one due badge scan, if there is one. */
+const badgeTick = async (deps: LoopDeps): Promise<boolean> => {
 	const job = await deps.client.claim();
 	if (!job) return false;
 	const log = deps.log ?? console.log;
@@ -50,13 +54,40 @@ export const tick = async (deps: LoopDeps): Promise<boolean> => {
 	return true;
 };
 
+/**
+ * Claims one job, runs it and reports it. Quick audits go first, since
+ * someone is waiting for one, but after QUICK_STREAK in a row a due badge
+ * scan does, so anonymous audits can't starve the badges. Returns whether
+ * there was a job, so the loop knows to ask again right away.
+ */
+export const tick = async (
+	deps: LoopDeps,
+	state: LoopState = { quickStreak: 0 },
+): Promise<boolean> => {
+	if (state.quickStreak < QUICK_STREAK && (await quickTick(deps))) {
+		state.quickStreak++;
+		return true;
+	}
+	state.quickStreak = 0;
+	if (await badgeTick(deps)) return true;
+	if (await quickTick(deps)) {
+		state.quickStreak = 1;
+		return true;
+	}
+	return false;
+};
+
 /** What to wait before the next tick, and the new count of failures in a row. */
 const afterTick = async (
 	deps: LoopDeps,
+	state: LoopState,
 	failures: number,
 ): Promise<{ delay: number; failures: number }> => {
 	try {
-		return { delay: (await tick(deps)) ? 0 : IDLE_DELAY_MS, failures: 0 };
+		return {
+			delay: (await tick(deps, state)) ? 0 : IDLE_DELAY_MS,
+			failures: 0,
+		};
 	} catch (cause) {
 		const log = deps.log ?? console.error;
 		log(`scanner API error: ${publicError(cause, deps.secrets ?? [])}`);
@@ -70,9 +101,10 @@ export const runLoop = async (
 	signal?: AbortSignal,
 ): Promise<void> => {
 	const sleep = deps.sleep ?? Bun.sleep;
+	const state: LoopState = { quickStreak: 0 };
 	let failures = 0;
 	while (!signal?.aborted) {
-		const next = await afterTick(deps, failures);
+		const next = await afterTick(deps, state, failures);
 		failures = next.failures;
 		if (next.delay > 0 && !signal?.aborted) await sleep(next.delay);
 	}

@@ -7,6 +7,7 @@ import {
 	backoffMs,
 	IDLE_DELAY_MS,
 	type LoopDeps,
+	QUICK_STREAK,
 	runLoop,
 	tick,
 } from "../src/loop";
@@ -102,6 +103,25 @@ describe("quick audits", () => {
 		expect(quickReports[0]?.[1].status).toBe("ok");
 		expect(await tick(deps)).toBe(true);
 		expect(reports).toHaveLength(1);
+	});
+
+	test("let a due badge scan go after a streak of quick audits", async () => {
+		const quick = Array.from({ length: QUICK_STREAK + 1 }, (_, n) => ({
+			id: `quick-${n}`,
+			site: "https://example.com/",
+		}));
+		const { client, reports, quickReports } = fakeClient([JOB], quick);
+		const deps = {
+			...loopDeps(client),
+			resolve: async () => ["93.184.215.14"],
+		};
+		const state = { quickStreak: 0 };
+		for (let n = 0; n < QUICK_STREAK; n++) await tick(deps, state);
+		expect(quickReports).toHaveLength(QUICK_STREAK);
+		await tick(deps, state);
+		expect(reports).toHaveLength(1);
+		await tick(deps, state);
+		expect(quickReports).toHaveLength(QUICK_STREAK + 1);
 	});
 
 	test("refuse a site that resolves to a private address", async () => {

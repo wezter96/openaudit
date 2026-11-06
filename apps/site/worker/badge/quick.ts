@@ -28,8 +28,8 @@ import { DAY } from "./store";
 
 /** Audits one address may start in a day. */
 export const QUICK_PER_IP = 5;
-/** Audits everyone together may start in a day. */
-export const QUICK_PER_DAY = 300;
+/** Audits everyone together may start in a day; at the 5-minute timeout, at most half the scanner's day. */
+export const QUICK_PER_DAY = 150;
 /** Audits waiting at once; more are refused until the queue drains. */
 export const QUICK_QUEUE = 20;
 /** How long the scanner may hold a quick audit. */
