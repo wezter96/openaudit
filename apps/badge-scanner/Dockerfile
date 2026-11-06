@@ -24,7 +24,7 @@ USER 1000
 # --------------------------------------------------------------------------
 # Stage 2: openaudit with its scanners, running the bundled loop.
 # checkov:skip=CKV_DOCKER_7:the scanner follows the openaudit release it ships with
-FROM ghcr.io/wezter96/openaudit:0.3.1@sha256:9307f70c10d7c180f9e5db0cdf7f32dd5a52c84b96d28d213da2da057043cb0d
+FROM ghcr.io/wezter96/openaudit:0.5.0@sha256:349c6e0e3a649cb51cc2d3719229d6510ddda7e62be50afbecfbd920193dbce9
 COPY --from=build /out/scanner.js /opt/scanner/scanner.js
 WORKDIR /tmp
 USER 1000
