@@ -66,7 +66,7 @@ function SeverityFilter({
 }) {
 	return (
 		<fieldset>
-			<legend className="mb-1.5 font-medium text-sm">Severity</legend>
+			<legend className="mb-1.5 text-sm font-medium">Severity</legend>
 			<div className="flex flex-wrap gap-x-3 gap-y-1">
 				{SEVERITY_ORDER.filter((s) => counts.has(s)).map((s) => (
 					<label
@@ -108,7 +108,7 @@ function SelectFilter({
 }) {
 	return (
 		<div>
-			<label htmlFor={id} className="mb-1.5 block font-medium text-sm">
+			<label htmlFor={id} className="mb-1.5 block text-sm font-medium">
 				{label}
 			</label>
 			<select
@@ -139,7 +139,7 @@ function SearchFilter({
 }) {
 	return (
 		<div>
-			<label htmlFor={id} className="mb-1.5 block font-medium text-sm">
+			<label htmlFor={id} className="mb-1.5 block text-sm font-medium">
 				Search
 			</label>
 			<Input
@@ -162,12 +162,12 @@ function FindingRows({
 	limit: number;
 }) {
 	return filtered.length === 0 ? (
-		<p className="border border-rule border-dashed px-4 py-6 text-ink-soft">
+		<p className="border border-dashed border-rule px-4 py-6 text-ink-soft">
 			No findings match these filters. Clear the search or select more
 			severities.
 		</p>
 	) : (
-		<ul className="divide-y divide-rule border-rule border-y">
+		<ul className="divide-y divide-rule border-y border-rule">
 			{filtered.slice(0, limit).map((f) => (
 				<FindingItem key={`${f.auditor}:${f.fingerprint}`} finding={f} />
 			))}
@@ -299,7 +299,7 @@ export function FindingsList({
 
 	if (findings.length === 0)
 		return (
-			<p className="border border-rule border-dashed px-4 py-6 text-ink-soft">
+			<p className="border border-dashed border-rule px-4 py-6 text-ink-soft">
 				No findings. Every auditor that ran came back clean.
 			</p>
 		);
@@ -313,7 +313,7 @@ export function FindingsList({
 				filters={filters}
 			/>
 
-			<p aria-live="polite" className="mt-4 mb-2 text-ink-soft text-sm">
+			<p aria-live="polite" className="mt-4 mb-2 text-sm text-ink-soft">
 				Showing {Math.min(limit, filtered.length)} of {filtered.length}
 				{filtered.length !== findings.length && ` (${findings.length} total)`}{" "}
 				findings
@@ -382,13 +382,13 @@ function OptionalFact({
 function FindingFacts({ finding: f }: { finding: Finding }) {
 	const selector = f.location?.selector;
 	return (
-		<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-ink-soft text-xs">
+		<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-xs text-ink-soft">
 			<dt>Rule</dt>
-			<dd className="break-all font-mono">{f.ruleId}</dd>
+			<dd className="font-mono break-all">{f.ruleId}</dd>
 			<dt>Auditor</dt>
 			<dd className="font-mono">{f.auditor}</dd>
 			{selector && (
-				<OptionalFact term="Selector" className="break-all font-mono">
+				<OptionalFact term="Selector" className="font-mono break-all">
 					{selector}
 				</OptionalFact>
 			)}
@@ -420,7 +420,7 @@ function FindingItem({ finding: f }: { finding: Finding }) {
 					</span>
 					<span className="min-w-0 flex-1">
 						<span className="block font-medium">{f.title}</span>
-						<span className="block truncate text-ink-soft text-sm">
+						<span className="block truncate text-sm text-ink-soft">
 							{CATEGORY_LABEL[f.category]}
 							{where ? <> in {where}</> : null}
 						</span>

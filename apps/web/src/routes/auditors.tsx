@@ -59,7 +59,7 @@ function EngineBadge({
 	return (
 		<span
 			className={cn(
-				"inline-flex items-center border px-1.5 py-0.5 font-medium text-xs",
+				"inline-flex items-center border px-1.5 py-0.5 text-xs font-medium",
 				ENGINE_BADGE[engine],
 			)}
 		>
@@ -105,10 +105,10 @@ function CatalogError({ message }: { message: string }) {
 	return (
 		<div
 			role="alert"
-			className="mt-10 border-sev-critical border-l-4 bg-surface p-4"
+			className="mt-10 border-l-4 border-sev-critical bg-surface p-4"
 		>
 			<p className="font-semibold">The auditor catalog could not be loaded</p>
-			<p className="mt-1 text-ink-soft text-sm">
+			<p className="mt-1 text-sm text-ink-soft">
 				The API server did not respond ({message}). Run{" "}
 				<code className="font-mono">bunx @openaudit/cli list</code> to see the
 				same catalog locally.
@@ -136,7 +136,7 @@ function FilterBar({
 			className="mt-10 flex flex-col gap-4 border border-rule bg-surface p-4 md:flex-row md:items-end"
 		>
 			<fieldset>
-				<legend className="mb-1.5 font-medium text-sm">Engine</legend>
+				<legend className="mb-1.5 text-sm font-medium">Engine</legend>
 				<div className="flex flex-wrap gap-x-4 gap-y-1">
 					{(["all", "builtin", "external", "agentic"] as const).map((e) => (
 						<label key={e} className="inline-flex items-center gap-1.5 text-sm">
@@ -154,7 +154,7 @@ function FilterBar({
 				</div>
 			</fieldset>
 			<div className="md:ml-auto md:w-80">
-				<label htmlFor={`${id}-q`} className="mb-1.5 block font-medium text-sm">
+				<label htmlFor={`${id}-q`} className="mb-1.5 block text-sm font-medium">
 					Search
 				</label>
 				<Input
@@ -210,11 +210,11 @@ function AuditorItem({ auditor: a }: { auditor: AuditorInfo }) {
 		<li className="grid gap-x-8 gap-y-1 py-4 md:grid-cols-[18rem_1fr]">
 			<div>
 				<h3 className="font-semibold">{a.title}</h3>
-				<p className="font-mono text-ink-soft text-xs">{a.id}</p>
+				<p className="font-mono text-xs text-ink-soft">{a.id}</p>
 			</div>
 			<div>
 				<p className="max-w-[72ch] text-sm">{a.description}</p>
-				<p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-ink-soft text-xs">
+				<p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-soft">
 					<EngineBadge engine={a.engine} tool={a.tool} />
 					<span>{a.categories.map((c) => CATEGORY_LABEL[c]).join(", ")}</span>
 					{!a.defaultEnabled && a.engine !== "agentic" && (
@@ -236,7 +236,7 @@ function TargetSection({ group }: { group: TargetGroup }) {
 		>
 			<h2
 				id={`${group.target}-title`}
-				className="border-rule border-b pb-2 font-bold text-2xl tracking-tight"
+				className="border-b border-rule pb-2 text-2xl font-bold tracking-tight"
 			>
 				{TARGET_LABEL[group.target]}
 			</h2>
@@ -260,9 +260,9 @@ function PlaybookItem({ playbook: p }: { playbook: PlaybookInfo }) {
 	return (
 		<li className="py-4">
 			<h3 className="font-semibold">{p.title}</h3>
-			<p className="font-mono text-ink-soft text-xs">{p.id}</p>
+			<p className="font-mono text-xs text-ink-soft">{p.id}</p>
 			<p className="mt-1 max-w-[72ch] text-sm">{p.summary}</p>
-			<p className="mt-2 text-ink-soft text-xs">
+			<p className="mt-2 text-xs text-ink-soft">
 				{areas}. Needs {p.needs.join(", ") || "nothing extra"}.
 			</p>
 			{p.checklist.length > 0 && (
@@ -294,7 +294,7 @@ function PlaybooksSection({
 		>
 			<h2
 				id="playbooks-title"
-				className="border-rule border-b pb-2 font-bold text-2xl tracking-tight"
+				className="border-b border-rule pb-2 text-2xl font-bold tracking-tight"
 			>
 				Playbooks
 			</h2>
@@ -340,7 +340,7 @@ function AuditorsPage() {
 
 	return (
 		<div className="mx-auto max-w-6xl px-4 pt-12 sm:px-6">
-			<h1 className="font-extrabold text-4xl tracking-tight sm:text-5xl">
+			<h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">
 				Auditors
 			</h1>
 			<p className="mt-3 max-w-[64ch] text-ink-soft">
@@ -364,7 +364,7 @@ function AuditorsPage() {
 						query={query}
 						setQuery={setQuery}
 					/>
-					<p aria-live="polite" className="mt-3 text-ink-soft text-sm">
+					<p aria-live="polite" className="mt-3 text-sm text-ink-soft">
 						{filtered.length} of {auditors.data.length} auditors
 					</p>
 

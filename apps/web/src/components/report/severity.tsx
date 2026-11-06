@@ -19,7 +19,7 @@ export function SeverityBadge({
 	return (
 		<span
 			className={cn(
-				"inline-flex items-center gap-1.5 font-semibold text-xs",
+				"inline-flex items-center gap-1.5 text-xs font-semibold",
 				SEVERITY_TEXT[severity],
 				className,
 			)}
@@ -36,18 +36,18 @@ export function SeverityBadge({
 /** A row of severity totals. */
 export function SeverityCountsRow({ counts }: { counts: SeverityCounts }) {
 	return (
-		<dl className="grid grid-cols-5 border-rule border-y">
+		<dl className="grid grid-cols-5 border-y border-rule">
 			{SEVERITY_ORDER.map((s) => (
 				<div
 					key={s}
-					className="border-rule border-l px-3 py-3 first:border-l-0 sm:px-4"
+					className="border-l border-rule px-3 py-3 first:border-l-0 sm:px-4"
 				>
 					<dt>
 						<SeverityBadge severity={s} />
 					</dt>
 					<dd
 						className={cn(
-							"mt-1 font-bold text-2xl tabular-nums",
+							"mt-1 text-2xl font-bold tabular-nums",
 							counts[s] === 0 && "text-ink-soft",
 						)}
 					>

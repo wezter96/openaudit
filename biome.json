@@ -35,7 +35,13 @@
 		"enabled": true,
 		"indentStyle": "tab"
 	},
-	"assist": { "actions": { "source": { "organizeImports": "on" } } },
+	"assist": {
+		"actions": {
+			"source": {
+				"organizeImports": "on"
+			}
+		}
+	},
 	"linter": {
 		"enabled": true,
 		"rules": {
@@ -44,12 +50,9 @@
 				"useExhaustiveDependencies": "info"
 			},
 			"nursery": {
-				"useSortedClasses": {
+				"useTailwindSortedClasses": {
 					"level": "warn",
-					"fix": "safe",
-					"options": {
-						"functions": ["clsx", "cva", "cn"]
-					}
+					"fix": "safe"
 				}
 			},
 			"style": {
@@ -74,6 +77,16 @@
 	"css": {
 		"parser": {
 			"tailwindDirectives": true
+		}
+	},
+	"tailwind": {
+		"mergeFunctions": ["clsx", "cn"],
+		"variantFunctions": ["cva"],
+		"stylesheet": "./apps/web/src/index.css"
+	},
+	"markdown": {
+		"formatter": {
+			"enabled": false
 		}
 	}
 }

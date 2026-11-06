@@ -210,7 +210,7 @@ function DefTable({
 						<tr key={k} className="align-top">
 							<th
 								scope="row"
-								className="whitespace-nowrap px-3 py-2 font-medium font-mono text-[0.8125rem]"
+								className="px-3 py-2 font-mono text-[0.8125rem] font-medium whitespace-nowrap"
 							>
 								{k}
 							</th>
@@ -226,7 +226,7 @@ function DefTable({
 function DocsNav() {
 	return (
 		<nav aria-label="On this page" className="lg:sticky lg:top-6 lg:self-start">
-			<p className="mb-2 font-semibold text-sm">On this page</p>
+			<p className="mb-2 text-sm font-semibold">On this page</p>
 			<ul className="space-y-1 text-sm">
 				{TOC.map((t) => (
 					<li key={t.id}>
@@ -533,7 +533,7 @@ function DocsPage() {
 			<DocsNav />
 
 			<div className="prose-doc min-w-0">
-				<h1 className="font-extrabold text-4xl tracking-tight sm:text-5xl">
+				<h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">
 					Docs
 				</h1>
 				<p className="mt-3 text-ink-soft">

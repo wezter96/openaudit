@@ -76,10 +76,10 @@ export function AuditUrlForm({
 			}}
 			className="border border-rule bg-surface p-4 sm:p-5"
 		>
-			<h2 id={`${id}-title`} className="font-semibold text-lg">
+			<h2 id={`${id}-title`} className="text-lg font-semibold">
 				Audit a URL
 			</h2>
-			<p id={`${id}-help`} className="mt-1 text-ink-soft text-sm">
+			<p id={`${id}-help`} className="mt-1 text-sm text-ink-soft">
 				Runs the built-in web checks from our server, without a browser: up to 5
 				pages, about a minute at most. Only audit sites you own or are
 				authorised to test.
@@ -107,7 +107,7 @@ export function AuditUrlForm({
 				<Button
 					type="submit"
 					disabled={audit.isPending}
-					className="h-11 px-5 font-semibold text-sm"
+					className="h-11 px-5 text-sm font-semibold"
 				>
 					<RunLabel pending={audit.isPending} />
 				</Button>

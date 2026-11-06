@@ -44,7 +44,7 @@ export function CodeBlock({
 					{prompt &&
 						code.split("\n").map((line, i) => (
 							<span key={i} className="block">
-								<span aria-hidden="true" className="select-none text-ink-soft">
+								<span aria-hidden="true" className="text-ink-soft select-none">
 									${" "}
 								</span>
 								{line}

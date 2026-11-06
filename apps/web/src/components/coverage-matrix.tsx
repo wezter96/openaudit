@@ -100,7 +100,7 @@ export function CoverageMatrix({ captionId }: { captionId: string }) {
 		>
 			<table className="w-full min-w-[44rem] border-collapse text-sm">
 				<thead>
-					<tr className="border-rule border-b">
+					<tr className="border-b border-rule">
 						<th scope="col" className="px-4 py-3 text-left font-semibold">
 							Area
 						</th>

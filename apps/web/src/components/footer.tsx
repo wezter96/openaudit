@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 
 export default function Footer() {
 	return (
-		<footer className="mt-24 border-rule border-t">
+		<footer className="mt-24 border-t border-rule">
 			<div className="mx-auto grid max-w-6xl gap-6 px-4 py-10 text-sm sm:px-6 md:grid-cols-[2fr_1fr]">
 				<div className="max-w-[60ch] space-y-2">
 					<p className="font-semibold">Responsible use</p>

@@ -80,7 +80,7 @@ function useFocusWhen(
 function ReportIntro() {
 	return (
 		<div className="max-w-[60ch]">
-			<h1 className="font-extrabold text-4xl tracking-tight sm:text-5xl">
+			<h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">
 				Report viewer
 			</h1>
 			<p className="mt-3 text-ink-soft">
@@ -106,10 +106,10 @@ function PickFile({
 		<div className="space-y-4">
 			<div>
 				<p className="mb-2 font-semibold">Report file</p>
-				<label className="flex cursor-pointer flex-col items-center gap-2 border-2 border-rule border-dashed bg-surface px-6 py-10 text-center hover:border-signal has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-[var(--focus)] has-[:focus-visible]:outline-offset-2">
+				<label className="flex cursor-pointer flex-col items-center gap-2 border-2 border-dashed border-rule bg-surface px-6 py-10 text-center hover:border-signal has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[var(--focus)]">
 					<FileJson aria-hidden="true" className="size-8 text-ink-soft" />
 					<span className="font-medium">Choose a .json report</span>
-					<span className="text-ink-soft text-sm">Up to 25 MB</span>
+					<span className="text-sm text-ink-soft">Up to 25 MB</span>
 					<input
 						type="file"
 						accept="application/json,.json"
@@ -121,7 +121,7 @@ function PickFile({
 					/>
 				</label>
 			</div>
-			<p className="text-ink-soft text-sm">
+			<p className="text-sm text-ink-soft">
 				No report yet?{" "}
 				<button
 					type="button"
@@ -165,7 +165,7 @@ function PasteJson({
 			<Button
 				type="submit"
 				disabled={busy || !text.trim()}
-				className="h-10 px-5 font-semibold text-sm"
+				className="h-10 px-5 text-sm font-semibold"
 			>
 				Open report
 			</Button>
@@ -231,10 +231,10 @@ function OpenError({
 			tabIndex={-1}
 			role="alert"
 			id={`${id}-error`}
-			className="mt-8 border-sev-critical border-l-4 bg-surface p-4"
+			className="mt-8 border-l-4 border-sev-critical bg-surface p-4"
 		>
 			<p className="font-semibold">The report could not be opened</p>
-			<pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap font-mono text-ink-soft text-sm">
+			<pre className="mt-2 max-h-64 overflow-auto font-mono text-sm whitespace-pre-wrap text-ink-soft">
 				{error}
 			</pre>
 		</div>

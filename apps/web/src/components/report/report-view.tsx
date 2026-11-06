@@ -52,7 +52,7 @@ function AiPriorities({
 	return (
 		<section
 			aria-labelledby={`${id}-ai`}
-			className="border-signal border-l-4 bg-surface p-4"
+			className="border-l-4 border-signal bg-surface p-4"
 		>
 			<h3 id={`${id}-ai`} className="font-semibold">
 				Priorities from {ai.model}
@@ -117,7 +117,7 @@ function ReportHeader({
 						ref={titleRef}
 						tabIndex={-1}
 						id={`${id}-title`}
-						className="break-words font-bold text-2xl tracking-tight sm:text-3xl"
+						className="text-2xl font-bold tracking-tight break-words sm:text-3xl"
 					>
 						Report for {targetName(report.target)}
 					</h2>
@@ -152,7 +152,7 @@ export function ReportView({
 			<section aria-labelledby={`${id}-findings`}>
 				<h3
 					id={`${id}-findings`}
-					className="mb-4 font-bold text-xl tracking-tight"
+					className="mb-4 text-xl font-bold tracking-tight"
 				>
 					Findings
 				</h3>
@@ -162,7 +162,7 @@ export function ReportView({
 			<section aria-labelledby={`${id}-auditors`}>
 				<h3
 					id={`${id}-auditors`}
-					className="mb-4 font-bold text-xl tracking-tight"
+					className="mb-4 text-xl font-bold tracking-tight"
 				>
 					Auditors
 				</h3>

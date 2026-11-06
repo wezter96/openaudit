@@ -36,11 +36,11 @@ function Hero({
 			<div className="min-w-0">
 				<h1
 					id="hero-title"
-					className="max-w-[16ch] text-balance font-extrabold text-[2.75rem] leading-[1.02] tracking-[-0.035em] sm:text-6xl lg:text-7xl"
+					className="max-w-[16ch] text-[2.75rem] leading-[1.02] font-extrabold tracking-[-0.035em] text-balance sm:text-6xl lg:text-7xl"
 				>
 					Audit everything you ship
 				</h1>
-				<p className="mt-6 max-w-[56ch] text-ink-soft text-lg sm:text-xl">
+				<p className="mt-6 max-w-[56ch] text-lg text-ink-soft sm:text-xl">
 					Code, sites, apps, containers, infrastructure and mobile builds — from
 					your terminal or your AI agent. One report covering security,
 					accessibility, performance, SEO, privacy and the supply chain.
@@ -51,7 +51,7 @@ function Hero({
 					label="install command"
 					className="mt-8 max-w-md"
 				/>
-				<p className="mt-2 text-ink-soft text-sm">
+				<p className="mt-2 text-sm text-ink-soft">
 					Runs in the current directory. No account, no upload: the audit runs
 					on your machine.
 				</p>
@@ -66,7 +66,7 @@ function Hero({
 					className="mx-auto w-full max-w-[22rem]"
 				/>
 				{!report && (
-					<p className="mx-auto mt-4 max-w-[22rem] text-center text-ink-soft text-sm">
+					<p className="mx-auto mt-4 max-w-[22rem] text-center text-sm text-ink-soft">
 						This tag is from an example audit.{" "}
 						<Link
 							to="/report"
@@ -86,10 +86,10 @@ function Coverage() {
 	return (
 		<section
 			aria-labelledby="coverage-title"
-			className="border-rule border-t py-16"
+			className="border-t border-rule py-16"
 		>
 			<div className="mb-8 max-w-[60ch]">
-				<h2 id="coverage-title" className="font-bold text-3xl tracking-tight">
+				<h2 id="coverage-title" className="text-3xl font-bold tracking-tight">
 					What it checks, wherever it runs
 				</h2>
 				<p className="mt-3 text-ink-soft">
@@ -100,7 +100,7 @@ function Coverage() {
 				</p>
 			</div>
 			<CoverageMatrix captionId="coverage-title" />
-			<p className="mt-3 text-ink-soft text-sm">
+			<p className="mt-3 text-sm text-ink-soft">
 				Each area is backed by several auditors.{" "}
 				<Link
 					to="/auditors"
@@ -118,10 +118,10 @@ function ForAgents() {
 	return (
 		<section
 			aria-labelledby="agents-title"
-			className="grid grid-cols-[minmax(0,1fr)] gap-10 border-rule border-t py-16 lg:grid-cols-2 lg:gap-16"
+			className="grid grid-cols-[minmax(0,1fr)] gap-10 border-t border-rule py-16 lg:grid-cols-2 lg:gap-16"
 		>
 			<div className="max-w-[60ch]">
-				<h2 id="agents-title" className="font-bold text-3xl tracking-tight">
+				<h2 id="agents-title" className="text-3xl font-bold tracking-tight">
 					Built for agents too
 				</h2>
 				<p className="mt-3 text-ink-soft">
@@ -197,7 +197,7 @@ function HomeComponent() {
 			{report && (
 				<section
 					aria-label="Audit result"
-					className="border-rule border-t py-12"
+					className="border-t border-rule py-12"
 				>
 					<ReportView report={report} showTag={false} titleRef={titleRef} />
 				</section>

@@ -9,19 +9,19 @@ type Summary = Report["summary"];
 /** The big letter grade with the score and what the grade means. */
 function GradeLine({ summary, graded }: { summary: Summary; graded: boolean }) {
 	return (
-		<div className="mt-4 flex items-end gap-4 border-tag-ink/25 border-b-2 border-dashed pb-4">
+		<div className="mt-4 flex items-end gap-4 border-b-2 border-dashed border-tag-ink/25 pb-4">
 			<span
 				aria-hidden="true"
-				className="font-black text-[6.5rem] leading-[0.8] tracking-tighter"
+				className="text-[6.5rem] leading-[0.8] font-black tracking-tighter"
 			>
 				{graded ? summary.grade : "–"}
 			</span>
 			<span aria-hidden="true" className="pb-1">
 				{graded ? (
 					<>
-						<span className="block font-bold text-3xl tabular-nums leading-none">
+						<span className="block text-3xl leading-none font-bold tabular-nums">
 							{summary.score}
-							<span className="font-medium text-base opacity-70">/100</span>
+							<span className="text-base font-medium opacity-70">/100</span>
 						</span>
 						<span className="mt-1 block text-sm">
 							{GRADE_MEANING[summary.grade]}
@@ -102,7 +102,7 @@ export function ScoreTag({
 					aria-hidden="true"
 					className="absolute top-4 left-1/2 size-5 -translate-x-1/2 rounded-full border-[3px] border-tag-edge bg-paper"
 				/>
-				<p className="truncate font-semibold text-sm" title={label}>
+				<p className="truncate text-sm font-semibold" title={label}>
 					{label}
 				</p>
 				<p className="text-sm opacity-80">

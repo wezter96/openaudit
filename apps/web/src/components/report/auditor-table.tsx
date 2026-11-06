@@ -22,21 +22,21 @@ function AuditorRow({ result: r }: { result: AuditorResult }) {
 		<tr className="align-top">
 			<th scope="row" className="px-3 py-2 font-normal">
 				<span className="block font-medium">{r.title}</span>
-				<span className="block font-mono text-ink-soft text-xs">
+				<span className="block font-mono text-xs text-ink-soft">
 					{r.auditor}
 					<span className="font-sans"> ({ENGINE_LABEL[r.engine]})</span>
 				</span>
 			</th>
 			<td
 				className={cn(
-					"whitespace-nowrap px-3 py-2 font-semibold",
+					"px-3 py-2 font-semibold whitespace-nowrap",
 					STATUS_CLASS[r.status],
 				)}
 			>
 				{STATUS_LABEL[r.status]}
 			</td>
 			<td className="px-3 py-2 text-right tabular-nums">{r.findings.length}</td>
-			<td className="whitespace-nowrap px-3 py-2 text-right text-ink-soft tabular-nums">
+			<td className="px-3 py-2 text-right whitespace-nowrap text-ink-soft tabular-nums">
 				{formatDuration(r.durationMs)}
 			</td>
 			<td className="min-w-[16rem] px-3 py-2 text-ink-soft">
@@ -62,7 +62,7 @@ export function AuditorTable({
 
 	if (rows.length === 0)
 		return (
-			<p className="border border-rule border-dashed px-4 py-6 text-ink-soft">
+			<p className="border border-dashed border-rule px-4 py-6 text-ink-soft">
 				No auditors applied to this target.
 			</p>
 		);

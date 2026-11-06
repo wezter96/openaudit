@@ -134,7 +134,7 @@ export const inspectTls = (
 			socket.end();
 			resume(Effect.succeed(info));
 		});
-		socket.once("error", (err) => {
+		socket.once("error", (err: Error) => {
 			clearTimeout(timer);
 			socket.destroy();
 			resume(Effect.fail(err));
