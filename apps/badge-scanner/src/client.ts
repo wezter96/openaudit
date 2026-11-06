@@ -55,6 +55,10 @@ const adapt = (api: ScannerApi): ScannerClient => ({
 	report: async (id, payload) => {
 		await call(api.report({ params: { id }, payload }));
 	},
+	claimQuick: async () => (await call(api.claimQuick())).job,
+	reportQuick: async (id, payload) => {
+		await call(api.reportQuick({ params: { id }, payload }));
+	},
 });
 
 /** The generated `HttpApiClient` for the scanner group, as a `ScannerClient`. */

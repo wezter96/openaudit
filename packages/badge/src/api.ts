@@ -188,6 +188,59 @@ export const JobReport = Schema.Struct({
 });
 export type JobReport = typeof JobReport.Type;
 
+/* ------------------------------------------------------------- quick audits */
+
+/** A quick audit of any public site: no sign-up, one report, kept 7 days. */
+export const QuickStatus = Schema.Literals([
+	"queued",
+	"running",
+	"ok",
+	"failed",
+]);
+export type QuickStatus = typeof QuickStatus.Type;
+
+export const QuickPayload = Schema.Struct({
+	site: Schema.String.check(Schema.isMaxLength(2000)),
+});
+export type QuickPayload = typeof QuickPayload.Type;
+
+export const QuickCreated = Schema.Struct({ id: ScanId });
+export type QuickCreated = typeof QuickCreated.Type;
+
+/** One quick audit. Times are Unix seconds. */
+export const QuickState = Schema.Struct({
+	id: ScanId,
+	site: Schema.String,
+	status: QuickStatus,
+	createdAt: Count,
+	finishedAt: Schema.NullOr(Count),
+	/** Audits queued before this one; 0 once it runs. */
+	ahead: Count,
+	summary: Schema.NullOr(TargetSummary),
+	error: Schema.NullOr(Schema.String),
+});
+export type QuickState = typeof QuickState.Type;
+
+export const QuickJob = Schema.Struct({ id: ScanId, site: Schema.String });
+export type QuickJob = typeof QuickJob.Type;
+
+export const QuickClaimResult = Schema.Struct({
+	job: Schema.NullOr(QuickJob),
+});
+export type QuickClaimResult = typeof QuickClaimResult.Type;
+
+export const QuickReport = Schema.Struct({
+	status: ScanStatus,
+	error: Schema.optional(
+		Schema.String.check(Schema.isMaxLength(MAX_ERROR_LENGTH)),
+	),
+	openauditVersion: Schema.optional(
+		Schema.String.check(Schema.isMaxLength(64)),
+	),
+	site: Schema.optional(ReportFiles),
+});
+export type QuickReport = typeof QuickReport.Type;
+
 const message = { message: Schema.String };
 
 export class InvalidInput extends Schema.TaggedError<InvalidInput>()(
@@ -310,11 +363,36 @@ export class ScannerApi extends HttpApiGroup.make("scanner")
 			success: HttpApiSchema.NoContent,
 			error: [NotFound, InvalidInput],
 		}),
+		HttpApiEndpoint.post("claimQuick", "/quick/claim", {
+			success: QuickClaimResult,
+		}),
+		HttpApiEndpoint.post("reportQuick", "/quick/:id", {
+			params: { id: ScanId },
+			payload: QuickReport,
+			success: HttpApiSchema.NoContent,
+			error: [NotFound, InvalidInput],
+		}),
 	)
 	.middleware(ScannerAuth)
 	.prefix("/api/scanner") {}
 
+export class QuickApi extends HttpApiGroup.make("quick")
+	.add(
+		HttpApiEndpoint.post("start", "/", {
+			payload: QuickPayload,
+			success: QuickCreated.pipe(HttpApiSchema.status(202)),
+			error: [InvalidInput, Full, RateLimited],
+		}),
+		HttpApiEndpoint.get("get", "/:id", {
+			params: { id: ScanId },
+			success: QuickState,
+			error: NotFound,
+		}),
+	)
+	.prefix("/api/quick") {}
+
 export class BadgeApi extends HttpApi.make("openaudit-badges")
 	.add(ProjectsApi)
+	.add(QuickApi)
 	.add(ScannerApi)
 	.annotateMerge(OpenApi.annotations({ title: "openaudit verified badges" })) {}

@@ -49,3 +49,23 @@ CREATE TABLE IF NOT EXISTS registrations (
 );
 
 CREATE INDEX IF NOT EXISTS registrations_ip ON registrations (ip_day_hash, created_at);
+
+-- Quick audits: any public site, no sign-up, kept QUICK_KEEP (7 days).
+CREATE TABLE IF NOT EXISTS quick_scans (
+	id TEXT PRIMARY KEY,
+	site TEXT NOT NULL,
+	-- queued, running, ok or failed.
+	status TEXT NOT NULL,
+	-- Daily-salted hash of the requesting IP, never the IP.
+	ip_day TEXT NOT NULL,
+	created_at INT NOT NULL,
+	lease_until INT,
+	finished_at INT,
+	openaudit_version TEXT,
+	summary TEXT,
+	error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS quick_status ON quick_scans (status, created_at);
+CREATE INDEX IF NOT EXISTS quick_ip ON quick_scans (ip_day, created_at);
+CREATE INDEX IF NOT EXISTS quick_site ON quick_scans (site, created_at);

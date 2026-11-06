@@ -1,7 +1,13 @@
-import type { Job, JobReport, ReportFiles } from "@openaudit/badge/api";
+import type {
+	Job,
+	JobReport,
+	QuickJob,
+	QuickReport,
+	ReportFiles,
+} from "@openaudit/badge/api";
 
 /** A claimed scan, as `POST /api/scanner/claim` returns it. */
-export type { Job };
+export type { Job, QuickJob, QuickReport };
 /** The body of `POST /api/scanner/jobs/:id`. */
 export type JobResult = JobReport;
 /** The JSON and HTML report of one openaudit run. */
@@ -11,6 +17,9 @@ export type ReportPair = ReportFiles;
 export interface ScannerClient {
 	readonly claim: () => Promise<Job | null>;
 	readonly report: (scanId: string, result: JobResult) => Promise<void>;
+	/** The oldest queued quick audit of a public site, or null. */
+	readonly claimQuick: () => Promise<QuickJob | null>;
+	readonly reportQuick: (id: string, result: QuickReport) => Promise<void>;
 }
 
 /** A child process environment: built by `childEnv`, never `process.env`. */

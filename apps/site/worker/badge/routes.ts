@@ -1,11 +1,17 @@
 /**
  * Routes for the verified badges (see packages/badge): the JSON API under
- * /api/badges and /api/scanner, and the public /badge/* and /v/* pages.
+ * /api/badges, /api/quick and /api/scanner, and the public /badge/*, /v/*
+ * and /q/* (quick audit report) pages.
  */
 import type { ScanId } from "@openaudit/badge";
 import { apiRoute, type Path } from "./api-route";
 import type { BadgeBindings } from "./env";
-import { reportResponse, svgResponse, verifyPage } from "./pages";
+import {
+	quickReportResponse,
+	reportResponse,
+	svgResponse,
+	verifyPage,
+} from "./pages";
 
 /** Path plus query string, in characters. */
 const MAX_URL = 512;
@@ -14,13 +20,17 @@ const ID = "([a-z0-9][a-z0-9-]{0,159})";
 const SVG = new RegExp(`^/badge/${ID}(\\.svg|/card\\.svg)$`);
 const PAGE = new RegExp(`^/v/${ID}/?$`);
 const REPORT = new RegExp(`^/v/${ID}/(report|site-report)$`);
-const SCAN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const SCAN = new RegExp(`^${UUID}$`);
+const QUICK = new RegExp(`^/q/(${UUID})/?$`);
 
 const isApi = (path: Path) =>
-	path.startsWith("/api/badges") || path.startsWith("/api/scanner/");
+	path.startsWith("/api/badges") ||
+	path.startsWith("/api/quick") ||
+	path.startsWith("/api/scanner/");
 
 const isPublic = (path: Path) =>
-	[SVG, PAGE, REPORT].some((pattern) => pattern.test(path));
+	[SVG, PAGE, REPORT, QUICK].some((pattern) => pattern.test(path));
 
 const tooLong = (url: URL) => url.pathname.length + url.search.length > MAX_URL;
 
@@ -53,6 +63,8 @@ const reportPage = (url: URL, env: BadgeBindings) => {
 };
 
 const page = (url: URL, env: BadgeBindings): Promise<Response> | undefined => {
+	const quick = QUICK.exec(url.pathname);
+	if (quick?.[1]) return quickReportResponse(env, quick[1]);
 	const verify = PAGE.exec(url.pathname);
 	if (verify?.[1]) return verifyPage(env, verify[1], url.origin);
 	return svgPage(url.pathname, env) ?? reportPage(url, env);

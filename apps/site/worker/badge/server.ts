@@ -17,6 +17,7 @@ import { HttpApiBuilder } from "effect/http-api";
 import { constantTimeEqual } from "./crypto";
 import { Badge, type BadgeRequest } from "./env";
 import { getState, remove, rescan, verify } from "./manage";
+import { claimQuick, getQuick, reportQuick, startQuick } from "./quick";
 import { register } from "./register";
 import { claim, report } from "./scanner";
 
@@ -62,6 +63,20 @@ const ScannerLive = HttpApiBuilder.group(BadgeApi, "scanner", (handlers) =>
 		.handle("claim", () => withRequest(claim))
 		.handle("report", ({ params, payload }) =>
 			withRequest((req) => report(req, params.id, payload)),
+		)
+		.handle("claimQuick", () => withRequest(claimQuick))
+		.handle("reportQuick", ({ params, payload }) =>
+			withRequest((req) => reportQuick(req, params.id, payload)),
+		),
+);
+
+const QuickLive = HttpApiBuilder.group(BadgeApi, "quick", (handlers) =>
+	handlers
+		.handle("start", ({ payload }) =>
+			withRequest((req) => startQuick(req, payload)),
+		)
+		.handle("get", ({ params }) =>
+			withRequest((req) => getQuick(req, params.id)),
 		),
 );
 
@@ -91,7 +106,7 @@ const ScannerAuthLive = Layer.succeed(ScannerAuth)({
 });
 
 const ApiLive = HttpApiBuilder.layer(BadgeApi).pipe(
-	Layer.provide([ProjectsLive, ScannerLive]),
+	Layer.provide([ProjectsLive, QuickLive, ScannerLive]),
 	Layer.provide([ManageAuthLive, ScannerAuthLive]),
 	Layer.provide(HttpServer.layerServices),
 );
@@ -100,7 +115,7 @@ const makeWeb = () => HttpRouter.toWebHandler(ApiLive, { disableLogger: true });
 
 let web: ReturnType<typeof makeWeb> | undefined;
 
-/** Answers one /api/badges or /api/scanner request. */
+/** Answers one /api/badges, /api/quick or /api/scanner request. */
 export const handleApi = (request: Request, req: BadgeRequest) => {
 	web ??= makeWeb();
 	return web.handler(request, Context.make(Badge, req));

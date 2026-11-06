@@ -11,7 +11,15 @@ import { publicError, ScanError } from "./errors";
 import { childEnv } from "./process";
 import { cloneRepo, hasVerificationFile, headCommit } from "./repo";
 import { assertPublicSite, dnsResolver, type Resolver } from "./site";
-import type { Exec, Job, JobResult, ProcessRunner, ReportPair } from "./types";
+import type {
+	Exec,
+	Job,
+	JobResult,
+	ProcessRunner,
+	QuickJob,
+	QuickReport,
+	ReportPair,
+} from "./types";
 import { type Workdir, withWorkdir } from "./workdir";
 
 /** What the Worker accepts, less room for the JSON envelope and escaping. */
@@ -116,6 +124,46 @@ export const runJob = async (job: Job, deps: JobDeps): Promise<JobResult> => {
 				}),
 			deps.tmpBase,
 		);
+	} catch (cause) {
+		return { status: "failed", error: publicError(cause, deps.secrets ?? []) };
+	}
+};
+
+/** A quick audit stops sooner than a badge site scan. */
+export const QUICK_TIMEOUT_MS = 5 * 60_000;
+
+/**
+ * Runs one quick audit: the site only, default auditors, no config. Never
+ * rejects: any failure becomes a `failed` result with a short, scrubbed error.
+ */
+export const runQuickJob = async (
+	job: QuickJob,
+	deps: JobDeps,
+): Promise<QuickReport> => {
+	try {
+		return await withWorkdir(async (workdir) => {
+			const exec = { run: deps.run, env: childEnv(workdir.tmp) };
+			const target = await assertPublicSite(
+				job.site,
+				deps.resolve ?? dnsResolver,
+			);
+			const version = await openauditVersion(exec, deps.openaudit);
+			const site = await runAudit(exec, {
+				command: deps.openaudit,
+				target,
+				out: workdir.siteOut,
+				cwd: workdir.root,
+				timeoutMs: QUICK_TIMEOUT_MS,
+				label: "site",
+			});
+			if (reportBytes(site) > MAX_REPORT_BYTES)
+				throw new ScanError("the report is too large to store");
+			return {
+				status: "ok",
+				site,
+				...(version ? { openauditVersion: version } : {}),
+			} satisfies QuickReport;
+		}, deps.tmpBase);
 	} catch (cause) {
 		return { status: "failed", error: publicError(cause, deps.secrets ?? []) };
 	}

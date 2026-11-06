@@ -10,7 +10,13 @@ import {
 	runLoop,
 	tick,
 } from "../src/loop";
-import type { Job, JobResult, ScannerClient } from "../src/types";
+import type {
+	Job,
+	JobResult,
+	QuickJob,
+	QuickReport,
+	ScannerClient,
+} from "../src/types";
 import { fakeRunner } from "./fakes";
 
 const JOB: Job = {
@@ -28,8 +34,12 @@ beforeEach(() => {
 afterEach(() => rmSync(base, { recursive: true, force: true }));
 
 /** A client that hands out `jobs` in order, then fails or idles. */
-const fakeClient = (steps: Array<Job | null | Error>) => {
+const fakeClient = (
+	steps: Array<Job | null | Error>,
+	quick: QuickJob[] = [],
+) => {
 	const reports: Array<[string, JobResult]> = [];
+	const quickReports: Array<[string, QuickReport]> = [];
 	const client: ScannerClient = {
 		claim: async () => {
 			const step = steps.shift() ?? null;
@@ -39,8 +49,12 @@ const fakeClient = (steps: Array<Job | null | Error>) => {
 		report: async (id, result) => {
 			reports.push([id, result]);
 		},
+		claimQuick: async () => quick.shift() ?? null,
+		reportQuick: async (id, result) => {
+			quickReports.push([id, result]);
+		},
 	};
-	return { client, reports };
+	return { client, reports, quickReports };
 };
 
 const loopDeps = (client: ScannerClient, sleeps: number[] = []): LoopDeps => ({
@@ -68,6 +82,38 @@ describe("tick", () => {
 		expect(reports).toHaveLength(1);
 		expect(reports[0]?.[0]).toBe("scan-7");
 		expect(reports[0]?.[1].status).toBe("ok");
+	});
+});
+
+describe("quick audits", () => {
+	test("run before badge scans and report under their own id", async () => {
+		const { client, reports, quickReports } = fakeClient(
+			[JOB],
+			[{ id: "quick-1", site: "https://example.com/" }],
+		);
+		const deps = {
+			...loopDeps(client),
+			resolve: async () => ["93.184.215.14"],
+		};
+		expect(await tick(deps)).toBe(true);
+		expect(reports).toEqual([]);
+		expect(quickReports).toHaveLength(1);
+		expect(quickReports[0]?.[0]).toBe("quick-1");
+		expect(quickReports[0]?.[1].status).toBe("ok");
+		expect(await tick(deps)).toBe(true);
+		expect(reports).toHaveLength(1);
+	});
+
+	test("refuse a site that resolves to a private address", async () => {
+		const { client, quickReports } = fakeClient(
+			[],
+			[{ id: "quick-2", site: "https://internal.example/" }],
+		);
+		await tick({ ...loopDeps(client), resolve: async () => ["10.0.0.5"] });
+		expect(quickReports[0]?.[1]).toEqual({
+			status: "failed",
+			error: expect.stringContaining("private or reserved"),
+		});
 	});
 });
 

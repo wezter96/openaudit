@@ -14,6 +14,7 @@ import {
 import { PAGE_CSS } from "@openaudit/badge/page-css";
 import { sha256 } from "./crypto";
 import { type BadgeBindings, nowSeconds } from "./env";
+import { quickReportObject } from "./quick";
 import { finishedScans, reportKey } from "./scans";
 import { findProject, stateOf } from "./store";
 
@@ -140,4 +141,13 @@ export const reportResponse = async (env: BadgeBindings, r: ReportRequest) => {
 	);
 	if (!object) return notFound();
 	return new Response(object.body, { headers: REPORT_HEADERS });
+};
+
+/** A quick audit's HTML report: sandboxed like the others, and never indexed. */
+export const quickReportResponse = async (env: BadgeBindings, id: ScanId) => {
+	const object = await quickReportObject(env, id);
+	if (!object) return notFound();
+	return new Response(object.body, {
+		headers: { ...REPORT_HEADERS, "X-Robots-Tag": "noindex, nofollow" },
+	});
 };

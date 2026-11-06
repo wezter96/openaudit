@@ -1,8 +1,10 @@
 import { publicError } from "./errors";
-import { type JobDeps, runJob } from "./job";
+import { type JobDeps, runJob, runQuickJob } from "./job";
 import type { ScannerClient } from "./types";
 
-export const IDLE_DELAY_MS = 60_000;
+/** Short, so a quick audit someone is waiting for starts soon. */
+export const IDLE_DELAY_MS = 15_000;
+const BACKOFF_BASE_MS = 60_000;
 const MAX_BACKOFF_MS = 15 * 60_000;
 
 export interface LoopDeps extends JobDeps {
@@ -13,13 +15,29 @@ export interface LoopDeps extends JobDeps {
 
 /** The wait after `failures` API errors in a row: 1, 2, 4 ... minutes, capped. */
 export const backoffMs = (failures: number): number =>
-	Math.min(IDLE_DELAY_MS * 2 ** Math.max(0, failures - 1), MAX_BACKOFF_MS);
+	Math.min(BACKOFF_BASE_MS * 2 ** Math.max(0, failures - 1), MAX_BACKOFF_MS);
+
+/** Runs one queued quick audit, if there is one. */
+const quickTick = async (deps: LoopDeps): Promise<boolean> => {
+	const job = await deps.client.claimQuick();
+	if (!job) return false;
+	const log = deps.log ?? console.log;
+	log(`quick ${job.id}: ${job.site}`);
+	const result = await runQuickJob(job, deps);
+	log(
+		`quick ${job.id}: ${result.status}${result.error ? ` (${result.error})` : ""}`,
+	);
+	await deps.client.reportQuick(job.id, result);
+	return true;
+};
 
 /**
- * Claims one job, runs it and reports it. Returns whether there was a job,
- * so the loop knows to ask again right away.
+ * Claims one job, runs it and reports it: a quick audit first, since someone
+ * is waiting for it, else a badge scan. Returns whether there was a job, so
+ * the loop knows to ask again right away.
  */
 export const tick = async (deps: LoopDeps): Promise<boolean> => {
+	if (await quickTick(deps)) return true;
 	const job = await deps.client.claim();
 	if (!job) return false;
 	const log = deps.log ?? console.log;

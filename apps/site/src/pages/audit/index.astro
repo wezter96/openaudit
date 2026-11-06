@@ -1,0 +1,167 @@
+---
+import Base from "../../layouts/Base.astro";
+import { u } from "../../lib/site";
+
+const description =
+	"Free quick audit of any public website: security headers, TLS, DNS and email, SEO, accessibility, performance and privacy, with a scored report in about a minute. No sign-up.";
+---
+
+<Base title="Audit your website" description={description} markdown={false}>
+	<header class="page-head frame">
+		<p class="eyebrow">Free, no sign-up</p>
+		<h1>Audit your website</h1>
+		<p class="lede">
+			Enter an address. We run openaudit's website checks from our server and give you a scored report in about a minute.
+		</p>
+	</header>
+
+	<div class="frame">
+		<div class="prose">
+			<p class="nojs">The form needs JavaScript. You can also run <code>bunx openaudit https://your-site.example</code> yourself.</p>
+			<form class="quick-form needs-js" data-quick novalidate>
+				<div class="field">
+					<label for="q-site">Website address</label>
+					<div class="row">
+						<input id="q-site" name="site" type="text" inputmode="url" required placeholder="https://example.com" autocomplete="url" spellcheck="false" />
+						<button class="btn primary" type="submit">Audit</button>
+					</div>
+				</div>
+				<p class="status" role="status" aria-live="polite" data-status></p>
+			</form>
+
+			<section class="result" hidden data-result aria-labelledby="result-title">
+				<h2 id="result-title">Result for <span data-site></span></h2>
+				<p class="score"><b data-score></b> <span data-grade></span></p>
+				<p data-counts></p>
+				<p><a class="btn primary" data-report href={u("/audit/")}>Open the full report</a></p>
+				<p class="fine">The report link works for 7 days. Anyone with the link can open it.</p>
+			</section>
+
+			<h2>What we check</h2>
+			<ul>
+				<li>Security headers, TLS and certificate set-up, and exposed files and APIs.</li>
+				<li>DNS and email protection: SPF, DMARC, CAA, MTA-STS and subdomain takeover.</li>
+				<li>SEO, accessibility markup, page weight and caching, and trackers.</li>
+				<li>Lighthouse and pa11y on the home page.</li>
+			</ul>
+			<p>
+				This is the quick version. It does not log in, fill in forms or attack anything: it sends a few ordinary GET and HEAD requests, like a visitor would. For your code, containers and a full browser run, <a href={u("/docs/")}>run openaudit yourself</a>.
+			</p>
+
+			<h2>Limits</h2>
+			<ul>
+				<li>Public https sites only, on the standard port.</li>
+				<li>5 audits per visitor per day. An audit of the same site in the last hour is reused.</li>
+				<li>We keep the report for 7 days, then delete it.</li>
+			</ul>
+			<p>Only audit sites you own or may test. Want a score on your README every week? Get a <a href={u("/badge/")}>verified badge</a>.</p>
+		</div>
+	</div>
+</Base>
+
+<script>
+	import "../../scripts/quick";
+</script>
+
+<style>
+	.eyebrow {
+		margin: 0 0 0.5rem;
+		font-family: var(--mono);
+		font-size: 0.8125rem;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--graphite);
+	}
+
+	:global(.js) .nojs {
+		display: none;
+	}
+
+	.quick-form {
+		display: grid;
+		gap: 0.75rem;
+		padding: 1.25rem;
+		background: var(--paper-2);
+		border: 1px solid var(--hair);
+		border-radius: 10px;
+	}
+
+	.field {
+		display: grid;
+		gap: 0.35rem;
+	}
+
+	.field label {
+		font-size: 0.875rem;
+		font-weight: 600;
+	}
+
+	.row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.6rem;
+	}
+
+	input {
+		flex: 1 1 14rem;
+		min-width: 0;
+		font: inherit;
+		font-size: 1rem;
+		color: var(--ink);
+		background: var(--paper);
+		border: 1px solid var(--hair);
+		border-radius: 7px;
+		padding: 0.5rem 0.7rem;
+		min-height: 2.75rem;
+		transition: border-color 0.2s, box-shadow 0.2s;
+	}
+
+	input:hover {
+		border-color: var(--graphite);
+	}
+
+	input:focus {
+		border-color: var(--accent);
+		outline: none;
+		box-shadow: 0 0 0 3px var(--accent-soft);
+	}
+
+	.status {
+		margin: 0;
+		min-height: 1.5em;
+		font-size: 0.9375rem;
+		color: var(--graphite);
+	}
+
+	.status[data-tone="error"] {
+		color: var(--t-critical);
+	}
+
+	.result {
+		margin-top: 1.5rem;
+		padding: 1.25rem;
+		border: 1px solid var(--hair);
+		border-left: 2px solid var(--accent);
+		border-radius: 0 10px 10px 0;
+	}
+
+	.result > * + * {
+		margin-top: 0.75rem;
+	}
+
+	.result h2 {
+		margin: 0;
+		overflow-wrap: anywhere;
+	}
+
+	.score b {
+		font-family: var(--display);
+		font-size: 2.5rem;
+		line-height: 1;
+	}
+
+	.fine {
+		font-size: 0.875rem;
+		color: var(--graphite);
+	}
+</style>
