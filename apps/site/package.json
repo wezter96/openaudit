@@ -29,6 +29,6 @@
 		"@types/bun": "catalog:",
 		"playwright": "1.56.1",
 		"typescript": "catalog:",
-		"wrangler": "^4.150.0"
+		"wrangler": "^4.158.0"
 	}
 }
