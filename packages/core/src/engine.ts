@@ -25,7 +25,7 @@ import {
 } from "./services";
 import { resolveTarget } from "./target";
 
-export const VERSION = "0.4.0";
+export const VERSION = "0.5.0";
 
 export type AuditEvent =
 	| { readonly type: "target"; readonly target: Report["target"] }
