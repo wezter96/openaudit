@@ -1,0 +1,104 @@
+{
+  "schema_version": "1.2.1",
+  "generated_at": "2026-11-06T10:15:20+00:00",
+  "result": {
+    "name": "dotnet",
+    "label": "Microsoft .NET",
+    "links": {
+      "html": "https://endoflife.date/dotnet"
+    },
+    "releases": [
+      {
+        "name": "10",
+        "releaseDate": "2025-11-11",
+        "isEol": false,
+        "eolFrom": "2028-11-14",
+        "isMaintained": true
+      },
+      {
+        "name": "9",
+        "releaseDate": "2024-11-12",
+        "isEol": false,
+        "eolFrom": "2026-11-10",
+        "isMaintained": true
+      },
+      {
+        "name": "8",
+        "releaseDate": "2023-11-14",
+        "isEol": false,
+        "eolFrom": "2026-11-10",
+        "isMaintained": true
+      },
+      {
+        "name": "7",
+        "releaseDate": "2022-11-08",
+        "isEol": true,
+        "eolFrom": "2024-05-14",
+        "isMaintained": false
+      },
+      {
+        "name": "6",
+        "releaseDate": "2021-11-08",
+        "isEol": true,
+        "eolFrom": "2024-11-12",
+        "isMaintained": false
+      },
+      {
+        "name": "5",
+        "releaseDate": "2020-11-10",
+        "isEol": true,
+        "eolFrom": "2022-05-10",
+        "isMaintained": false
+      },
+      {
+        "name": "3.1",
+        "releaseDate": "2019-12-03",
+        "isEol": true,
+        "eolFrom": "2022-12-13",
+        "isMaintained": false
+      },
+      {
+        "name": "3.0",
+        "releaseDate": "2019-09-23",
+        "isEol": true,
+        "eolFrom": "2020-03-03",
+        "isMaintained": false
+      },
+      {
+        "name": "2.2",
+        "releaseDate": "2018-12-04",
+        "isEol": true,
+        "eolFrom": "2019-12-23",
+        "isMaintained": false
+      },
+      {
+        "name": "2.1",
+        "releaseDate": "2018-05-30",
+        "isEol": true,
+        "eolFrom": "2021-08-21",
+        "isMaintained": false
+      },
+      {
+        "name": "2.0",
+        "releaseDate": "2017-08-14",
+        "isEol": true,
+        "eolFrom": "2018-10-01",
+        "isMaintained": false
+      },
+      {
+        "name": "1.1",
+        "releaseDate": "2016-11-16",
+        "isEol": true,
+        "eolFrom": "2019-06-27",
+        "isMaintained": false
+      },
+      {
+        "name": "1.0",
+        "releaseDate": "2016-06-27",
+        "isEol": true,
+        "eolFrom": "2019-06-27",
+        "isMaintained": false
+      }
+    ]
+  }
+}

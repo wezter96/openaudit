@@ -1,0 +1,83 @@
+{
+  "schema_version": "1.2.1",
+  "generated_at": "2026-11-06T10:15:20+00:00",
+  "result": {
+    "name": "laravel",
+    "label": "Laravel",
+    "links": {
+      "html": "https://endoflife.date/laravel"
+    },
+    "releases": [
+      {
+        "name": "13",
+        "releaseDate": "2026-03-17",
+        "isEol": false,
+        "eolFrom": "2028-03-17",
+        "isMaintained": true
+      },
+      {
+        "name": "12",
+        "releaseDate": "2025-02-24",
+        "isEol": false,
+        "eolFrom": "2027-02-24",
+        "isMaintained": true
+      },
+      {
+        "name": "11",
+        "releaseDate": "2024-03-12",
+        "isEol": true,
+        "eolFrom": "2026-03-12",
+        "isMaintained": false
+      },
+      {
+        "name": "10",
+        "releaseDate": "2023-02-14",
+        "isEol": true,
+        "eolFrom": "2025-02-04",
+        "isMaintained": false
+      },
+      {
+        "name": "9",
+        "releaseDate": "2022-02-08",
+        "isEol": true,
+        "eolFrom": "2024-02-06",
+        "isMaintained": false
+      },
+      {
+        "name": "8",
+        "releaseDate": "2020-09-08",
+        "isEol": true,
+        "eolFrom": "2023-01-24",
+        "isMaintained": false
+      },
+      {
+        "name": "7",
+        "releaseDate": "2020-03-03",
+        "isEol": true,
+        "eolFrom": "2021-03-03",
+        "isMaintained": false
+      },
+      {
+        "name": "6",
+        "releaseDate": "2019-09-03",
+        "isEol": true,
+        "eolFrom": "2022-09-06",
+        "isMaintained": false
+      },
+      {
+        "name": "5.8",
+        "releaseDate": "2019-02-26",
+        "isEol": true,
+        "eolFrom": "2020-02-26",
+        "isMaintained": false
+      },
+      {
+        "name": "5.5",
+        "releaseDate": "2017-08-30",
+        "isEol": true,
+        "eolFrom": "2020-08-30",
+        "isMaintained": false
+      }
+    ]
+  }
+}

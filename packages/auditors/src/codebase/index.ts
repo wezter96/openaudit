@@ -5,6 +5,7 @@ import { agentConfig } from "./agent-config";
 import { api } from "./api";
 import { dependencies } from "./dependencies";
 import { dependencyHealth } from "./dependency-health";
+import { eol } from "./eol";
 import { gitleaks, osvScanner, semgrep, trivyFs } from "./external";
 import { codeHealth } from "./health";
 import { codeHistory } from "./history";
@@ -44,6 +45,7 @@ export const codebaseAuditors: ReadonlyArray<Auditor> = [
 	unicode,
 	dependencies,
 	dependencyHealth,
+	eol,
 	licenses,
 	lockfiles,
 	accessibility,

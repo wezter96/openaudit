@@ -1,0 +1,69 @@
+{
+  "schema_version": "1.2.1",
+  "generated_at": "2026-11-06T10:15:20+00:00",
+  "result": {
+    "name": "nextjs",
+    "label": "Next.js",
+    "links": {
+      "html": "https://endoflife.date/nextjs"
+    },
+    "releases": [
+      {
+        "name": "16",
+        "releaseDate": "2025-10-22",
+        "isEol": false,
+        "eolFrom": null,
+        "isMaintained": true
+      },
+      {
+        "name": "15",
+        "releaseDate": "2024-10-21",
+        "isEol": false,
+        "eolFrom": "2027-01-31",
+        "isMaintained": true
+      },
+      {
+        "name": "14",
+        "releaseDate": "2023-10-26",
+        "isEol": true,
+        "eolFrom": "2025-10-26",
+        "isMaintained": false
+      },
+      {
+        "name": "13",
+        "releaseDate": "2022-10-25",
+        "isEol": true,
+        "eolFrom": "2024-12-21",
+        "isMaintained": false
+      },
+      {
+        "name": "12",
+        "releaseDate": "2021-10-26",
+        "isEol": true,
+        "eolFrom": "2022-11-21",
+        "isMaintained": false
+      },
+      {
+        "name": "11",
+        "releaseDate": "2021-06-15",
+        "isEol": true,
+        "eolFrom": "2022-01-27",
+        "isMaintained": false
+      },
+      {
+        "name": "10",
+        "releaseDate": "2020-10-27",
+        "isEol": true,
+        "eolFrom": "2021-06-15",
+        "isMaintained": false
+      },
+      {
+        "name": "9",
+        "releaseDate": "2019-07-08",
+        "isEol": true,
+        "eolFrom": "2020-10-27",
+        "isMaintained": false
+      }
+    ]
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "schema_version": "1.2.1",
+  "generated_at": "2026-11-06T10:15:20+00:00",
+  "result": {
+    "name": "ruby",
+    "label": "Ruby",
+    "links": {
+      "html": "https://endoflife.date/ruby"
+    },
+    "releases": [
+      {
+        "name": "4.0",
+        "releaseDate": "2025-12-25",
+        "isEol": false,
+        "eolFrom": "2029-03-31",
+        "isMaintained": true
+      },
+      {
+        "name": "3.4",
+        "releaseDate": "2024-12-24",
+        "isEol": false,
+        "eolFrom": "2028-03-31",
+        "isMaintained": true
+      },
+      {
+        "name": "3.3",
+        "releaseDate": "2023-12-25",
+        "isEol": false,
+        "eolFrom": "2027-03-31",
+        "isMaintained": true
+      },
+      {
+        "name": "3.2",
+        "releaseDate": "2022-12-25",
+        "isEol": true,
+        "eolFrom": "2026-03-31",
+        "isMaintained": false
+      },
+      {
+        "name": "3.1",
+        "releaseDate": "2021-12-25",
+        "isEol": true,
+        "eolFrom": "2025-03-26",
+        "isMaintained": false
+      },
+      {
+        "name": "3.0",
+        "releaseDate": "2020-12-25",
+        "isEol": true,
+        "eolFrom": "2024-04-23",
+        "isMaintained": false
+      },
+      {
+        "name": "2.7",
+        "releaseDate": "2019-12-25",
+        "isEol": true,
+        "eolFrom": "2023-03-31",
+        "isMaintained": false
+      },
+      {
+        "name": "2.6",
+        "releaseDate": "2018-12-25",
+        "isEol": true,
+        "eolFrom": "2022-03-31",
+        "isMaintained": false
+      },
+      {
+        "name": "2.5",
+        "releaseDate": "2017-12-25",
+        "isEol": true,
+        "eolFrom": "2021-03-31",
+        "isMaintained": false
+      },
+      {
+        "name": "2.4",
+        "releaseDate": "2016-12-23",
+        "isEol": true,
+        "eolFrom": "2020-03-31",
+        "isMaintained": false
+      },
+      {
+        "name": "2.3",
+        "releaseDate": "2015-12-24",
+        "isEol": true,
+        "eolFrom": "2019-03-31",
+        "isMaintained": false
+      },
+      {
+        "name": "2.2",
+        "releaseDate": "2014-12-25",
+        "isEol": true,
+        "eolFrom": "2018-03-31",
+        "isMaintained": false
+      },
+      {
+        "name": "2.1",
+        "releaseDate": "2013-12-25",
+        "isEol": true,
+        "eolFrom": "2017-03-31",
+        "isMaintained": false
+      },
+      {
+        "name": "2.0.0",
+        "releaseDate": "2013-02-24",
+        "isEol": true,
+        "eolFrom": "2016-02-24",
+        "isMaintained": false
+      },
+      {
+        "name": "1.9.3",
+        "releaseDate": "2011-10-30",
+        "isEol": true,
+        "eolFrom": "2015-02-23",
+        "isMaintained": false
+      }
+    ]
+  }
+}

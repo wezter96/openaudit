@@ -4,7 +4,7 @@ heading: A free, open-source code security scanner
 description: openaudit is a free, MIT-licensed CLI that runs Semgrep, gitleaks, Trivy, Checkov and more on your machine, merges duplicates and scores each area.
 order: 4
 ---
-If you're looking for an open-source alternative to tools like Snyk or SonarQube, openaudit is a free, MIT-licensed CLI that runs established open-source scanners on your machine and merges their output into one scored report. It also has 39 auditors of its own, so it finds issues even before you install anything else.
+If you're looking for an open-source alternative to tools like Snyk or SonarQube, openaudit is a free, MIT-licensed CLI that runs established open-source scanners on your machine and merges their output into one scored report. It also has 40 auditors of its own, so it finds issues even before you install anything else.
 
 ## Run it
 
@@ -45,7 +45,7 @@ bunx @openaudit/cli . --diff origin/main -f html,sarif -o openaudit-report --fai
 
 ## Your code stays on your machine
 
-openaudit runs locally. Dependency checks ask OSV.dev, and `--offline` blocks network access except to the target itself. Code only leaves your machine if you turn on the agentic auditors, and they're opt-in. Wrapped tools never build or install what they scan. The [safety page](/docs/safety/) has the details.
+openaudit runs locally. Dependency checks ask OSV.dev, the end-of-life check asks endoflife.date, and `--offline` blocks network access except to the target itself. Code only leaves your machine if you turn on the agentic auditors, and they're opt-in. Wrapped tools never build or install what they scan. The [safety page](/docs/safety/) has the details.
 
 ## What it doesn't do
 

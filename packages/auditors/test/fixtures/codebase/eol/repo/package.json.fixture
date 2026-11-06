@@ -1,0 +1,5 @@
+{
+	"name": "eol-fixture",
+	"engines": { "node": ">=14" },
+	"volta": { "node": "20.11.0" }
+}

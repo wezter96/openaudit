@@ -1,0 +1,111 @@
+{
+  "schema_version": "1.2.1",
+  "generated_at": "2026-11-06T10:15:20+00:00",
+  "result": {
+    "name": "eclipse-temurin",
+    "label": "Eclipse Temurin",
+    "links": {
+      "html": "https://endoflife.date/eclipse-temurin"
+    },
+    "releases": [
+      {
+        "name": "27",
+        "releaseDate": "2026-09-22",
+        "isEol": false,
+        "eolFrom": "2027-03-23",
+        "isMaintained": true
+      },
+      {
+        "name": "26",
+        "releaseDate": "2026-03-23",
+        "isEol": true,
+        "eolFrom": "2026-09-22",
+        "isMaintained": false
+      },
+      {
+        "name": "25",
+        "releaseDate": "2025-09-22",
+        "isEol": false,
+        "eolFrom": "2031-09-30",
+        "isMaintained": true
+      },
+      {
+        "name": "24",
+        "releaseDate": "2025-03-20",
+        "isEol": true,
+        "eolFrom": "2025-09-22",
+        "isMaintained": false
+      },
+      {
+        "name": "23",
+        "releaseDate": "2024-09-17",
+        "isEol": true,
+        "eolFrom": "2025-03-18",
+        "isMaintained": false
+      },
+      {
+        "name": "22",
+        "releaseDate": "2024-03-20",
+        "isEol": true,
+        "eolFrom": "2024-09-17",
+        "isMaintained": false
+      },
+      {
+        "name": "21",
+        "releaseDate": "2023-10-10",
+        "isEol": false,
+        "eolFrom": "2029-12-31",
+        "isMaintained": true
+      },
+      {
+        "name": "20",
+        "releaseDate": "2023-03-23",
+        "isEol": true,
+        "eolFrom": "2023-09-19",
+        "isMaintained": false
+      },
+      {
+        "name": "19",
+        "releaseDate": "2022-09-26",
+        "isEol": true,
+        "eolFrom": "2023-03-31",
+        "isMaintained": false
+      },
+      {
+        "name": "18",
+        "releaseDate": "2022-03-24",
+        "isEol": true,
+        "eolFrom": "2022-09-30",
+        "isMaintained": false
+      },
+      {
+        "name": "17",
+        "releaseDate": "2021-09-22",
+        "isEol": false,
+        "eolFrom": "2027-10-31",
+        "isMaintained": true
+      },
+      {
+        "name": "11",
+        "releaseDate": "2021-08-01",
+        "isEol": false,
+        "eolFrom": "2027-10-31",
+        "isMaintained": true
+      },
+      {
+        "name": "16",
+        "releaseDate": "2021-07-30",
+        "isEol": true,
+        "eolFrom": "2021-09-30",
+        "isMaintained": false
+      },
+      {
+        "name": "8",
+        "releaseDate": "2021-07-29",
+        "isEol": false,
+        "eolFrom": "2030-12-31",
+        "isMaintained": true
+      }
+    ]
+  }
+}

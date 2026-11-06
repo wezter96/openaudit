@@ -1,0 +1,139 @@
+{
+  "schema_version": "1.2.1",
+  "generated_at": "2026-11-06T10:15:20+00:00",
+  "result": {
+    "name": "go",
+    "label": "Go",
+    "links": {
+      "html": "https://endoflife.date/go"
+    },
+    "releases": [
+      {
+        "name": "1.27",
+        "releaseDate": "2026-08-19",
+        "isEol": false,
+        "eolFrom": null,
+        "isMaintained": true
+      },
+      {
+        "name": "1.26",
+        "releaseDate": "2026-02-10",
+        "isEol": false,
+        "eolFrom": null,
+        "isMaintained": true
+      },
+      {
+        "name": "1.25",
+        "releaseDate": "2025-08-12",
+        "isEol": true,
+        "eolFrom": "2026-08-19",
+        "isMaintained": false
+      },
+      {
+        "name": "1.24",
+        "releaseDate": "2025-02-11",
+        "isEol": true,
+        "eolFrom": "2026-02-10",
+        "isMaintained": false
+      },
+      {
+        "name": "1.23",
+        "releaseDate": "2024-08-13",
+        "isEol": true,
+        "eolFrom": "2025-08-12",
+        "isMaintained": false
+      },
+      {
+        "name": "1.22",
+        "releaseDate": "2024-02-06",
+        "isEol": true,
+        "eolFrom": "2025-02-11",
+        "isMaintained": false
+      },
+      {
+        "name": "1.21",
+        "releaseDate": "2023-08-08",
+        "isEol": true,
+        "eolFrom": "2024-08-13",
+        "isMaintained": false
+      },
+      {
+        "name": "1.20",
+        "releaseDate": "2023-02-01",
+        "isEol": true,
+        "eolFrom": "2024-02-06",
+        "isMaintained": false
+      },
+      {
+        "name": "1.19",
+        "releaseDate": "2022-08-02",
+        "isEol": true,
+        "eolFrom": "2023-09-06",
+        "isMaintained": false
+      },
+      {
+        "name": "1.18",
+        "releaseDate": "2022-03-15",
+        "isEol": true,
+        "eolFrom": "2023-02-01",
+        "isMaintained": false
+      },
+      {
+        "name": "1.17",
+        "releaseDate": "2021-08-16",
+        "isEol": true,
+        "eolFrom": "2022-08-02",
+        "isMaintained": false
+      },
+      {
+        "name": "1.16",
+        "releaseDate": "2021-02-16",
+        "isEol": true,
+        "eolFrom": "2022-03-15",
+        "isMaintained": false
+      },
+      {
+        "name": "1.15",
+        "releaseDate": "2020-08-11",
+        "isEol": true,
+        "eolFrom": "2021-08-16",
+        "isMaintained": false
+      },
+      {
+        "name": "1.14",
+        "releaseDate": "2020-02-25",
+        "isEol": true,
+        "eolFrom": "2021-02-16",
+        "isMaintained": false
+      },
+      {
+        "name": "1.13",
+        "releaseDate": "2019-09-03",
+        "isEol": true,
+        "eolFrom": "2020-08-11",
+        "isMaintained": false
+      },
+      {
+        "name": "1.12",
+        "releaseDate": "2019-02-25",
+        "isEol": true,
+        "eolFrom": "2020-02-25",
+        "isMaintained": false
+      },
+      {
+        "name": "1.11",
+        "releaseDate": "2018-08-24",
+        "isEol": true,
+        "eolFrom": "2019-09-03",
+        "isMaintained": false
+      },
+      {
+        "name": "1.10",
+        "releaseDate": "2018-02-16",
+        "isEol": true,
+        "eolFrom": "2019-02-25",
+        "isMaintained": false
+      }
+    ]
+  }
+}

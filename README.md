@@ -19,7 +19,7 @@
 
 </div>
 
-openaudit runs 39 built-in auditors and wraps 53 established open-source scanners, linters and type checkers when they're installed. Ten agent **playbooks** cover the judgment-heavy work no rule can do, such as authorisation review, keyboard and screen-reader journeys, and privacy data flows. Everything lands in one report with a 0–100 score and an A–F grade per area.
+openaudit runs 40 built-in auditors and wraps 53 established open-source scanners, linters and type checkers when they're installed. Ten agent **playbooks** cover the judgment-heavy work no rule can do, such as authorisation review, keyboard and screen-reader journeys, and privacy data flows. Everything lands in one report with a 0–100 score and an A–F grade per area.
 
 - **One issue, one finding.** When gitleaks, TruffleHog and the built-in secret scan all find the same key, you get one finding that says who confirmed it, scored once.
 - **A report people actually read.** A self-contained interactive HTML page with an overview, a tab per area and an OWASP Top 10 / CWE Top 25 view. It also comes as JSON, SARIF, Markdown and CSV.
@@ -96,6 +96,7 @@ Wrapped tools run when they're installed.
   change coupling and knowledge risk from git history,
   Code Health (a 1 to 10 maintainability score per file using CodeScene's rules: complex, long and nested functions, complex conditionals, duplication, with hotspots from git history),
   dependency licence policy,
+  end-of-life runtimes and frameworks (endoflife.date),
   language strictness,
   lockfile integrity and install scripts,
   performance,

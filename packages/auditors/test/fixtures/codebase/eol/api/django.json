@@ -1,0 +1,174 @@
+{
+  "schema_version": "1.2.1",
+  "generated_at": "2026-11-06T10:15:20+00:00",
+  "result": {
+    "name": "django",
+    "label": "Django",
+    "links": {
+      "html": "https://endoflife.date/django"
+    },
+    "releases": [
+      {
+        "name": "6.1",
+        "releaseDate": "2026-08-05",
+        "isEol": false,
+        "eolFrom": "2027-12-31",
+        "isMaintained": true
+      },
+      {
+        "name": "6.0",
+        "releaseDate": "2025-12-03",
+        "isEol": false,
+        "eolFrom": "2027-04-30",
+        "isMaintained": true
+      },
+      {
+        "name": "5.2",
+        "releaseDate": "2025-04-02",
+        "isEol": false,
+        "eolFrom": "2028-04-30",
+        "isMaintained": true
+      },
+      {
+        "name": "5.1",
+        "releaseDate": "2024-08-07",
+        "isEol": true,
+        "eolFrom": "2025-12-03",
+        "isMaintained": false
+      },
+      {
+        "name": "5.0",
+        "releaseDate": "2023-12-04",
+        "isEol": true,
+        "eolFrom": "2025-04-02",
+        "isMaintained": false
+      },
+      {
+        "name": "4.2",
+        "releaseDate": "2023-04-03",
+        "isEol": true,
+        "eolFrom": "2026-04-07",
+        "isMaintained": false
+      },
+      {
+        "name": "4.1",
+        "releaseDate": "2022-08-03",
+        "isEol": true,
+        "eolFrom": "2023-12-01",
+        "isMaintained": false
+      },
+      {
+        "name": "4.0",
+        "releaseDate": "2021-12-07",
+        "isEol": true,
+        "eolFrom": "2023-04-01",
+        "isMaintained": false
+      },
+      {
+        "name": "3.2",
+        "releaseDate": "2021-04-06",
+        "isEol": true,
+        "eolFrom": "2024-04-01",
+        "isMaintained": false
+      },
+      {
+        "name": "3.1",
+        "releaseDate": "2020-08-04",
+        "isEol": true,
+        "eolFrom": "2021-12-07",
+        "isMaintained": false
+      },
+      {
+        "name": "3.0",
+        "releaseDate": "2019-12-02",
+        "isEol": true,
+        "eolFrom": "2021-04-06",
+        "isMaintained": false
+      },
+      {
+        "name": "2.2",
+        "releaseDate": "2019-04-01",
+        "isEol": true,
+        "eolFrom": "2022-04-11",
+        "isMaintained": false
+      },
+      {
+        "name": "2.1",
+        "releaseDate": "2018-08-01",
+        "isEol": true,
+        "eolFrom": "2019-12-02",
+        "isMaintained": false
+      },
+      {
+        "name": "2.0",
+        "releaseDate": "2017-12-02",
+        "isEol": true,
+        "eolFrom": "2019-04-01",
+        "isMaintained": false
+      },
+      {
+        "name": "1.11",
+        "releaseDate": "2017-04-04",
+        "isEol": true,
+        "eolFrom": "2020-04-01",
+        "isMaintained": false
+      },
+      {
+        "name": "1.10",
+        "releaseDate": "2016-08-01",
+        "isEol": true,
+        "eolFrom": "2017-12-02",
+        "isMaintained": false
+      },
+      {
+        "name": "1.9",
+        "releaseDate": "2015-12-01",
+        "isEol": true,
+        "eolFrom": "2017-04-04",
+        "isMaintained": false
+      },
+      {
+        "name": "1.8",
+        "releaseDate": "2015-04-01",
+        "isEol": true,
+        "eolFrom": "2018-04-01",
+        "isMaintained": false
+      },
+      {
+        "name": "1.7",
+        "releaseDate": "2014-09-03",
+        "isEol": true,
+        "eolFrom": "2015-12-01",
+        "isMaintained": false
+      },
+      {
+        "name": "1.6",
+        "releaseDate": "2013-11-06",
+        "isEol": true,
+        "eolFrom": "2015-04-01",
+        "isMaintained": false
+      },
+      {
+        "name": "1.5",
+        "releaseDate": "2013-02-26",
+        "isEol": true,
+        "eolFrom": "2014-09-02",
+        "isMaintained": false
+      },
+      {
+        "name": "1.4",
+        "releaseDate": "2012-03-23",
+        "isEol": true,
+        "eolFrom": "2015-10-01",
+        "isMaintained": false
+      },
+      {
+        "name": "1.3",
+        "releaseDate": "2011-03-23",
+        "isEol": true,
+        "eolFrom": "2013-02-26",
+        "isMaintained": false
+      }
+    ]
+  }
+}

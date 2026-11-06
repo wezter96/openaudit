@@ -1,0 +1,111 @@
+{
+  "schema_version": "1.2.1",
+  "generated_at": "2026-11-06T10:15:20+00:00",
+  "result": {
+    "name": "angular",
+    "label": "Angular",
+    "links": {
+      "html": "https://endoflife.date/angular"
+    },
+    "releases": [
+      {
+        "name": "22",
+        "releaseDate": "2026-06-03",
+        "isEol": false,
+        "eolFrom": "2028-06-30",
+        "isMaintained": true
+      },
+      {
+        "name": "21",
+        "releaseDate": "2025-11-19",
+        "isEol": false,
+        "eolFrom": "2027-06-30",
+        "isMaintained": true
+      },
+      {
+        "name": "20",
+        "releaseDate": "2025-05-28",
+        "isEol": false,
+        "eolFrom": "2026-11-28",
+        "isMaintained": true
+      },
+      {
+        "name": "19",
+        "releaseDate": "2024-11-19",
+        "isEol": true,
+        "eolFrom": "2026-05-19",
+        "isMaintained": true
+      },
+      {
+        "name": "18",
+        "releaseDate": "2024-05-22",
+        "isEol": true,
+        "eolFrom": "2025-11-21",
+        "isMaintained": true
+      },
+      {
+        "name": "17",
+        "releaseDate": "2023-11-08",
+        "isEol": true,
+        "eolFrom": "2025-05-15",
+        "isMaintained": true
+      },
+      {
+        "name": "16",
+        "releaseDate": "2023-05-03",
+        "isEol": true,
+        "eolFrom": "2024-11-08",
+        "isMaintained": true
+      },
+      {
+        "name": "15",
+        "releaseDate": "2022-11-16",
+        "isEol": true,
+        "eolFrom": "2024-05-18",
+        "isMaintained": true
+      },
+      {
+        "name": "14",
+        "releaseDate": "2022-06-02",
+        "isEol": true,
+        "eolFrom": "2023-11-18",
+        "isMaintained": true
+      },
+      {
+        "name": "13",
+        "releaseDate": "2021-11-03",
+        "isEol": true,
+        "eolFrom": "2023-05-04",
+        "isMaintained": true
+      },
+      {
+        "name": "12",
+        "releaseDate": "2021-05-13",
+        "isEol": true,
+        "eolFrom": "2022-11-12",
+        "isMaintained": true
+      },
+      {
+        "name": "11",
+        "releaseDate": "2020-11-11",
+        "isEol": true,
+        "eolFrom": "2022-05-11",
+        "isMaintained": true
+      },
+      {
+        "name": "10",
+        "releaseDate": "2020-06-24",
+        "isEol": true,
+        "eolFrom": "2021-12-24",
+        "isMaintained": true
+      },
+      {
+        "name": "9",
+        "releaseDate": "2020-02-06",
+        "isEol": true,
+        "eolFrom": "2021-08-06",
+        "isMaintained": true
+      }
+    ]
+  }
+}
