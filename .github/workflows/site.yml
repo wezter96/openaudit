@@ -115,8 +115,11 @@ jobs:
         # report covers every bundled tool instead of skipping the ones the
         # runner lacks. Published whatever the result; CI is where the gate lives.
         # The mount point names the report ("Audit of openaudit").
+        # The read-only job token lets OpenSSF Scorecard query this repo.
+        env:
+          GITHUB_AUTH_TOKEN: ${{ github.token }}
         run: >-
-          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e GITHUB_AUTH_TOKEN
           -v "$PWD:/openaudit" -w /openaudit --entrypoint bun ghcr.io/wezter96/openaudit:edge-full
           apps/cli/src/bin.ts . --format html,json,sarif,markdown --out apps/site/public/report --fail-on none --quiet
       - name: Keep the report for the next fast deploy
