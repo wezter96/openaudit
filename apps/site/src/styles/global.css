@@ -370,6 +370,11 @@ code {
 	font-size: 0.86em;
 }
 
+/* A long bare link or word in body text breaks rather than widen a phone screen. */
+main :where(p, li, dd) {
+	overflow-wrap: break-word;
+}
+
 /* An inline path or flag may break anywhere rather than widen a phone screen. */
 :not(pre) > code {
 	overflow-wrap: anywhere;
