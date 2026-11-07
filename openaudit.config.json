@@ -16,7 +16,34 @@
 				"reason": "Gitignored build data that the site's prepare step copies from sources audited directly (playbooks, registry, schemas); scanning it again only duplicates their findings and bypasses their fingerprint suppressions"
 			}
 		],
-		"rules": [],
+		"rules": [
+			{
+				"rule": "code.scorecard/maintained",
+				"until": "2027-01-12",
+				"reason": "Scorecard scores every repository younger than 90 days 0; this one was created on 2026-10-13, so the check passes on its own after 2027-01-11"
+			},
+			{
+				"rule": "code.scorecard/code-review",
+				"reason": "One maintainer: there is no second person to approve changes, so Scorecard's approved-changeset count stays 0. CI, CodeQL and this self-audit run on every push instead"
+			},
+			{
+				"rule": "code.scorecard/contributors",
+				"reason": "One maintainer, so there are no contributors from several organisations yet"
+			},
+			{
+				"rule": "code.scorecard/branch-protection",
+				"reason": "Scorecard's full score needs required reviews by a second maintainer, which a one-person project cannot give; main is gated by CI on every push"
+			},
+			{
+				"rule": "code.scorecard/vulnerabilities",
+				"reason": "Scorecard counts the deliberately vulnerable lockfiles in packages/auditors/test/fixtures, which the auditors' tests scan. The shipped lockfile is checked by code.bun-audit, code.osv-scanner, code.trivy-fs and code.dependencies, which do report real issues"
+			},
+			{
+				"rule": "code.scorecard/cii-best-practices",
+				"until": "2026-12-07",
+				"reason": "The OpenSSF Best Practices badge needs the maintainer to register the project at https://www.bestpractices.dev; reported again after 2026-12-07 if it still isn't there"
+			}
+		],
 		"fingerprints": [
 			{
 				"fingerprint": "fec97ae0392386ac",
