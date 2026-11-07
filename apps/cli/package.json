@@ -57,9 +57,9 @@
 		"release:check": "bun scripts/check-release.ts"
 	},
 	"dependencies": {
-		"@anthropic-ai/claude-agent-sdk": "^0.3.296",
+		"@anthropic-ai/claude-agent-sdk": "^0.3.315",
 		"@anthropic-ai/sdk": "^0.133.0",
-		"@modelcontextprotocol/sdk": "^1.32.1",
+		"@modelcontextprotocol/sdk": "^1.32.2",
 		"effect": "4.1.2",
 		"fflate": "^0.8.2",
 		"htmlparser2": "^10.0.0",
