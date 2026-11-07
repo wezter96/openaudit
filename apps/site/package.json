@@ -16,13 +16,13 @@
 	"dependencies": {
 		"@astrojs/sitemap": "3.7.4",
 		"@openaudit/badge": "workspace:*",
-		"astro": "7.3.8",
+		"astro": "7.4.4",
 		"effect": "4.1.2",
-		"marked": "^18.1.1",
+		"marked": "^18.1.2",
 		"yaml": "^2.9.1"
 	},
 	"devDependencies": {
-		"@astrojs/check": "^0.9.10",
+		"@astrojs/check": "^0.9.12",
 		"@expo-google-fonts/inter": "^0.4.2",
 		"@expo-google-fonts/jetbrains-mono": "^0.4.1",
 		"@resvg/resvg-js": "^2.6.2",
