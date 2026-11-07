@@ -15,6 +15,7 @@
 	"devDependencies": {
 		"@openaudit/config": "workspace:*",
 		"@types/bun": "catalog:",
+		"fast-check": "^4.10.2",
 		"typescript": "catalog:"
 	}
 }
