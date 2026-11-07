@@ -84,10 +84,10 @@ const toolLines =
 	(text: string): Match[] =>
 		[...text.matchAll(re)].flatMap((m) => {
 			const product = TOOLS[m[1] ?? ""];
+			const raw = m[2];
 			const at = m.indices?.[2];
-			return product && m[2] && at
-				? [{ product, raw: m[2], index: at[0] }]
-				: [];
+			if (!product || !at) return [];
+			return raw ? [{ product, raw, index: at[0] }] : [];
 		});
 
 /** Each `netX.Y` / `netcoreappX.Y` of a `<TargetFramework(s)>` element. */
@@ -103,7 +103,10 @@ const targetFrameworks = (text: string): Match[] =>
 		);
 	});
 
-const re = (pattern: string) => new RegExp(pattern, "dgm");
+const re = (pattern: string) =>
+	// The patterns are this module's own literals.
+	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
+	new RegExp(pattern, "dgm");
 
 /** A JSON object member `"outer": { ... "inner": "value" }` (flat objects only). */
 const jsonMember = (outer: string, inner: string) =>

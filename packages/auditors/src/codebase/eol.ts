@@ -141,30 +141,52 @@ const remediationFor = (d: Declaration, product: Product, now: number) => {
 	return `Upgrade to a supported ${product.label} release${target ? ` (${target} or newer)` : ""} and update \`${d.file}\`${d.range ? ", raising the lowest version the range allows" : ""}.`;
 };
 
+interface Status {
+	readonly cycle: Release;
+	readonly past: boolean;
+	readonly daysLeft: number;
+}
+
+/** Where the declared cycle stands, or undefined while it's well supported. */
+const statusOf = (
+	d: Declaration,
+	product: Product,
+	now: number,
+): Status | undefined => {
+	const cycle = cycleOf(product, d.version);
+	if (!cycle) return undefined;
+	const past = isPastEol(cycle, now);
+	const daysLeft = Math.ceil((eolTime(cycle) - now) / DAY);
+	return past || daysLeft <= SOON_DAYS ? { cycle, past, daysLeft } : undefined;
+};
+
+const titleOf = (label: string, { cycle, past }: Status) =>
+	past
+		? `${label} ${cycle.name} is end-of-life`
+		: `${label} ${cycle.name} reaches end-of-life soon`;
+
+const messageOf = (d: Declaration, label: string, s: Status) => {
+	const on = s.cycle.eolFrom ? ` on ${s.cycle.eolFrom}` : "";
+	return s.past
+		? `${declared(d, label)}. The ${s.cycle.name} release line stopped getting security fixes${on}.`
+		: `${declared(d, label)}. The ${s.cycle.name} release line stops getting security fixes${on}, in ${s.daysLeft} days.`;
+};
+
 /** The finding for one declaration, or none while its cycle is supported. */
 export const assessDeclaration = (
 	d: Declaration,
 	product: Product,
 	now: number,
 ): FindingInput[] => {
-	const cycle = cycleOf(product, d.version);
-	if (!cycle) return [];
-	const label = product.label;
-	const past = isPastEol(cycle, now);
-	const daysLeft = Math.ceil((eolTime(cycle) - now) / DAY);
-	if (!past && !(daysLeft <= SOON_DAYS)) return [];
-	const on = cycle.eolFrom ? ` on ${cycle.eolFrom}` : "";
+	const status = statusOf(d, product, now);
+	if (!status) return [];
 	return [
 		{
-			ruleId: past ? `${EOL_ID}/${d.kind}-eol` : `${EOL_ID}/eol-soon`,
-			title: past
-				? `${label} ${cycle.name} is end-of-life`
-				: `${label} ${cycle.name} reaches end-of-life soon`,
-			severity: past ? severityOf(d) : "low",
+			ruleId: status.past ? `${EOL_ID}/${d.kind}-eol` : `${EOL_ID}/eol-soon`,
+			title: titleOf(product.label, status),
+			severity: status.past ? severityOf(d) : "low",
 			category: "supply-chain",
-			message: past
-				? `${declared(d, label)}. The ${cycle.name} release line stopped getting security fixes${on}.`
-				: `${declared(d, label)}. The ${cycle.name} release line stops getting security fixes${on}, in ${daysLeft} days.`,
+			message: messageOf(d, product.label, status),
 			remediation: remediationFor(d, product, now),
 			location: { file: d.file, line: d.line },
 			evidence: d.raw,
@@ -178,6 +200,27 @@ export const assessDeclaration = (
 /* -------------------------------------------------------------------------- */
 /*                                  Auditor                                   */
 /* -------------------------------------------------------------------------- */
+
+/** One lookup per product the declarations name, at most four at once. */
+const lookupAll = (
+	http: AuditContext["http"],
+	declarations: ReadonlyArray<Declaration>,
+) =>
+	Effect.map(
+		Effect.forEach(
+			[...new Set(declarations.map((d) => d.product))].sort(),
+			(id) => Effect.map(fetchProduct(http, id), (l) => [id, l] as const),
+			{ concurrency: 4 },
+		),
+		(lookups) => {
+			const products = new Map<string, Product>();
+			const errors: string[] = [];
+			for (const [id, l] of lookups)
+				if ("product" in l) products.set(id, l.product);
+				else errors.push(l.error);
+			return { products, errors };
+		},
+	);
 
 const isEolFile = (path: string) =>
 	!isFixturePath(path) && (isEolSource(path) || isManifest(path));
@@ -201,17 +244,7 @@ export const eol = defineAuditor({
 			const declarations = findDeclarations(files);
 			if (declarations.length === 0)
 				return yield* skip("No runtime or framework versions declared");
-			const ids = [...new Set(declarations.map((d) => d.product))].sort();
-			const lookups = yield* Effect.forEach(
-				ids,
-				(id) => Effect.map(fetchProduct(ctx.http, id), (l) => [id, l] as const),
-				{ concurrency: 4 },
-			);
-			const products = new Map<string, Product>();
-			const errors: string[] = [];
-			for (const [id, l] of lookups)
-				if ("product" in l) products.set(id, l.product);
-				else errors.push(l.error);
+			const { products, errors } = yield* lookupAll(ctx.http, declarations);
 			if (products.size === 0)
 				return yield* skip(
 					`endoflife.date could not be reached (${errors.slice(0, 3).join("; ")})`,

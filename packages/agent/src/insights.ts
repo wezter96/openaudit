@@ -192,6 +192,13 @@ const hasApiAccess = (options: AiInsightsOptions): boolean =>
 const userPrompt = (input: ReturnType<typeof compactReport>) =>
 	`Triage this openaudit report.\n\n<report>\n${JSON.stringify(input)}\n</report>`;
 
+/** Message types that can carry an authentication error. */
+const AUTH_TYPES: ReadonlySet<string> = new Set(["assistant", "auth_status"]);
+
+/** The authentication error a message carries, if any. */
+const authErrorOf = (m: { readonly type: string }): unknown =>
+	AUTH_TYPES.has(m.type) && "error" in m ? m.error : undefined;
+
 /**
  * No API key: one tool-less Agent SDK run, which uses the Claude Code login
  * (subscription). Same prompt and schema as the Messages API path.
@@ -236,8 +243,9 @@ const viaClaudeCode = (
 				tools: {},
 			});
 			for await (const m of messages) {
-				if ((m.type === "assistant" || m.type === "auth_status") && m.error)
-					why = `Claude authentication failed (${m.error}). ${AUTH_HINT}`;
+				const authError = authErrorOf(m);
+				if (authError)
+					why = `Claude authentication failed (${authError}). ${AUTH_HINT}`;
 				else if (m.type === "result") {
 					if (m.subtype === "success") output = m.structured_output;
 					else why ??= m.subtype;
