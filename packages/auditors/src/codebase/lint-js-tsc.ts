@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
 	type AuditContext,
 	type Auditor,
@@ -313,7 +313,11 @@ export const selectTsconfigs = (
 /** Absolute path of the TypeScript compiler bundled with openaudit. */
 const bundledTsc = (): AbsolutePath | undefined => {
 	try {
-		return createRequire(import.meta.url).resolve("typescript/bin/tsc");
+		// TypeScript 7's exports map hides bin/, so go through package.json.
+		const pkg = createRequire(import.meta.url).resolve(
+			"typescript/package.json",
+		);
+		return join(dirname(pkg), "bin", "tsc");
 	} catch {
 		return undefined;
 	}

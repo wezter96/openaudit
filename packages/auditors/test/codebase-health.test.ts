@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 
 import { codeHealth } from "../src/codebase/health";
 import { parseRulesFile, rulesFor } from "../src/codebase/health/config";

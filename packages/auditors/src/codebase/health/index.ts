@@ -263,7 +263,7 @@ const readRuleSets = (ws: {
  * that overflows the stack, say) is left out rather than failing the audit.
  */
 const scoreFile = (
-	ts: typeof import("typescript"),
+	ts: typeof import("@typescript/typescript6"),
 	{ path, text }: { readonly path: string; readonly text: string },
 	sets: ReadonlyArray<MatchedRuleSet>,
 ): Scored | undefined => {
@@ -281,8 +281,9 @@ const scoreFile = (
 	}
 };
 
+// TypeScript 7 ships no JavaScript compiler API; Microsoft's TS 6 package keeps it.
 const loadTypeScript = Effect.tryPromise({
-	try: async () => (await import("typescript")).default,
+	try: async () => (await import("@typescript/typescript6")).default,
 	catch: () => undefined,
 }).pipe(Effect.orElseSucceed(() => undefined));
 
@@ -298,7 +299,10 @@ export const codeHealth = defineAuditor({
 		Effect.gen(function* () {
 			const ws = yield* requireWorkspace(ctx);
 			const ts = yield* loadTypeScript;
-			if (!ts) return yield* skip("The typescript package is not installed.");
+			if (!ts)
+				return yield* skip(
+					"The @typescript/typescript6 package is not installed.",
+				);
 			const files = yield* readTextFiles(ws, isAnalyzable);
 			if (!files.length)
 				return yield* skip("No JavaScript or TypeScript files.");

@@ -1,4 +1,4 @@
-import type * as TS from "typescript";
+import type * as TS from "@typescript/typescript6";
 
 import { codeLineMask, directivesBefore } from "./lines";
 import type { Bump, FileMetrics, FunctionMetrics, Param } from "./metrics";
