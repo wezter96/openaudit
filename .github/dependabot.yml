@@ -1,0 +1,35 @@
+# Weekly dependency updates, grouped into one pull request per ecosystem so
+# the queue stays short. Security updates still arrive on their own.
+version: 2
+updates:
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+    # A new release waits a week, so a hijacked one is usually caught first.
+    cooldown:
+      default-days: 7
+    groups:
+      dependencies:
+        patterns: ["*"]
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # A new release waits a week, so a hijacked one is usually caught first.
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directories: [/, /apps/badge-scanner]
+    schedule:
+      interval: weekly
+    # A new release waits a week, so a hijacked one is usually caught first.
+    cooldown:
+      default-days: 7
+    groups:
+      images:
+        patterns: ["*"]
