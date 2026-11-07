@@ -26,6 +26,9 @@ env:
 
 jobs:
   deploy:
+    # Dependabot's runs get no repository secrets, so there is no preview to
+    # upload; CI still tests its pull requests.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
