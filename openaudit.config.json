@@ -40,8 +40,7 @@
 			},
 			{
 				"rule": "code.scorecard/cii-best-practices",
-				"until": "2026-12-07",
-				"reason": "The OpenSSF Best Practices badge needs the maintainer to register the project at https://www.bestpractices.dev; reported again after 2026-12-07 if it still isn't there"
+				"reason": "Registered as https://www.bestpractices.dev/en/projects/16414. Scorecard gives 10 only for the gold level (in progress 2, passing 5, silver 7), which takes the questionnaire and a second maintainer"
 			}
 		],
 		"fingerprints": [
