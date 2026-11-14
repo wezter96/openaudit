@@ -16,9 +16,9 @@
 	"dependencies": {
 		"@astrojs/sitemap": "3.7.4",
 		"@openaudit/badge": "workspace:*",
-		"astro": "7.4.4",
+		"astro": "7.4.7",
 		"effect": "4.1.2",
-		"marked": "^18.1.2",
+		"marked": "^18.1.3",
 		"yaml": "^2.9.1"
 	},
 	"devDependencies": {
