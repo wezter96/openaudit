@@ -15,14 +15,14 @@
 		"@orpc/openapi": "catalog:",
 		"@orpc/server": "catalog:",
 		"@orpc/zod": "catalog:",
-		"hono": "^4.13.7",
+		"hono": "^4.13.18",
 		"varlock": "catalog:",
 		"zod": "catalog:"
 	},
 	"devDependencies": {
 		"@openaudit/config": "workspace:*",
 		"@types/bun": "catalog:",
-		"tsdown": "^0.23.4",
+		"tsdown": "^0.23.7",
 		"typescript": "catalog:"
 	}
 }
