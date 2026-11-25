@@ -9,8 +9,8 @@
 		"catalog": {
 			"zod": "^4.6.7",
 			"typescript": "^7.0.2",
-			"@types/bun": "^1.4.4",
-			"varlock": "1.24.0",
+			"@types/bun": "^1.4.5",
+			"varlock": "1.25.0",
 			"@orpc/server": "^1.16.6",
 			"@orpc/openapi": "^1.16.6",
 			"@orpc/zod": "^1.16.6",
@@ -43,10 +43,10 @@
 		"zod": "catalog:"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.6.6",
+		"@biomejs/biome": "^2.6.9",
 		"@openaudit/config": "workspace:*",
 		"@types/bun": "catalog:",
-		"turbo": "^2.11.10",
+		"turbo": "^2.11.13",
 		"typescript": "catalog:",
 		"varlock": "catalog:"
 	},
