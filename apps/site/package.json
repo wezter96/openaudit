@@ -14,11 +14,11 @@
 		"deploy": "wrangler deploy"
 	},
 	"dependencies": {
-		"@astrojs/sitemap": "3.7.4",
+		"@astrojs/sitemap": "3.7.6",
 		"@openaudit/badge": "workspace:*",
 		"astro": "7.4.7",
 		"effect": "4.1.5",
-		"marked": "^18.1.2",
+		"marked": "^18.3.0",
 		"yaml": "^2.9.1"
 	},
 	"devDependencies": {
@@ -27,8 +27,8 @@
 		"@expo-google-fonts/jetbrains-mono": "^0.4.1",
 		"@resvg/resvg-js": "^2.6.2",
 		"@types/bun": "catalog:",
-		"playwright": "1.65.0",
+		"playwright": "1.65.1",
 		"typescript": "^6.0.3",
-		"wrangler": "^4.158.0"
+		"wrangler": "^4.168.0"
 	}
 }

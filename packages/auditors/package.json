@@ -19,8 +19,8 @@
 		"yaml": "^2.8.1"
 	},
 	"optionalDependencies": {
-		"playwright-core": "^1.64.0",
-		"axe-core": "^4.14.0"
+		"playwright-core": "^1.65.1",
+		"axe-core": "^4.14.1"
 	},
 	"devDependencies": {
 		"@openaudit/config": "workspace:*",
