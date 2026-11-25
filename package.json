@@ -10,17 +10,17 @@
 			"zod": "^4.6.7",
 			"typescript": "^7.0.2",
 			"@types/bun": "^1.4.4",
-			"varlock": "1.24.0",
+			"varlock": "1.25.0",
 			"@orpc/server": "^1.16.2",
-			"@orpc/openapi": "^1.16.2",
-			"@orpc/zod": "^1.16.2",
-			"lucide-react": "^1.70.0",
+			"@orpc/openapi": "^1.16.3",
+			"@orpc/zod": "^1.16.3",
+			"lucide-react": "^1.75.0",
 			"next-themes": "^0.4.6",
 			"react": "^19.3.1",
 			"react-dom": "^19.3.1",
 			"sonner": "^2.0.8",
 			"tailwindcss": "^4.3.5",
-			"@orpc/client": "^1.16.2",
+			"@orpc/client": "^1.16.3",
 			"@types/react": "^19.3.0",
 			"@types/react-dom": "^19.3.0"
 		}
@@ -43,10 +43,10 @@
 		"zod": "catalog:"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.6.6",
+		"@biomejs/biome": "^2.6.8",
 		"@openaudit/config": "workspace:*",
 		"@types/bun": "catalog:",
-		"turbo": "^2.11.10",
+		"turbo": "^2.11.13",
 		"typescript": "catalog:",
 		"varlock": "catalog:"
 	},
