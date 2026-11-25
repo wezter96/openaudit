@@ -17,7 +17,7 @@
 		"@astrojs/sitemap": "3.7.4",
 		"@openaudit/badge": "workspace:*",
 		"astro": "7.4.4",
-		"effect": "4.1.2",
+		"effect": "4.1.5",
 		"marked": "^18.1.2",
 		"yaml": "^2.9.1"
 	},

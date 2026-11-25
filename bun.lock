@@ -21,7 +21,7 @@
       "dependencies": {
         "@openaudit/badge": "workspace:*",
         "@openaudit/core": "workspace:*",
-        "effect": "4.1.2",
+        "effect": "4.1.5",
       },
       "devDependencies": {
         "@openaudit/config": "workspace:*",
@@ -40,7 +40,7 @@
         "@anthropic-ai/sdk": "^1.3.0",
         "@modelcontextprotocol/sdk": "^1.32.2",
         "@typescript/typescript6": "^6.0.2",
-        "effect": "4.1.2",
+        "effect": "4.1.5",
         "fflate": "^0.8.2",
         "htmlparser2": "^12.0.0",
         "typescript": "^7.0.2",
@@ -84,7 +84,7 @@
         "@astrojs/sitemap": "3.7.4",
         "@openaudit/badge": "workspace:*",
         "astro": "7.4.4",
-        "effect": "4.1.2",
+        "effect": "4.1.5",
         "marked": "^18.1.2",
         "yaml": "^2.9.1",
       },
@@ -114,7 +114,7 @@
         "@tanstack/react-router-ssr-query": "^1.167.2",
         "@tanstack/react-start": "^1.169.4",
         "@varlock/vite-integration": "1.5.5",
-        "effect": "4.1.2",
+        "effect": "4.1.5",
         "lucide-react": "catalog:",
         "next-themes": "catalog:",
         "react": "catalog:",
@@ -145,7 +145,7 @@
         "@anthropic-ai/claude-agent-sdk": "^0.3.315",
         "@anthropic-ai/sdk": "^1.3.0",
         "@openaudit/core": "workspace:*",
-        "effect": "4.1.2",
+        "effect": "4.1.5",
         "zod": "catalog:",
       },
       "devDependencies": {
@@ -164,7 +164,7 @@
         "@orpc/openapi": "catalog:",
         "@orpc/server": "catalog:",
         "@orpc/zod": "catalog:",
-        "effect": "4.1.2",
+        "effect": "4.1.5",
         "zod": "catalog:",
       },
       "devDependencies": {
@@ -177,7 +177,7 @@
       "dependencies": {
         "@openaudit/core": "workspace:*",
         "@typescript/typescript6": "^6.0.2",
-        "effect": "4.1.2",
+        "effect": "4.1.5",
         "fflate": "^0.8.2",
         "htmlparser2": "^12.0.0",
         "typescript": "catalog:",
@@ -195,7 +195,7 @@
     "packages/badge": {
       "name": "@openaudit/badge",
       "dependencies": {
-        "effect": "4.1.2",
+        "effect": "4.1.5",
       },
       "devDependencies": {
         "@openaudit/config": "workspace:*",
@@ -210,7 +210,7 @@
     "packages/core": {
       "name": "@openaudit/core",
       "dependencies": {
-        "effect": "4.1.2",
+        "effect": "4.1.5",
       },
       "devDependencies": {
         "@openaudit/config": "workspace:*",
@@ -226,7 +226,7 @@
         "@openaudit/agent": "workspace:*",
         "@openaudit/auditors": "workspace:*",
         "@openaudit/core": "workspace:*",
-        "effect": "4.1.2",
+        "effect": "4.1.5",
         "zod": "catalog:",
       },
       "devDependencies": {
@@ -1191,7 +1191,7 @@
 
     "ee-first": ["ee-first@1.1.1", "", {}, "sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow=="],
 
-    "effect": ["effect@4.1.2", "", {}, "sha512-d3Oah1WyKxFLFh19yWheS5IXIVaITzxZ71JkE1rkUozq/6EcJSU5nPk5bF2QrSygZ3SQoiNQB8TsxFriyMeMaQ=="],
+    "effect": ["effect@4.1.5", "", {}, "sha512-xyR20KhQI0vg2gD8ILUSQRTTESEYJ0JKdP+QD8J37xbwPTqXRxFM/l0+vUVD9fuSvoYruoTqyt33C4FZv1s4TQ=="],
 
     "electron-to-chromium": ["electron-to-chromium@1.5.478", "", {}, "sha512-pftG+ma5Lm8O6/p45bhYT6StBN5ziQymaRzmCZwFl8DwWHKPPD93FdOmP1aqftcepolQYvrcyTLa17kE8Yf+jg=="],
 
